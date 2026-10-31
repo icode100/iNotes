@@ -45,20 +45,23 @@ Host: Apple silicon ARM64, macOS 27.2 (26B123), Apple Swift 6.4.2, full Xcode 27
 
 | Check | Result |
 | --- | --- |
-| Shared model and persistence XCTest | Passed through `scripts/test.sh`: 29 tests, 0 failures, 0.696 seconds, including legacy archives, instrument/paper persistence, size limits, recovery, and conflict checks |
+| Shared model and persistence XCTest | Passed through `scripts/test.sh`: 29 tests, 0 failures, 0.725 seconds, including legacy archives, instrument/paper persistence, size limits, recovery, and conflict checks |
 | Native macOS debug compilation | Passed using SwiftPM's native build system and isolated scratch directory |
 | App `--smoke-test` | Passed: save, reopen, archive import, versioned folder backup, oversized-update rejection, and final save on quit |
 | iPad project metadata | Passed plist/XML checks; all 12 app/editor Swift files are registered in the target |
-| Native AppKit editor integration | Passed in final packaged release app: 49 checks covering the shared text/ink page, long-page sizing, instruments, grid, RTF, Unicode, formatting, undo/redo, pressure, eraser, combined PNG/PDF export, and PencilKit interchange |
+| Native AppKit editor integration | Passed in rebuilt release app: 69 checks covering safe tracking/menu event classification, the shared text/ink page, straight lines with axis snapping, long-page sizing, instruments, grid, RTF, Unicode, formatting, undo/redo, pressure, eraser, combined PNG/PDF export, and PencilKit interchange |
 | Release app and DMG | Passed: ARM64 release build, local signature, property list, compressed-image checksum, read-only mounted image, Applications link, and mounted app smoke test |
 | iPad simulator compilation | Passed with full Xcode: `iNotes-iPad` scheme, iPadOS simulator SDK, signing disabled; no source compile errors |
 | iPad simulator launch and persistence | Passed on a fresh iPad Pro 11-inch (M5), iPadOS 27.2 ARM64 simulator: install, launch, relaunch, unchanged saved library, and visual rendering of the shared text/ink page with the native tool palette |
+| iPad straight-line and undo integration | Passed: 14 opt-in DEBUG checks against a real simulator `PKCanvasView` and native `UndoManager`, covering two-endpoint lines, axis snapping, pressure, separate gesture undo/redo, and portable pen conversion |
 | HID metadata and false positives | Read-only enumeration worked without opening devices; the built-in trackpad's digitizer usage 5 is excluded from pen-tablet detection |
 | Live Mac unified-page walkthrough | Passed: new sheet, Unicode rich text, pencil underline while text stayed visible, persisted grid paper, translucent highlighter, ink undo preserving text/paper, and truthful mouse/pen status; persisted JSON was checked |
+| Tracking/menu/export live regression | Passed in the corrected release: More menu opened and tracked safely, plain-text export opened the native save panel, UTF-8 bullets/keyboard symbols saved to the correct `.txt` file, and the app remained running with no new crash report |
+| Straight-line live Mac check | Passed: horizontal and vertical lines persisted as exact two-endpoint strokes alongside unchanged typed text and grid paper |
 
-The final release app contains 2,331,628 bytes of files (2.22 MiB); the compressed
-DMG is 997,833 bytes (974.45 KiB). These are artifact sizes, not RAM measurements.
-The DMG SHA-256 is `723e6cd4ddfc6a00d3f4afd6e46568cfec71e3d5030c944da4df4fa26c93e7b9`.
+The final release app contains 2,347,468 bytes of files (2.24 MiB); the compressed
+DMG is 698,726 bytes (682.35 KiB). These are artifact sizes, not RAM measurements.
+The DMG SHA-256 is `c7a33792b8615a1a3f8e841e87db1d6e106ed064ac1eabad5a227b5f20116d80`.
 
 The backup smoke test used a temporary local folder to validate archive creation
 and contents. It did not upload through a Google account. iPadOS compilation,
@@ -69,6 +72,12 @@ mounted-image verification, and iPad build logs are `/tmp/inotes-release.log`,
 `/tmp/inotes-dmg-verify.log`, and `/tmp/inotes-ipad-build.log`.
 The final native editor diagnostics are in `/tmp/inotes-editor-tests.log`.
 The iPad runtime validation log is `/tmp/inotes-ipad-validation.log`.
+The line diagnostic result is `/tmp/inotes-ipad-line-diagnostics.json`. This check
+commits lines through the app's actual pipeline programmatically; it does not
+generate physical Pencil touches. To repeat on a temporary simulator, launch the
+Debug build with `SIMCTL_CHILD_INOTES_IOS_EDITOR_DIAGNOSTICS=1`; the app writes
+`Library/Caches/iNotesEditorDiagnostics.json` in its data container, then restores
+the original drawing. The diagnostic is absent from release builds.
 
 The same page keeps text, handwriting, and its paper background together; the
 Text tool changes input routing without hiding the ink. On iPad, a shared zoomed
@@ -86,7 +95,8 @@ Record device model, OS version, app commit, result, and any issue for every run
 | Upgrade | Create notes, quit, replace app with newer version, relaunch | Existing notes and hierarchy remain available |
 | Hierarchy | Create workbook, chapter, nested topic, sheets; rename and move | Selection and hierarchy persist across relaunch |
 | Editing | Type Unicode, paste styled text, format, undo and redo; switch sheets | Saved text and formatting survive relaunch |
-| Ink | Draw quick curves and slow lines; change width/color; erase and undo | No dropped strokes or edits leaking to another sheet |
+| Ink | Draw curves and straight lines; change instrument/width/color; erase and undo | No dropped strokes or edits leaking to another sheet |
+| Straight Line tool | Draw horizontal/vertical table borders and arbitrary-angle lines; undo and redo each gesture | One two-endpoint line per gesture; directions within 8° snap to exact axes; one undo removes one line and redo restores it |
 | Tablet | Use physical pressure-sensitive tablet on Mac | Strokes track pen and pressure; normal clicks remain usable |
 | iPad | Build with Xcode and test on physical Apple silicon iPad | Navigation, rotation, split view, keyboard and persistence work |
 | Apple Pencil | Draw with palm resting on iPad; use tool picker and undo | Pencil input remains smooth and palm does not add marks |
