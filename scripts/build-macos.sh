@@ -1,18 +1,29 @@
 #!/bin/bash
 set -euo pipefail
 
-# Direct distribution for Apple silicon. No package manager or third-party runtime.
+# Direct distribution for Apple silicon, with a native signed Sparkle updater.
 ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 cd "$ROOT"
 VERSION="${VERSION:-0.1.0}"
-BUILD_NUMBER="${BUILD_NUMBER:-1}"
+BUILD_NUMBER="${BUILD_NUMBER:-2}"
 SIGNING_IDENTITY="${SIGNING_IDENTITY:--}"
+export UPDATE_FEED_URL="${UPDATE_FEED_URL-https://github.com/icode100/iNotes/releases/latest/download/appcast.xml}"
+if [[ ! ${UPDATE_PUBLIC_ED_KEY+x} && -f Resources/UpdatePublicEDKey.txt ]]; then
+  UPDATE_PUBLIC_ED_KEY="$(cat Resources/UpdatePublicEDKey.txt)"
+fi
+export UPDATE_PUBLIC_ED_KEY="${UPDATE_PUBLIC_ED_KEY:-}"
+# Reject partial or malformed release settings before spending time on a build.
+python3 scripts/update-config.py --validate
 if [[ ! "$VERSION" =~ ^[0-9]+\.[0-9]+\.[0-9]+$ ]] || [[ ! "$BUILD_NUMBER" =~ ^[0-9]+$ ]]; then
   echo "VERSION must be x.y.z and BUILD_NUMBER must be numeric." >&2
   exit 2
 fi
 if [[ "$(uname -s)" != "Darwin" ]]; then
   echo "This script requires macOS, Apple command line tools, and hdiutil." >&2
+  exit 2
+fi
+if ! xcrun --find actool >/dev/null 2>&1; then
+  echo "Full Xcode with actool is required to compile the adaptive light/dark app icon." >&2
   exit 2
 fi
 
@@ -37,8 +48,35 @@ APP="$STAGE/iNotes.app"
 mkdir -p "$APP/Contents/MacOS" "$APP/Contents/Resources"
 cp "$BIN_DIR/iNotes" "$APP/Contents/MacOS/iNotes"
 cp LICENSE "$APP/Contents/Resources/LICENSE"
+SPARKLE_DIST="$SCRATCH/artifacts/sparkle/Sparkle"
+SPARKLE_SOURCE="$SPARKLE_DIST/Sparkle.xcframework/macos-arm64_x86_64/Sparkle.framework"
+test -d "$SPARKLE_SOURCE"
+mkdir -p "$APP/Contents/Frameworks"
+ditto "$SPARKLE_SOURCE" "$APP/Contents/Frameworks/Sparkle.framework"
+cp "$SPARKLE_DIST/LICENSE" "$APP/Contents/Resources/Sparkle-LICENSE"
+FRAMEWORK="$APP/Contents/Frameworks/Sparkle.framework"
+# The app is not sandboxed. Sparkle explicitly permits omitting unused XPC services.
+# Keep its installer and updater helpers; neither runs as a persistent service.
+rm -rf "$FRAMEWORK/Versions/B/XPCServices" "$FRAMEWORK/XPCServices"
+# Ship only the architecture supported by this app, then re-sign inside out.
+for BINARY in "$FRAMEWORK/Versions/B/Sparkle" "$FRAMEWORK/Versions/B/Autoupdate" \
+  "$FRAMEWORK/Versions/B/Updater.app/Contents/MacOS/Updater"; do
+  lipo "$BINARY" -thin arm64 -output "$BINARY.arm64"
+  mv "$BINARY.arm64" "$BINARY"
+done
 swift scripts/make-icon.swift "$STAGE/iNotes.iconset"
 iconutil -c icns "$STAGE/iNotes.iconset" -o "$APP/Contents/Resources/AppIcon.icns"
+# Compile the native layered icon, including true Aqua/Dark Aqua renditions.
+# Keep the hand-tuned ICNS above as the fallback for older macOS versions.
+swift scripts/make-icon.swift "$STAGE/PencilForeground.iconset" --foreground
+ditto Resources/AppIcon.icon "$STAGE/AppIcon.icon"
+cp "$STAGE/PencilForeground.iconset/icon_512x512@2x.png" "$STAGE/AppIcon.icon/Assets/Pencil.png"
+mkdir -p "$STAGE/adaptive-icons"
+xcrun actool "$STAGE/AppIcon.icon" --compile "$STAGE/adaptive-icons" \
+  --platform macosx --minimum-deployment-target 14.0 --target-device mac \
+  --app-icon AppIcon --output-partial-info-plist "$STAGE/icon-info.plist" \
+  --output-format human-readable-text
+cp "$STAGE/adaptive-icons/Assets.car" "$APP/Contents/Resources/Assets.car"
 cat > "$APP/Contents/Info.plist" <<PLIST
 <?xml version="1.0" encoding="UTF-8"?>
 <!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
@@ -48,6 +86,7 @@ cat > "$APP/Contents/Info.plist" <<PLIST
   <key>CFBundleIdentifier</key><string>io.inotes.app</string>
   <key>CFBundleExecutable</key><string>iNotes</string>
   <key>CFBundleIconFile</key><string>AppIcon</string>
+  <key>CFBundleIconName</key><string>AppIcon</string>
   <key>CFBundlePackageType</key><string>APPL</string>
   <key>CFBundleShortVersionString</key><string>$VERSION</string>
   <key>CFBundleVersion</key><string>$BUILD_NUMBER</string>
@@ -72,7 +111,14 @@ cat > "$APP/Contents/Info.plist" <<PLIST
   </dict></array>
 </dict></plist>
 PLIST
+python3 scripts/update-config.py "$APP/Contents/Info.plist"
 plutil -lint "$APP/Contents/Info.plist"
+# Never use --deep for signing: each nested executable needs its own signature.
+SIGN_OPTIONS=(--force --sign "$SIGNING_IDENTITY")
+if [[ "$SIGNING_IDENTITY" != "-" ]]; then SIGN_OPTIONS+=(--options runtime --timestamp); fi
+codesign "${SIGN_OPTIONS[@]}" "$FRAMEWORK/Versions/B/Autoupdate"
+codesign "${SIGN_OPTIONS[@]}" "$FRAMEWORK/Versions/B/Updater.app"
+codesign "${SIGN_OPTIONS[@]}" "$FRAMEWORK"
 if [[ "$SIGNING_IDENTITY" == "-" ]]; then
   codesign --force --sign - "$APP"
 else
@@ -113,3 +159,4 @@ mv -f "$TEMP_DMG" "$DMG"
 (cd dist && shasum -a 256 "$(basename "$DMG")" > "$(basename "$DMG").sha256")
 echo "Built $DMG"
 du -sh "$ROOT/dist/iNotes.app" "$DMG"
+echo "Bundled Sparkle framework: $(du -sh "$ROOT/dist/iNotes.app/Contents/Frameworks/Sparkle.framework" | cut -f1)"

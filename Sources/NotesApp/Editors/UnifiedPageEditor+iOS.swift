@@ -15,6 +15,7 @@ struct UnifiedPageEditor: UIViewRepresentable {
     var colorHex: String = "#314D43"
     var lineWidth: Double = 2.5
     var paper: InkPaper = .dotted
+    var theme: PageTheme = .light
     var onTextChange: ((String, Data?) -> Void)? = nil
     var onInkChange: (([InkStroke], Data?) -> Void)? = nil
     var onInputChange: ((String) -> Void)? = nil
@@ -41,7 +42,7 @@ struct UnifiedPageEditor: UIViewRepresentable {
     }
 
     @MainActor
-    final class Coordinator: NSObject, UIScrollViewDelegate, UITextViewDelegate, PKCanvasViewDelegate {
+    final class Coordinator: NSObject, UIScrollViewDelegate, UITextViewDelegate, PKCanvasViewDelegate, PKToolPickerObserver {
         var parent: UnifiedPageEditor
         let richTextCoordinator: RichTextEditor.Coordinator
         private weak var view: UnifiedPageScrollView?
@@ -53,6 +54,11 @@ struct UnifiedPageEditor: UIViewRepresentable {
         private var expectedDrawingData: Data?
         private var toolConfiguration: String?
         private var previousTool: InkTool?
+        private var appliedTheme: PageTheme?
+        private var canonicalColorsByPath: [StrokeColorKey: UIColor] = [:]
+        private var configuredCanonicalInk: UIColor?
+        private var configuredDisplayInk: UIColor?
+        private var adjustingPicker = false
         private var undoObservers: [NSObjectProtocol] = []
         private var lineGesture: PencilLineGestureRecognizer?
         private let linePreview = CAShapeLayer()
@@ -64,7 +70,7 @@ struct UnifiedPageEditor: UIViewRepresentable {
         init(_ parent: UnifiedPageEditor) {
             self.parent = parent
             richTextCoordinator = RichTextEditor.Coordinator(RichTextEditor(
-                text: parent.$text, rtfData: parent.$rtfData, onChange: parent.onTextChange
+                text: parent.$text, rtfData: parent.$rtfData, theme: parent.theme, onChange: parent.onTextChange
             ))
             super.init()
             for name in [Notification.Name.NSUndoManagerDidUndoChange, Notification.Name.NSUndoManagerDidRedoChange] {
@@ -93,6 +99,7 @@ struct UnifiedPageEditor: UIViewRepresentable {
             self.view = view
             expectedDrawingData = view.page.canvas.drawing.dataRepresentation()
             picker.addObserver(view.page.canvas)
+            picker.addObserver(self)
             picker.showsDrawingPolicyControls = false
             let lineGesture = PencilLineGestureRecognizer(target: self, action: #selector(handleLineGesture(_:)))
             lineGesture.allowedTouchTypes = [NSNumber(value: UITouch.TouchType.pencil.rawValue)]
@@ -118,26 +125,48 @@ struct UnifiedPageEditor: UIViewRepresentable {
         }
 
         func update(_ view: UnifiedPageScrollView, enabled: Bool) {
-            richTextCoordinator.parent = RichTextEditor(text: parent.$text, rtfData: parent.$rtfData, onChange: parent.onTextChange)
+            // A system appearance transition waits until the current Pencil
+            // gesture completes, preserving in-flight native ink and pressure.
+            let theme = nativeToolActive ? (appliedTheme ?? parent.theme) : parent.theme
+            richTextCoordinator.parent = RichTextEditor(text: parent.$text, rtfData: parent.$rtfData, theme: theme, onChange: parent.onTextChange)
             let editor = view.page.textView
             editor.isEditable = enabled
             view.isUserInteractionEnabled = enabled
             view.page.textToolSelected = parent.tool == .text
             view.panGestureRecognizer.minimumNumberOfTouches = parent.tool == .text ? 2 : 1
             view.page.paper.style = parent.paper
-            if richTextCoordinator.lastText != parent.text || richTextCoordinator.lastRTF != parent.rtfData {
+            view.page.paper.theme = theme
+            view.page.overrideUserInterfaceStyle = theme == .dark ? .dark : .light
+            editor.overrideUserInterfaceStyle = view.page.overrideUserInterfaceStyle
+            // PencilKit transforms ink colors itself when a canvas is dark.
+            // Our semantic resolver already supplies the display color, so
+            // render that color in a light-trait canvas to avoid a second tint.
+            view.page.canvas.overrideUserInterfaceStyle = .light
+            picker.overrideUserInterfaceStyle = view.page.overrideUserInterfaceStyle
+            picker.colorUserInterfaceStyle = .light
+            if richTextCoordinator.lastText != parent.text || richTextCoordinator.lastRTF != parent.rtfData || richTextCoordinator.lastTheme != theme {
                 richTextCoordinator.load(text: parent.text, rtf: parent.rtfData, into: editor)
             }
+            let themeChanged = appliedTheme != theme
             if lastData != parent.pencilKitData || lastStrokes != parent.strokes {
-                isLoading = true
-                view.page.canvas.drawing = parent.pencilKitData.flatMap { try? PKDrawing(data: $0) }
+                let canonical = parent.pencilKitData.flatMap { try? PKDrawing(data: $0) }
                     ?? PortableInkConverter.drawing(from: parent.strokes)
-                expectedDrawingData = view.page.canvas.drawing.dataRepresentation()
+                rememberCanonicalColors(in: canonical)
+                show(canonicalDrawing: canonical, on: view.page.canvas, theme: theme)
                 lastData = parent.pencilKitData
                 lastStrokes = parent.strokes
-                isLoading = false
+            } else if themeChanged {
+                let canonical = canonicalDrawing(from: view.page.canvas.drawing, theme: appliedTheme ?? .light)
+                rememberCanonicalColors(in: canonical)
+                show(canonicalDrawing: canonical, on: view.page.canvas, theme: theme)
             }
-            configureTool(on: view.page.canvas)
+            if themeChanged {
+                // PencilKit assigns stroke identifiers when replacing a
+                // drawing. Old native undo actions must not target stale IDs.
+                view.page.canvas.undoManager?.removeAllActions()
+            }
+            appliedTheme = theme
+            configureTool(on: view.page.canvas, theme: theme)
             view.page.canvas.drawingGestureRecognizer.isEnabled = parent.tool != .line
             lineGesture?.isEnabled = enabled && parent.tool == .line
             view.resizePage()
@@ -157,11 +186,14 @@ struct UnifiedPageEditor: UIViewRepresentable {
             }
         }
 
-        private func configureTool(on canvas: PKCanvasView) {
-            let configuration = "\(parent.tool.rawValue)|\(parent.colorHex)|\(parent.lineWidth)"
+        private func configureTool(on canvas: PKCanvasView, theme: PageTheme) {
+            let configuration = "\(parent.tool.rawValue)|\(parent.colorHex)|\(parent.lineWidth)|\(theme.rawValue)"
             guard configuration != toolConfiguration else { return }
             toolConfiguration = configuration
-            let color = UIColor(noteHex: parent.colorHex)
+            let canonical = UIColor(noteHex: parent.colorHex)
+            let color = UIColor(noteHex: theme.resolvedInkHex(parent.colorHex))
+            configuredCanonicalInk = canonical
+            configuredDisplayInk = color
             let width = max(0.5, min(30, parent.lineWidth))
             switch parent.tool {
             case .text: break // Pencil keeps its selected ink while fingers can edit text.
@@ -171,6 +203,20 @@ struct UnifiedPageEditor: UIViewRepresentable {
             case .highlighter: canvas.tool = PKInkingTool(.marker, color: color.withAlphaComponent(0.3), width: width * InkStyle.highlighter.widthMultiplier)
             case .eraser: canvas.tool = PKEraserTool(.vector)
             }
+        }
+
+        func toolPickerSelectedToolDidChange(_ toolPicker: PKToolPicker) {
+            guard !adjustingPicker, let view, let selected = toolPicker.selectedTool as? PKInkingTool else { return }
+            let theme = appliedTheme ?? parent.theme
+            let canonical = UIColor(noteHex: theme.canonicalInkHex(selected.color.noteHex))
+                .withAlphaComponent(selected.color.cgColor.alpha)
+            let displayed = UIColor(noteHex: theme.resolvedInkHex(canonical.noteHex))
+                .withAlphaComponent(selected.color.cgColor.alpha)
+            configuredCanonicalInk = canonical
+            configuredDisplayInk = displayed
+            adjustingPicker = true
+            view.page.canvas.tool = PKInkingTool(selected.inkType, color: displayed, width: selected.width)
+            adjustingPicker = false
         }
 
         private func showToolsIfNeeded() {
@@ -184,6 +230,7 @@ struct UnifiedPageEditor: UIViewRepresentable {
             persistInk(view.page.canvas)
             picker.setVisible(false, forFirstResponder: view.page.canvas)
             picker.removeObserver(view.page.canvas)
+            picker.removeObserver(self)
             if let lineGesture { view.page.canvas.removeGestureRecognizer(lineGesture) }
             view.page.canvas.undoManager?.removeAllActions(withTarget: view.page.canvas)
             linePreview.removeFromSuperlayer()
@@ -219,6 +266,7 @@ struct UnifiedPageEditor: UIViewRepresentable {
         func canvasViewDidEndUsingTool(_ canvasView: PKCanvasView) {
             nativeToolActive = false
             persistInk(canvasView)
+            if appliedTheme != parent.theme, let view { update(view, enabled: view.isUserInteractionEnabled) }
         }
 
         @objc private func handleLineGesture(_ gesture: PencilLineGestureRecognizer) {
@@ -286,15 +334,84 @@ struct UnifiedPageEditor: UIViewRepresentable {
             #if DEBUG
             guard !isRunningDiagnostics else { return }
             #endif
-            let data = canvas.drawing.dataRepresentation()
-            guard data != expectedDrawingData else { return }
-            let portable = portableStrokes(from: canvas.drawing)
-            expectedDrawingData = data
+            let displayedData = canvas.drawing.dataRepresentation()
+            guard displayedData != expectedDrawingData else { return }
+            let canonical = canonicalDrawing(from: canvas.drawing, theme: appliedTheme ?? parent.theme)
+            let data = canonical.dataRepresentation()
+            let portable = portableStrokes(from: canonical)
+            expectedDrawingData = displayedData
             lastData = data
             lastStrokes = portable
             if let onInkChange = parent.onInkChange { onInkChange(portable, data) }
             else { parent.strokes = portable; parent.pencilKitData = data }
             view?.resizePage()
+        }
+
+        private struct StrokeColorKey: Hashable {
+            let creationDate: Date
+            let randomSeed: UInt32
+            let firstX: CGFloat
+            let firstY: CGFloat
+            let pointCount: Int
+
+            init(_ stroke: PKStroke) {
+                creationDate = stroke.path.creationDate
+                randomSeed = stroke.randomSeed
+                firstX = stroke.path.first?.location.x ?? 0
+                firstY = stroke.path.first?.location.y ?? 0
+                pointCount = stroke.path.count
+            }
+        }
+
+        private func rememberCanonicalColors(in drawing: PKDrawing) {
+            canonicalColorsByPath.removeAll(keepingCapacity: true)
+            for stroke in drawing.strokes { canonicalColorsByPath[StrokeColorKey(stroke)] = stroke.ink.color }
+        }
+
+        private func show(canonicalDrawing: PKDrawing, on canvas: PKCanvasView, theme: PageTheme) {
+            let displayed = canonicalDrawing.strokes.map { stroke -> PKStroke in
+                let color = UIColor(noteHex: theme.resolvedInkHex(stroke.ink.color.noteHex))
+                    .withAlphaComponent(stroke.ink.color.cgColor.alpha)
+                let ink = PKInk(stroke.ink.inkType, color: color)
+                // PencilKit caches rendered color by stroke ID. A new display
+                // projection needs a new ID even when the geometric path is
+                // unchanged, otherwise switching back can keep the old tint.
+                // Xcode 27 pairs the iOS 27 SDK with Swift 6.4. Older SDKs
+                // must not type-check the new stroke identity API.
+                #if compiler(>=6.4)
+                if #available(iOS 27, *) {
+                    return PKStroke(ink: ink, path: stroke.path, transform: stroke.transform, mask: stroke.mask,
+                                    randomSeed: stroke.randomSeed, id: UUID(),
+                                    renderGroupID: stroke.renderGroupID, renderState: stroke.renderState)
+                }
+                #endif
+                return PKStroke(ink: ink, path: stroke.path, transform: stroke.transform,
+                                mask: stroke.mask, randomSeed: stroke.randomSeed)
+            }
+            isLoading = true
+            canvas.drawing = PKDrawing(strokes: displayed)
+            expectedDrawingData = canvas.drawing.dataRepresentation()
+            isLoading = false
+        }
+
+        private func canonicalDrawing(from displayed: PKDrawing, theme: PageTheme) -> PKDrawing {
+            PKDrawing(strokes: displayed.strokes.map { stroke -> PKStroke in
+                let key = StrokeColorKey(stroke)
+                let canonical: UIColor
+                if let remembered = canonicalColorsByPath[key] {
+                    canonical = remembered
+                } else if let configuredDisplayInk, let configuredCanonicalInk,
+                          stroke.ink.color.hasSameRGB(as: configuredDisplayInk) {
+                    canonical = configuredCanonicalInk.withAlphaComponent(stroke.ink.color.cgColor.alpha)
+                } else {
+                    canonical = UIColor(noteHex: theme.canonicalInkHex(stroke.ink.color.noteHex))
+                        .withAlphaComponent(stroke.ink.color.cgColor.alpha)
+                }
+                canonicalColorsByPath[key] = canonical
+                var original = stroke
+                original.ink = PKInk(stroke.ink.inkType, color: canonical)
+                return original
+            })
         }
 
         private func portableStrokes(from drawing: PKDrawing) -> [InkStroke] {
@@ -362,7 +479,8 @@ struct UnifiedPageEditor: UIViewRepresentable {
                 try require(diagonal.x == 100 && diagonal.y == 130, "Arbitrary line angle must remain unchanged")
                 let portable = portableStrokes(from: canvas.drawing)
                 try require(portable.count == 2 && portable.allSatisfy { $0.style == .pen && $0.points.count == 2 }, "Lines must survive as two-endpoint portable pen strokes")
-                result = ["passed": true, "checks": checks, "message": "iPad straight-line geometry, pressure, snapshot undo/redo, and portable conversion passed"]
+                checks += try runThemeDiagnostics()
+                result = ["passed": true, "checks": checks, "message": "iPad straight lines, undo/redo, light/dark paper, visible rules, and canonical ink preservation passed"]
             } catch { result = ["passed": false, "checks": checks, "message": error.localizedDescription] }
             isLoading = true
             canvas.drawing = original
@@ -374,6 +492,64 @@ struct UnifiedPageEditor: UIViewRepresentable {
                 try JSONSerialization.data(withJSONObject: result, options: [.prettyPrinted, .sortedKeys]).write(to: resultURL, options: .atomic)
                 print("iNotes iPad diagnostics: \(result)")
             } catch { print("Could not write iPad diagnostics: \(error)") }
+        }
+
+        private func runThemeDiagnostics() throws -> Int {
+            var checks = 0
+            func require(_ condition: @autoclosure () -> Bool, _ message: String) throws {
+                if !condition() { throw NSError(domain: "iNotes.iPadThemeDiagnostics", code: 1, userInfo: [NSLocalizedDescriptionKey: message]) }
+                checks += 1
+            }
+            let originalStrokes = [InkStroke(points: [InkPoint(x: 30, y: 40), InkPoint(x: 160, y: 60)], colorHex: "#102040")]
+            let originalDrawing = PortableInkConverter.drawing(from: originalStrokes)
+            let originalData = originalDrawing.dataRepresentation()
+            var savedData: Data? = originalData
+            var savedStrokes = originalStrokes
+            var writes = 0
+            let testEditor = UnifiedPageEditor(text: .constant("Theme preservation"), rtfData: .constant(nil),
+                                              strokes: Binding(get: { savedStrokes }, set: { savedStrokes = $0 }),
+                                              pencilKitData: Binding(get: { savedData }, set: { savedData = $0 }),
+                                              tool: .pen, colorHex: "#30343B", paper: .dotted, theme: .dark,
+                                              onInkChange: { strokes, data in savedStrokes = strokes; savedData = data; writes += 1 })
+            let coordinator = Coordinator(testEditor)
+            let testView = UnifiedPageScrollView()
+            coordinator.attach(testView)
+            defer { coordinator.detach(testView) }
+            coordinator.update(testView, enabled: true)
+            testView.page.paper.layoutIfNeeded()
+            try require(testView.page.canvas.drawing.strokes[0].ink.color.noteHex != "#102040", "Dark paper must lighten custom navy ink")
+            try require(coordinator.canonicalDrawing(from: testView.page.canvas.drawing, theme: .dark).strokes[0].ink.color.noteHex == "#102040", "Custom canonical ink color must survive dark display")
+            try require(savedData == originalData && writes == 0, "Rendering a dark page must not save display colors")
+            try require(UIColor(cgColor: testView.page.paper.layer.backgroundColor!).noteHex == PageTheme.dark.paperHex, "Dark paper must use its theme background")
+            try require(testView.page.canvas.overrideUserInterfaceStyle == .light, "PencilKit must not apply a second dark-ink transform")
+            try require(coordinator.picker.overrideUserInterfaceStyle == .dark, "The native tool palette must still use dark UI")
+            try require(coordinator.picker.colorUserInterfaceStyle == .light, "Native palette colors must use the canvas display color space")
+            let rules = testView.page.paper.layer.sublayers?.first as? CAShapeLayer
+            try require(rules?.lineWidth == 3, "Dots must retain a visible three-point diameter")
+            for _ in 0..<3 {
+                #if compiler(>=6.4)
+                let previousDisplayStroke = testView.page.canvas.drawing.strokes[0]
+                #endif
+                coordinator.parent.theme = .light
+                coordinator.update(testView, enabled: true)
+                try require(testView.page.canvas.drawing.strokes[0].ink.color.noteHex == "#102040", "Light page must restore the original custom ink")
+                #if compiler(>=6.4)
+                if #available(iOS 27, *) {
+                    try require(testView.page.canvas.drawing.strokes[0].id != previousDisplayStroke.id, "Theme projection must invalidate PencilKit's cached display color")
+                }
+                #endif
+                coordinator.parent.theme = .dark
+                coordinator.update(testView, enabled: true)
+            }
+            try require(savedData == originalData && writes == 0, "Repeated appearance changes must preserve archived PencilKit bytes")
+            let selected = testView.page.canvas.tool as? PKInkingTool
+            try require(selected?.color.noteHex == PageTheme.dark.resolvedInkHex("#30343B"), "Dark pen tool must use a light display color")
+            coordinator.commitLine(start: InkPoint(x: 200, y: 200), end: InkPoint(x: 400, y: 204), in: testView.page.canvas)
+            guard let data = savedData else { throw CocoaError(.fileReadCorruptFile) }
+            let saved = try PKDrawing(data: data)
+            try require(writes == 1 && saved.strokes.count == 2, "A dark ink gesture must persist one atomic edit")
+            try require(saved.strokes[0].ink.color.noteHex == "#102040" && saved.strokes[1].ink.color.noteHex == "#30343B", "Saving on dark paper must preserve old custom ink and canonical new pen color")
+            return checks
         }
         #endif
     }
@@ -508,20 +684,25 @@ final class UnifiedPencilPage: UIView {
 @MainActor
 final class UnifiedPaperView: UIView {
     var style: InkPaper = .dotted { didSet { if style != oldValue { setNeedsLayout() } } }
+    var theme: PageTheme = .light { didSet { if theme != oldValue { updateColors(); setNeedsLayout() } } }
     private let rules = CAShapeLayer()
     private var previousSize: CGSize = .zero
     private var previousStyle: InkPaper?
 
     override init(frame: CGRect) {
         super.init(frame: frame)
-        layer.backgroundColor = UIColor.white.cgColor
-        rules.strokeColor = UIColor(white: 0.85, alpha: 1).cgColor
         rules.fillColor = UIColor.clear.cgColor
-        rules.lineWidth = 0.7
+        rules.lineWidth = 1
         layer.addSublayer(rules)
+        updateColors()
     }
 
     required init?(coder: NSCoder) { fatalError("init(coder:) is unavailable") }
+
+    private func updateColors() {
+        layer.backgroundColor = UIColor(noteHex: theme.paperHex).cgColor
+        rules.strokeColor = UIColor(noteHex: theme.ruleHex).cgColor
+    }
 
     override func layoutSubviews() {
         super.layoutSubviews()
@@ -529,7 +710,7 @@ final class UnifiedPaperView: UIView {
         previousSize = bounds.size
         previousStyle = style
         let path = CGMutablePath()
-        let spacing: CGFloat = style == .dotted ? 24 : 32
+        let spacing: CGFloat = 28
         if style != .blank {
             for y in stride(from: spacing, through: bounds.height, by: spacing) {
                 path.move(to: CGPoint(x: style == .dotted ? spacing : 0, y: y))
@@ -543,7 +724,8 @@ final class UnifiedPaperView: UIView {
         }
         rules.frame = bounds
         rules.path = path
-        rules.lineDashPattern = style == .dotted ? [0.1, 23.9] : nil
+        rules.lineWidth = style == .dotted ? 3 : 1
+        rules.lineDashPattern = style == .dotted ? [0.1, 27.9] : nil
         rules.lineCap = style == .dotted ? .round : .butt
     }
 }
@@ -554,5 +736,13 @@ private extension UIColor {
         self.init(red: CGFloat((value >> 16) & 255) / 255, green: CGFloat((value >> 8) & 255) / 255,
                   blue: CGFloat(value & 255) / 255, alpha: 1)
     }
+
+    var noteHex: String {
+        var red: CGFloat = 0, green: CGFloat = 0, blue: CGFloat = 0, alpha: CGFloat = 0
+        guard getRed(&red, green: &green, blue: &blue, alpha: &alpha) else { return "#30343B" }
+        return String(format: "#%02X%02X%02X", Int((red * 255).rounded()), Int((green * 255).rounded()), Int((blue * 255).rounded()))
+    }
+
+    func hasSameRGB(as other: UIColor) -> Bool { noteHex == other.noteHex }
 }
 #endif

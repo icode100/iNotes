@@ -1,6 +1,6 @@
 # iNotes
 
-A small, native, open-source notebook for Apple silicon Macs, with a shared iPad app target. Built with SwiftUI, AppKit/UIKit, and PencilKit. No Electron, web view, third-party runtime, account, or telemetry.
+A small, native, open-source notebook for Apple silicon Macs, with a shared iPad app target. Built with SwiftUI, AppKit/UIKit, and PencilKit, with the open-source Sparkle framework for signed Mac updates. No Electron, cloud SDK, account, or telemetry.
 
 ## What works
 
@@ -9,16 +9,18 @@ A small, native, open-source notebook for Apple silicon Macs, with a shared iPad
 - Straight-line pen tool for table borders, with near-horizontal/vertical snapping and Shift axis constraints on Mac.
 - Pressure-aware pen-tablet input on Mac, including stylus proximity and hardware eraser events. Read-only HID presence detection excludes touchpads; the input indicator confirms actual pen activity. No global input capture or tablet SDK is required.
 - Apple Pencil and native PencilKit tools on iPad, with palm rejection and actual Pencil touch detection. Basic ink paths and instrument styles transfer between Mac and iPad; native PencilKit data is retained. Grid, ruled, dotted, and blank paper save with each sheet.
+- Light, dark, and system appearance for the shared page, readable ink colors, and prominent grids, rules, and dots. Switching appearance preserves original note colors. The single-pencil app icon includes native light and dark appearances.
 - Search across titles, text, and tags; favorite sheets; embedded file attachments.
 - Automatic local saves, a previous-version backup, explicit damaged-library recovery, and external-change checks that prevent overwriting another app instance's changes.
 - Portable `.inotes` import/export. Import creates a separate copy; it never replaces existing notebooks.
 - Mac text/RTF export and combined-page PDF/PNG export, preserving text and ink together. Files/Google Drive export on iPad.
 - Google Drive folder backups on Mac, including delayed backups after edits and a final backup on normal quit. No cloud SDK or OAuth secret is needed.
 - ARM64 `.app` and drag-to-Applications `.dmg` packaging, with verification scripts.
+- Native Mac update checks, verified Ed25519 downloads, and installation on quit. Release tags publish a signed feed through GitHub Releases after the signing secret is configured; see [release setup](docs/UPDATES.md).
 
 ## Run on Mac
 
-Requires an Apple silicon Mac and macOS 14+. Build tools: Apple Command Line Tools with Swift 6+, or full Xcode. The application itself has no developer-tool requirement.
+Requires an Apple silicon Mac and macOS 14+. Building the installer requires full Xcode 26+ for its adaptive light/dark icon. The application itself has no developer-tool requirement.
 
 ```sh
 ./scripts/test.sh

@@ -74,6 +74,7 @@ struct InkEditor: NSViewRepresentable {
     var lineWidth: Double = 2.5
     var tool: InkTool = .pen
     var paper: InkPaper = .dotted
+    var theme: PageTheme = .light
     var onInputChange: ((String) -> Void)? = nil
 
     func makeNSView(context: Context) -> NSScrollView {
@@ -101,6 +102,7 @@ struct InkEditor: NSViewRepresentable {
         canvas.colorHex = colorHex
         canvas.lineWidth = max(0.5, min(30, lineWidth))
         canvas.tool = tool
+        canvas.theme = theme
         if canvas.paper != paper { canvas.paper = paper; canvas.needsDisplay = true }
         if !canvas.isDrawing, canvas.strokes != strokes {
             canvas.strokes = strokes
@@ -115,7 +117,7 @@ struct InkEditor: NSViewRepresentable {
 enum InkExport {
     static let paperSize = NSSize(width: 1600, height: 2200)
 
-    static func png(strokes: [InkStroke], paper: InkPaper = .dotted) -> Data? {
+    static func png(strokes: [InkStroke], paper: InkPaper = .dotted, theme: PageTheme = .light) -> Data? {
         guard let bitmap = NSBitmapImageRep(
             bitmapDataPlanes: nil, pixelsWide: Int(paperSize.width), pixelsHigh: Int(paperSize.height),
             bitsPerSample: 8, samplesPerPixel: 4, hasAlpha: true, isPlanar: false,
@@ -125,62 +127,80 @@ enum InkExport {
         NSGraphicsContext.current = context
         context.cgContext.translateBy(x: 0, y: paperSize.height)
         context.cgContext.scaleBy(x: 1, y: -1)
-        InkRenderer.draw(strokes: strokes, paper: paper, in: NSRect(origin: .zero, size: paperSize))
+        InkRenderer.draw(strokes: strokes, paper: paper, in: NSRect(origin: .zero, size: paperSize), theme: theme)
         context.flushGraphics()
         NSGraphicsContext.restoreGraphicsState()
         return bitmap.representation(using: .png, properties: [:])
     }
 
-    static func pdf(strokes: [InkStroke], paper: InkPaper = .dotted) -> Data {
+    static func pdf(strokes: [InkStroke], paper: InkPaper = .dotted, theme: PageTheme = .light) -> Data {
         let canvas = InkDocumentView(frame: NSRect(origin: .zero, size: paperSize))
         canvas.strokes = strokes
         canvas.paper = paper
+        canvas.theme = theme
         return canvas.dataWithPDF(inside: canvas.bounds)
     }
 }
 
 @MainActor
 enum InkRenderer {
-    static func draw(strokes: [InkStroke], paper: InkPaper, in dirtyRect: NSRect, drawsPaper: Bool = true) {
+    static func draw(strokes: [InkStroke], paper: InkPaper, in requestedRect: NSRect, drawsPaper: Bool = true, theme: PageTheme = .light) {
+        // Layer-backed offscreen rendering can request an effectively infinite
+        // dirty rectangle. Intersect the real clip before constructing a grid.
+        var dirtyRect = requestedRect
+        if let clip = NSGraphicsContext.current?.cgContext.boundingBoxOfClipPath,
+           !clip.isNull, !clip.isInfinite,
+           [clip.minX, clip.minY, clip.width, clip.height].allSatisfy(\.isFinite) {
+            dirtyRect = dirtyRect.intersection(clip)
+        }
+        guard !dirtyRect.isEmpty, !dirtyRect.isNull, !dirtyRect.isInfinite,
+              [dirtyRect.minX, dirtyRect.minY, dirtyRect.width, dirtyRect.height].allSatisfy(\.isFinite) else { return }
         if drawsPaper {
-            NSColor.white.setFill()
+            color(theme.paperHex).setFill()
             dirtyRect.fill()
-            NSColor(white: 0.88, alpha: 1).set()
+            color(theme.ruleHex).set()
             let spacing: CGFloat = 28
+            // Keep a one-point rule on device-pixel boundaries. At 1x an
+            // integer-centered stroke would blur into two faint half pixels.
+            let transform = NSGraphicsContext.current?.cgContext.ctm ?? .identity
+            let scaleX = max(0.01, abs(transform.a)), scaleY = max(0.01, abs(transform.d))
+            let offsetX = Int(scaleX.rounded()) % 2 == 1 ? 0.5 / scaleX : 0
+            let offsetY = Int(scaleY.rounded()) % 2 == 1 ? 0.5 / scaleY : 0
             switch paper {
         case .blank: break
         case .ruled, .grid:
             let path = NSBezierPath()
             for y in stride(from: floor(dirtyRect.minY / spacing) * spacing, through: dirtyRect.maxY, by: spacing) {
-                path.move(to: NSPoint(x: dirtyRect.minX, y: y))
-                path.line(to: NSPoint(x: dirtyRect.maxX, y: y))
+                path.move(to: NSPoint(x: dirtyRect.minX, y: y + offsetY))
+                path.line(to: NSPoint(x: dirtyRect.maxX, y: y + offsetY))
             }
             if paper == .grid {
                 for x in stride(from: floor(dirtyRect.minX / spacing) * spacing, through: dirtyRect.maxX, by: spacing) {
-                    path.move(to: NSPoint(x: x, y: dirtyRect.minY))
-                    path.line(to: NSPoint(x: x, y: dirtyRect.maxY))
+                    path.move(to: NSPoint(x: x + offsetX, y: dirtyRect.minY))
+                    path.line(to: NSPoint(x: x + offsetX, y: dirtyRect.maxY))
                 }
             }
-            path.lineWidth = 0.7
+            path.lineWidth = 1.0
             path.stroke()
         case .dotted:
             for y in stride(from: floor(dirtyRect.minY / spacing) * spacing, through: dirtyRect.maxY, by: spacing) {
                 for x in stride(from: floor(dirtyRect.minX / spacing) * spacing, through: dirtyRect.maxX, by: spacing) {
-                    NSBezierPath(ovalIn: NSRect(x: x - 0.8, y: y - 0.8, width: 1.6, height: 1.6)).fill()
+                    NSBezierPath(ovalIn: NSRect(x: x - 1.5, y: y - 1.5, width: 3, height: 3)).fill()
                 }
             }
             }
         }
-        for stroke in strokes { draw(stroke) }
+        for stroke in strokes { draw(stroke, theme: theme) }
     }
 
-    private static func draw(_ stroke: InkStroke) {
+    private static func draw(_ stroke: InkStroke, theme: PageTheme) {
         guard let first = stroke.points.first, first.x.isFinite, first.y.isFinite else { return }
-        let inkColor = color(stroke.colorHex)
+        let inkColor = color(theme.resolvedInkHex(stroke.colorHex))
+        let highlighterAlpha: CGFloat = theme == .dark ? 0.36 : 0.25
         let baseWidth = (stroke.width.isFinite ? max(0.5, min(100, stroke.width)) : 2.5) * stroke.style.widthMultiplier
         if stroke.points.count == 1 {
             let width = baseWidth * pressure(first.pressure)
-            inkColor.withAlphaComponent(stroke.style == .highlighter ? 0.25 : stroke.style == .pencil ? 0.7 : 1).set()
+            inkColor.withAlphaComponent(stroke.style == .highlighter ? highlighterAlpha : stroke.style == .pencil ? 0.7 : 1).set()
             NSBezierPath(ovalIn: NSRect(x: first.x - width / 2, y: first.y - width / 2, width: width, height: width)).fill()
             return
         }
@@ -194,7 +214,7 @@ enum InkRenderer {
             path.lineWidth = baseWidth * (0.7 + 0.3 * meanPressure)
             path.lineCapStyle = stroke.style == .highlighter ? .butt : .round
             path.lineJoinStyle = .round
-            inkColor.withAlphaComponent(stroke.style == .highlighter ? 0.25 : 0.96).set()
+            inkColor.withAlphaComponent(stroke.style == .highlighter ? highlighterAlpha : 0.96).set()
             path.stroke()
             return
         }
@@ -209,7 +229,8 @@ enum InkRenderer {
             path.lineWidth = baseWidth * pressure(force)
             path.lineCapStyle = .round
             path.lineJoinStyle = .round
-            inkColor.withAlphaComponent(stroke.style == .pencil ? 0.3 + 0.58 * max(0, min(1, force)) : 1).set()
+            let pencilAlpha = (theme == .dark ? 0.55 : 0.3) + (theme == .dark ? 0.4 : 0.58) * max(0, min(1, force))
+            inkColor.withAlphaComponent(stroke.style == .pencil ? CGFloat(pencilAlpha) : 1).set()
             path.stroke()
         }
     }
@@ -227,7 +248,7 @@ enum InkRenderer {
         value.isFinite ? 0.35 + 0.65 * max(0, min(1, value)) : 1
     }
 
-    private static func color(_ hex: String) -> NSColor {
+    static func color(_ hex: String) -> NSColor {
         let digits = hex.trimmingCharacters(in: CharacterSet(charactersIn: "#"))
         guard digits.count == 6, let value = UInt32(digits, radix: 16) else { return .black }
         return NSColor(red: Double((value >> 16) & 255) / 255,
@@ -243,6 +264,9 @@ final class InkDocumentView: NSView {
     var lineWidth: Double = 2.5
     var tool: InkTool = .pen
     var paper: InkPaper = .dotted
+    var theme: PageTheme = .light {
+        didSet { if theme != oldValue { needsDisplay = true } }
+    }
     var drawsPaper = true
     var onChange: (([InkStroke]) -> Void)?
     var onInputChange: ((String) -> Void)?
@@ -285,7 +309,7 @@ final class InkDocumentView: NSView {
     override func resetCursorRects() { addCursorRect(bounds, cursor: .crosshair) }
 
     override func draw(_ dirtyRect: NSRect) {
-        InkRenderer.draw(strokes: activeStroke.map { strokes + [$0] } ?? strokes, paper: paper, in: dirtyRect, drawsPaper: drawsPaper)
+        InkRenderer.draw(strokes: activeStroke.map { strokes + [$0] } ?? strokes, paper: paper, in: dirtyRect.intersection(bounds), drawsPaper: drawsPaper, theme: theme)
     }
 
     override func mouseDown(with event: NSEvent) {

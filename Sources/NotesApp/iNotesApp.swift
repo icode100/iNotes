@@ -8,7 +8,9 @@ import AppKit
 struct iNotesApp: App {
     @StateObject private var store: NotesStore
     @StateObject private var inputDevice = InputDeviceMonitor()
+    @AppStorage("appearance") private var appearance = "system"
     #if os(macOS)
+    @StateObject private var updater = AppUpdater()
     @NSApplicationDelegateAdaptor(AppDelegate.self) private var delegate
     #endif
     @Environment(\.scenePhase) private var phase
@@ -42,9 +44,16 @@ struct iNotesApp: App {
     var body: some Scene {
         WindowGroup {
             ContentView().environmentObject(store).environmentObject(inputDevice)
+                .preferredColorScheme(appearance == "dark" ? .dark : appearance == "light" ? .light : nil)
                 #if os(macOS)
                 .frame(minWidth: 880, minHeight: 580)
-                .onAppear { delegate.store = store }
+                .onAppear {
+                    delegate.store = store
+                    updater.prepareForInstallation = { [weak store = store] in
+                        NSApp.keyWindow?.makeFirstResponder(nil)
+                        return store?.prepareForQuit() ?? false
+                    }
+                }
                 #endif
                 .onOpenURL { url in
                     let access = url.startAccessingSecurityScopedResource()
@@ -57,7 +66,7 @@ struct iNotesApp: App {
         .defaultSize(width: 1220, height: 800)
         .windowStyle(.titleBar)
         .windowToolbarStyle(.unified)
-        .commands { NotesCommands(store: store) }
+        .commands { NotesCommands(store: store, updater: updater) }
         #endif
         .onChange(of: phase) { _, value in if value != .active { _ = store.flush() } }
     }
@@ -77,6 +86,34 @@ enum StoreDiagnostics {
         func require(_ condition: @autoclosure () -> Bool, _ reason: String) throws {
             if !condition() { throw NSError(domain: "iNotes.StoreDiagnostics", code: 1, userInfo: [NSLocalizedDescriptionKey: reason]) }
         }
+        let updateSettings: [String: Any] = [
+            "SUFeedURL": "https://github.com/icode100/iNotes/releases/latest/download/appcast.xml",
+            "SUPublicEDKey": Data(repeating: 7, count: 32).base64EncodedString(),
+            "SUVerifyUpdateBeforeExtraction": true,
+            "SURequireSignedFeed": true,
+            "SUSignedFeedFailureExpirationInterval": 0
+        ]
+        try require(AppUpdater.configuration(in: updateSettings).valid, "Signed HTTPS release configuration is accepted")
+        for rejectedFeed in ["http://example.com/appcast.xml", "file:///tmp/appcast.xml", "https://user:secret@example.com/feed", "https://example.com/feed#fragment", "https://example.com:bad/feed", "https://example.com:65536/feed", "https://example.com:0/feed"] {
+            var invalid = updateSettings
+            invalid["SUFeedURL"] = rejectedFeed
+            try require(!AppUpdater.configuration(in: invalid).valid, "Unsafe update feed is rejected")
+        }
+        var unsignedUpdates = updateSettings
+        unsignedUpdates["SUVerifyUpdateBeforeExtraction"] = false
+        try require(!AppUpdater.configuration(in: unsignedUpdates).valid, "Unsigned archive updates are rejected")
+        unsignedUpdates = updateSettings
+        unsignedUpdates["SURequireSignedFeed"] = false
+        try require(!AppUpdater.configuration(in: unsignedUpdates).valid, "Unsigned update feeds are rejected")
+        for expiry in [nil, 20 * 24 * 60 * 60, -1, "invalid"] as [Any?] {
+            var invalid = updateSettings
+            invalid["SUSignedFeedFailureExpirationInterval"] = expiry
+            try require(!AppUpdater.configuration(in: invalid).valid, "Unsigned-feed fallback must stay disabled")
+        }
+        var invalidKey = updateSettings
+        invalidKey["SUPublicEDKey"] = Data(repeating: 7, count: 31).base64EncodedString()
+        try require(!AppUpdater.configuration(in: invalidKey).valid, "Invalid public-key length is rejected")
+        try require(!AppUpdater.configuration(in: [:]).valid, "An unconfigured updater remains dormant")
         let store = NotesStore(directory: directory, preferences: preferences)
         try require(store.errorMessage == nil && !store.dirty, "New library must save successfully")
         guard let sheet = store.selectedSheet else { throw CocoaError(.fileReadCorruptFile) }
@@ -115,7 +152,17 @@ enum StoreDiagnostics {
         let finalFiles = try FileManager.default.contentsOfDirectory(at: backups, includingPropertiesForKeys: nil)
         try require(finalFiles.count == 2, "Normal quit creates a final versioned backup")
         store.disconnectDrive()
-        return "Store integration checks passed: autosave, reopen, import, versioned Drive-folder backup and quit flush"
+        let savedLibrary = directory.appendingPathComponent("SavedLibrary.json")
+        try FileManager.default.moveItem(at: store.libraryURL, to: savedLibrary)
+        try FileManager.default.createDirectory(at: store.libraryURL, withIntermediateDirectories: false)
+        store.update(sheet.id) { $0.body += "\nKeep this edit when update restart is postponed" }
+        try require(!store.prepareForQuit() && store.dirty, "A failed local save postpones quit/update without discarding edits")
+        try FileManager.default.removeItem(at: store.libraryURL)
+        try FileManager.default.moveItem(at: savedLibrary, to: store.libraryURL)
+        try require(store.prepareForQuit() && !store.dirty, "A postponed quit/update can retry after storage is repaired")
+        let retried = NotesStore(directory: directory, preferences: preferences)
+        try require(retried.library.node(id: sheet.id)?.body.hasSuffix("Keep this edit when update restart is postponed") == true, "Retry preserves the latest edit on disk")
+        return "Store and updater checks passed: autosave, reopen, import, Drive-folder backup, quit flush, failed-save restart protection/retry, and 16 signed-update configuration checks"
     }
 }
 

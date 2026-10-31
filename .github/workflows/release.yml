@@ -1,0 +1,63 @@
+name: Signed macOS release
+on:
+  push:
+    tags:
+      - 'v*'
+permissions:
+  contents: read
+concurrency:
+  group: inotes-release
+  cancel-in-progress: false
+jobs:
+  release:
+    runs-on: macos-26
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - name: Validate tag and release key
+        env:
+          SPARKLE_PRIVATE_KEY: ${{ secrets.SPARKLE_PRIVATE_KEY }}
+        run: |
+          set -euo pipefail
+          if [[ ! "$GITHUB_REF_NAME" =~ ^v[0-9]+\.[0-9]+\.[0-9]+$ ]]; then
+            echo 'Release tags must use vX.Y.Z.' >&2
+            exit 2
+          fi
+          if [[ -z "$SPARKLE_PRIVATE_KEY" ]]; then
+            echo 'Configure SPARKLE_PRIVATE_KEY with the existing project seed before releasing.' >&2
+            exit 2
+          fi
+          umask 077
+          printf '%s\n' "$SPARKLE_PRIVATE_KEY" > "$RUNNER_TEMP/inotes-update-key"
+          printf 'UPDATE_PRIVATE_KEY_FILE=%s\n' "$RUNNER_TEMP/inotes-update-key" >> "$GITHUB_ENV"
+          printf 'VERSION=%s\n' "${GITHUB_REF_NAME#v}" >> "$GITHUB_ENV"
+          printf 'BUILD_NUMBER=%s\n' "$((1000 + GITHUB_RUN_NUMBER))" >> "$GITHUB_ENV"
+      - name: Unit and integration tests
+        run: bash scripts/test.sh
+      - name: Build native ARM64 DMG
+        # Ed25519 authenticates updates. Configure Developer ID/notarization locally
+        # using docs/BUILD.md before distributing a Gatekeeper-approved installer.
+        run: bash scripts/build-macos.sh
+      - name: Verify installed bundle and update signatures
+        run: |
+          bash scripts/verify-macos.sh
+          bash scripts/generate-appcast.sh
+          bash scripts/test-update-signatures.sh
+      - name: Publish release assets
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+          gh release create "$GITHUB_REF_NAME" \
+            "dist/iNotes-$VERSION-arm64.dmg" \
+            "dist/iNotes-$VERSION-arm64.dmg.sha256" \
+            dist/update/appcast.xml \
+            --repo "$GITHUB_REPOSITORY" --verify-tag --latest \
+            --title "iNotes $VERSION" \
+            --notes 'Native Apple silicon build with signed automatic updates. This workflow uses local ad hoc code signing; Apple Developer ID signing and notarization are separate release steps documented in docs/BUILD.md.'
+      - name: Remove signing seed from runner
+        if: always()
+        run: rm -f "$RUNNER_TEMP/inotes-update-key"

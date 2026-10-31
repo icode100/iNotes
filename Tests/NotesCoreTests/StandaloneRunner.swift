@@ -75,7 +75,13 @@ struct StandaloneTestRunner {
     static func main() {
         let library = NoteLibraryTests()
         let repository = LibraryRepositoryTests()
+        let themes = PageThemeTests()
         let tests: [(String, XCTestCase, () throws -> Void)] = [
+            ("theme text and ink contrast", themes, themes.testDefaultTextAndDarkInkContrast),
+            ("theme palette storage roundtrip", themes, themes.testKnownPaletteRoundTripsBetweenDisplayAndStorage),
+            ("theme custom hue resolution", themes, themes.testCustomDarkHuesLightenButBrightColorsStayUnchanged),
+            ("theme input normalization", themes, themes.testHexNormalizationAndInvalidInputHaveReadableFallbacks),
+            ("theme archive color preservation", themes, themes.testThemeResolutionNeverRewritesArchivedStrokes),
             ("hierarchy and order", library, library.testHierarchyAndOrderedChildren),
             ("invalid parents and titles", library, library.testInvalidParentsAndTitlesLeaveLibraryUnchanged),
             ("move cycles and reorder", library, library.testMoveRejectsCycleAndAllowsReordering),

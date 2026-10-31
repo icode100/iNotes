@@ -1,4 +1,5 @@
 import SwiftUI
+import NotesCore
 
 enum RichTextCommand: String, CaseIterable {
     case bold, italic, underline, heading, body, bullet, checklist
@@ -11,6 +12,7 @@ import AppKit
 struct RichTextEditor: NSViewRepresentable {
     @Binding var text: String
     @Binding var rtfData: Data?
+    var theme: PageTheme = .light
     var onChange: ((String, Data?) -> Void)? = nil
 
     func makeCoordinator() -> Coordinator { Coordinator(self) }
@@ -55,7 +57,7 @@ struct RichTextEditor: NSViewRepresentable {
         editor.font = .systemFont(ofSize: 16)
         editor.textColor = .textColor
         editor.backgroundColor = .textBackgroundColor
-        editor.usesAdaptiveColorMappingForDarkAppearance = true
+        editor.usesAdaptiveColorMappingForDarkAppearance = false
         editor.setAccessibilityLabel("Sheet text")
         editor.setAccessibilityHelp("Rich text editor. Use the Format menu to style selected text.")
         return editor
@@ -65,9 +67,10 @@ struct RichTextEditor: NSViewRepresentable {
         context.coordinator.parent = self
         guard let editor = scrollView.documentView as? NSTextView else { return }
         editor.isEditable = context.environment.isEnabled
-        if context.coordinator.lastText != text || context.coordinator.lastRTF != rtfData {
+        if context.coordinator.lastText != text || context.coordinator.lastRTF != rtfData || context.coordinator.lastTheme != theme {
+            let contentChanged = context.coordinator.lastText != text || context.coordinator.lastRTF != rtfData
             context.coordinator.load(text: text, rtf: rtfData, into: editor)
-            editor.undoManager?.removeAllActions()
+            if contentChanged { editor.undoManager?.removeAllActions() }
         }
     }
 
@@ -137,6 +140,7 @@ struct RichTextEditor: NSViewRepresentable {
         var parent: RichTextEditor
         var lastText: String?
         var lastRTF: Data?
+        var lastTheme: PageTheme?
         private var isLoading = false
         private weak var editor: NSTextView?
         private var undoObservers: [NSObjectProtocol] = []
@@ -167,18 +171,25 @@ struct RichTextEditor: NSViewRepresentable {
             isLoading = true
             defer { isLoading = false }
             let selected = editor.selectedRange()
+            let canonical: NSAttributedString
             if let rtf,
                let richText = try? NSAttributedString(data: rtf, options: [.documentType: NSAttributedString.DocumentType.rtf], documentAttributes: nil),
                richText.string == text {
-                editor.textStorage?.setAttributedString(richText)
+                canonical = richText
             } else {
-                editor.textStorage?.setAttributedString(NSAttributedString(string: text, attributes: [
-                    .font: NSFont.systemFont(ofSize: 16), .foregroundColor: NSColor.textColor
-                ]))
+                canonical = NSAttributedString(string: text, attributes: [
+                    .font: NSFont.systemFont(ofSize: 16), .foregroundColor: ThemeTextAttributes.color(PageTheme.light.textHex)
+                ])
             }
-            editor.setSelectedRange(NSRange(location: min(selected.location, (text as NSString).length), length: 0))
+            editor.appearance = NSAppearance(named: parent.theme == .dark ? .darkAqua : .aqua)
+            editor.backgroundColor = ThemeTextAttributes.color(parent.theme.paperHex)
+            editor.textStorage?.setAttributedString(ThemeTextAttributes.display(canonical, theme: parent.theme))
+            editor.setSelectedRange(ThemeTextAttributes.clipped(selected, length: (text as NSString).length))
+            editor.typingAttributes[.foregroundColor] = ThemeTextAttributes.color(parent.theme.resolvedInkHex(PageTheme.light.textHex))
+            editor.typingAttributes[ThemeTextAttributes.canonicalColorKey] = ThemeTextAttributes.color(PageTheme.light.textHex)
             lastText = text
             lastRTF = rtf
+            lastTheme = parent.theme
         }
 
         func textDidChange(_ notification: Notification) {
@@ -189,11 +200,24 @@ struct RichTextEditor: NSViewRepresentable {
         private func persist(_ editor: NSTextView) {
             guard !isLoading else { return }
             let text = editor.string
-            let rtf = try? editor.attributedString().data(
+            let canonical = ThemeTextAttributes.canonical(editor.attributedString(), theme: parent.theme)
+            let rtf = try? canonical.data(
                 from: NSRange(location: 0, length: (text as NSString).length),
                 documentAttributes: [.documentType: NSAttributedString.DocumentType.rtf]
             )
             guard text != lastText || rtf != lastRTF else { return }
+            let display = ThemeTextAttributes.display(canonical, theme: parent.theme)
+            if !editor.attributedString().isEqual(to: display) {
+                isLoading = true
+                let selected = editor.selectedRange()
+                let undo = editor.undoManager
+                let registering = undo?.isUndoRegistrationEnabled == true
+                if registering { undo?.disableUndoRegistration() }
+                editor.textStorage?.setAttributedString(display)
+                editor.setSelectedRange(ThemeTextAttributes.clipped(selected, length: display.length))
+                if registering { undo?.enableUndoRegistration() }
+                isLoading = false
+            }
             lastText = text
             lastRTF = rtf
             if let onChange = parent.onChange {
@@ -227,6 +251,7 @@ import UIKit
 struct RichTextEditor: UIViewRepresentable {
     @Binding var text: String
     @Binding var rtfData: Data?
+    var theme: PageTheme = .light
     var onChange: ((String, Data?) -> Void)? = nil
 
     func makeCoordinator() -> Coordinator { Coordinator(self) }
@@ -249,7 +274,7 @@ struct RichTextEditor: UIViewRepresentable {
     func updateUIView(_ editor: UITextView, context: Context) {
         context.coordinator.parent = self
         editor.isEditable = context.environment.isEnabled
-        if context.coordinator.lastText != text || context.coordinator.lastRTF != rtfData {
+        if context.coordinator.lastText != text || context.coordinator.lastRTF != rtfData || context.coordinator.lastTheme != theme {
             context.coordinator.load(text: text, rtf: rtfData, into: editor)
         }
     }
@@ -259,6 +284,7 @@ struct RichTextEditor: UIViewRepresentable {
         var parent: RichTextEditor
         var lastText: String?
         var lastRTF: Data?
+        var lastTheme: PageTheme?
         private var isLoading = false
         private weak var editor: UITextView?
         private var undoObservers: [NSObjectProtocol] = []
@@ -286,27 +312,48 @@ struct RichTextEditor: UIViewRepresentable {
             self.editor = editor
             isLoading = true
             defer { isLoading = false }
+            let selected = editor.selectedRange
+            let canonical: NSAttributedString
             if let rtf,
                let richText = try? NSAttributedString(data: rtf, options: [.documentType: NSAttributedString.DocumentType.rtf], documentAttributes: nil),
                richText.string == text {
-                editor.attributedText = richText
+                canonical = richText
             } else {
-                editor.attributedText = NSAttributedString(string: text, attributes: [
-                    .font: UIFont.preferredFont(forTextStyle: .body), .foregroundColor: UIColor.label
+                canonical = NSAttributedString(string: text, attributes: [
+                    .font: UIFont.preferredFont(forTextStyle: .body), .foregroundColor: ThemeTextAttributes.color(PageTheme.light.textHex)
                 ])
             }
+            editor.overrideUserInterfaceStyle = parent.theme == .dark ? .dark : .light
+            editor.attributedText = ThemeTextAttributes.display(canonical, theme: parent.theme)
+            editor.selectedRange = ThemeTextAttributes.clipped(selected, length: canonical.length)
+            editor.typingAttributes[.foregroundColor] = ThemeTextAttributes.color(parent.theme.resolvedInkHex(PageTheme.light.textHex))
+            editor.typingAttributes[ThemeTextAttributes.canonicalColorKey] = ThemeTextAttributes.color(PageTheme.light.textHex)
             lastText = text
             lastRTF = rtf
+            lastTheme = parent.theme
         }
 
         func textViewDidChange(_ editor: UITextView) {
             guard !isLoading else { return }
             let text = editor.text ?? ""
-            let rtf = try? editor.attributedText.data(
+            let canonical = ThemeTextAttributes.canonical(editor.attributedText, theme: parent.theme)
+            let rtf = try? canonical.data(
                 from: NSRange(location: 0, length: (text as NSString).length),
                 documentAttributes: [.documentType: NSAttributedString.DocumentType.rtf]
             )
             guard text != lastText || rtf != lastRTF else { return }
+            let display = ThemeTextAttributes.display(canonical, theme: parent.theme)
+            if !editor.attributedText.isEqual(to: display) {
+                isLoading = true
+                let selected = editor.selectedRange
+                let undo = editor.undoManager
+                let registering = undo?.isUndoRegistrationEnabled == true
+                if registering { undo?.disableUndoRegistration() }
+                editor.attributedText = display
+                editor.selectedRange = ThemeTextAttributes.clipped(selected, length: display.length)
+                if registering { undo?.enableUndoRegistration() }
+                isLoading = false
+            }
             lastText = text
             lastRTF = rtf
             if let onChange = parent.onChange {
@@ -316,6 +363,86 @@ struct RichTextEditor: UIViewRepresentable {
                 parent.rtfData = rtf
             }
         }
+    }
+}
+#endif
+
+#if os(macOS) || os(iOS)
+#if os(macOS)
+typealias NoteTextColor = NSColor
+#else
+typealias NoteTextColor = UIColor
+#endif
+
+/// Display colors carry their original foreground as transient metadata. Only
+/// canonical colors enter RTF, so switching appearance never rewrites the note.
+@MainActor
+enum ThemeTextAttributes {
+    static let canonicalColorKey = NSAttributedString.Key("io.inotes.canonicalForeground")
+
+    static func clipped(_ range: NSRange, length: Int) -> NSRange {
+        let location = min(range.location, length)
+        return NSRange(location: location, length: min(range.length, length - location))
+    }
+
+    static func color(_ hex: String) -> NoteTextColor {
+        let value = UInt64(hex.trimmingCharacters(in: CharacterSet(charactersIn: "#")), radix: 16) ?? 0
+        let red = CGFloat((value >> 16) & 255) / 255
+        let green = CGFloat((value >> 8) & 255) / 255
+        let blue = CGFloat(value & 255) / 255
+        #if os(macOS)
+        return NSColor(srgbRed: red, green: green, blue: blue, alpha: 1)
+        #else
+        return UIColor(red: red, green: green, blue: blue, alpha: 1)
+        #endif
+    }
+
+    static func hex(_ source: NoteTextColor) -> String {
+        var red: CGFloat = 0, green: CGFloat = 0, blue: CGFloat = 0, alpha: CGFloat = 1
+        #if os(macOS)
+        var resolved: NSColor?
+        NSAppearance(named: .aqua)?.performAsCurrentDrawingAppearance {
+            resolved = source.usingColorSpace(.sRGB)
+        }
+        guard let resolved else { return PageTheme.light.textHex }
+        resolved.getRed(&red, green: &green, blue: &blue, alpha: &alpha)
+        #else
+        let resolved = source.resolvedColor(with: UITraitCollection(userInterfaceStyle: .light))
+        guard resolved.getRed(&red, green: &green, blue: &blue, alpha: &alpha) else { return PageTheme.light.textHex }
+        #endif
+        return String(format: "#%02X%02X%02X", Int((red * 255).rounded()), Int((green * 255).rounded()), Int((blue * 255).rounded()))
+    }
+
+    static func display(_ source: NSAttributedString, theme: PageTheme) -> NSAttributedString {
+        let result = NSMutableAttributedString(attributedString: source)
+        source.enumerateAttributes(in: NSRange(location: 0, length: source.length)) { attributes, range, _ in
+            var original = attributes[canonicalColorKey] as? NoteTextColor
+                ?? attributes[.foregroundColor] as? NoteTextColor
+                ?? color(PageTheme.light.textHex)
+            let originalHex = hex(original)
+            // Older dark-editor archives could contain white default text.
+            if ["#FFFFFF", "#FEFEFE", "#FDFDFD"].contains(originalHex) { original = color(PageTheme.light.textHex) }
+            result.addAttribute(canonicalColorKey, value: original, range: range)
+            result.addAttribute(.foregroundColor, value: color(theme.resolvedInkHex(hex(original))), range: range)
+        }
+        return result
+    }
+
+    static func canonical(_ source: NSAttributedString, theme: PageTheme) -> NSAttributedString {
+        let result = NSMutableAttributedString(attributedString: source)
+        source.enumerateAttributes(in: NSRange(location: 0, length: source.length)) { attributes, range, _ in
+            let displayed = attributes[.foregroundColor] as? NoteTextColor ?? color(theme.textHex)
+            let original = attributes[canonicalColorKey] as? NoteTextColor
+            let canonical: NoteTextColor
+            if let original, hex(displayed) == theme.resolvedInkHex(hex(original)).uppercased() {
+                canonical = original
+            } else {
+                canonical = color(theme == .dark ? theme.canonicalInkHex(hex(displayed)) : hex(displayed))
+            }
+            result.addAttribute(.foregroundColor, value: canonical, range: range)
+            result.removeAttribute(canonicalColorKey, range: range)
+        }
+        return result
     }
 }
 #endif

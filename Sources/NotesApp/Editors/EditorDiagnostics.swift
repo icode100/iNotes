@@ -253,11 +253,13 @@ enum EditorDiagnostics {
         try check(inkBrightness < 0.4, "unified export includes ink at shared page coordinates (scale: \(exportScale), brightness: \(inkBrightness))")
         let colored = NSMutableAttributedString(string: "White red", attributes: [.font: NSFont.systemFont(ofSize: 16), .foregroundColor: NSColor.white])
         colored.addAttribute(.foregroundColor, value: NSColor.red, range: NSRange(location: 6, length: 3))
-        page.textView.textStorage?.setAttributedString(colored)
-        page.normalizePaperTextColors()
+        let coloredRTF = try colored.data(from: NSRange(location: 0, length: colored.length), documentAttributes: [.documentType: NSAttributedString.DocumentType.rtf])
+        let colorCoordinator = RichTextEditor.Coordinator(RichTextEditor(text: .constant(colored.string), rtfData: .constant(coloredRTF), theme: .light))
+        colorCoordinator.load(text: colored.string, rtf: coloredRTF, into: page.textView)
         let normalizedBlack = page.textView.attributedString().attribute(.foregroundColor, at: 0, effectiveRange: nil) as? NSColor
         let preservedRed = page.textView.attributedString().attribute(.foregroundColor, at: 6, effectiveRange: nil) as? NSColor
-        try check(normalizedBlack?.isEqual(NSColor.black) == true && preservedRed?.isEqual(NSColor.red) == true,
+        let lightText = InkRenderer.color(PageTheme.light.textHex)
+        try check(normalizedBlack?.usingColorSpace(.sRGB)?.isEqual(lightText.usingColorSpace(.sRGB)) == true && preservedRed?.usingColorSpace(.sRGB)?.redComponent == 1,
                   "white paper normalizes invisible text while preserving user colors")
         page.textView.string = String(repeating: "Reachable long page line\n", count: 300)
         page.resizePaperToContent()
@@ -295,7 +297,114 @@ enum EditorDiagnostics {
         lineCanvas.mouseUp(with: try event(.leftMouseUp, x: 260, y: 200, pressure: 0, modifiers: .shift))
         let shifted = committedLines.last!.points
         try check(shifted[0].y == shifted[1].y, "Shift forces the closest table axis")
-        return "\(checks) native editor integration checks passed (shared text/ink page, straight lines and axis snap, instruments, grid, RTF, Unicode, formatting, undo/redo, pressure, eraser, unified PNG/PDF and PencilKit interchange)."
+        // Theme rendering is a view transformation: all original pen colors,
+        // geometry, and undo snapshots stay canonical when the paper changes.
+        let canonicalThemeStrokes = [InkStroke(points: [InkPoint(x: 100, y: 180), InkPoint(x: 300, y: 180)], colorHex: "#30343B", width: 6)]
+        guard let darkPNG = InkExport.png(strokes: canonicalThemeStrokes, paper: .blank, theme: .dark),
+              let darkBitmap = NSBitmapImageRep(data: darkPNG),
+              let darkGridPNG = InkExport.png(strokes: [], paper: .grid, theme: .dark),
+              let darkGridBitmap = NSBitmapImageRep(data: darkGridPNG),
+              let lightGridPNG = InkExport.png(strokes: [], paper: .grid, theme: .light),
+              let lightGridBitmap = NSBitmapImageRep(data: lightGridPNG),
+              let darkDotPNG = InkExport.png(strokes: [], paper: .dotted, theme: .dark),
+              let darkDotBitmap = NSBitmapImageRep(data: darkDotPNG) else {
+            throw Failure(description: "Cannot render dark and light page themes")
+        }
+        func red(_ bitmap: NSBitmapImageRep, x: Int, y: Int) -> Double {
+            Double(bitmap.colorAt(x: x, y: y)?.usingColorSpace(.sRGB)?.redComponent ?? 0)
+        }
+        func strongestRed(_ bitmap: NSBitmapImageRep, x: Int, y: Int) -> Double {
+            max(red(bitmap, x: x, y: y), red(bitmap, x: x, y: bitmap.pixelsHigh - y - 1))
+        }
+        let darkPaperRed = red(darkBitmap, x: 900, y: 900)
+        try check(darkPaperRed < 0.2, "dark page exports a dark paper background")
+        try check(strongestRed(darkBitmap, x: 200, y: 180) > 0.75, "canonical dark pen renders light and readable on dark paper")
+        let lightPaperRed = red(lightGridBitmap, x: 45, y: 45)
+        let lightRuleRed = brightness(lightGridBitmap, x: 28, y: 45)
+        let darkRuleRed = strongestRed(darkGridBitmap, x: 28, y: 45)
+        try check(lightPaperRed - lightRuleRed > 0.25, "light grid ruling has visible contrast")
+        try check(darkRuleRed - darkPaperRed > 0.2, "dark grid ruling has visible contrast")
+        try check(strongestRed(darkDotBitmap, x: 28, y: 28) - darkPaperRed > 0.2, "dark dotted paper remains visible")
+        page.inkView.strokes = canonicalThemeStrokes
+        page.theme = .dark
+        try check(page.inkView.theme == .dark && page.paperView.theme == .dark, "shared page applies the same theme to ink and paper")
+        page.theme = .light
+        try check(page.inkView.strokes == canonicalThemeStrokes && canonicalThemeStrokes[0].colorHex == "#30343B", "switching paper themes preserves canonical ink data")
+        guard let themedPagePNG = UnifiedPageExport.png(text: "Shared dark page", rtfData: nil, strokes: canonicalThemeStrokes, paper: .grid, theme: .dark),
+              let themedPageBitmap = NSBitmapImageRep(data: themedPagePNG) else { throw Failure(description: "Cannot export themed shared page") }
+        try check(red(themedPageBitmap, x: 900, y: 900) < 0.2, "combined page PNG preserves the selected dark theme")
+        let themedPDF = PDFDocument(data: UnifiedPageExport.pdf(text: "Shared dark page", rtfData: nil, strokes: canonicalThemeStrokes, paper: .grid, theme: .dark))
+        try check(themedPDF?.string?.contains("Shared dark page") == true, "dark shared-page PDF keeps searchable text")
+        func clippedPaper(_ requested: NSRect) -> NSBitmapImageRep? {
+            guard let bitmap = NSBitmapImageRep(bitmapDataPlanes: nil, pixelsWide: 32, pixelsHigh: 32,
+                                               bitsPerSample: 8, samplesPerPixel: 4, hasAlpha: true, isPlanar: false,
+                                               colorSpaceName: .deviceRGB, bytesPerRow: 0, bitsPerPixel: 0),
+                  let graphics = NSGraphicsContext(bitmapImageRep: bitmap) else { return nil }
+            NSGraphicsContext.saveGraphicsState()
+            NSGraphicsContext.current = graphics
+            graphics.cgContext.clip(to: CGRect(x: 0, y: 0, width: 32, height: 32))
+            InkRenderer.draw(strokes: [], paper: .grid, in: requested, theme: .dark)
+            graphics.flushGraphics()
+            NSGraphicsContext.restoreGraphicsState()
+            guard let png = bitmap.representation(using: .png, properties: [:]) else { return nil }
+            return NSBitmapImageRep(data: png)
+        }
+        guard let unboundedPaper = clippedPaper(.infinite),
+              let oversizedPaper = clippedPaper(NSRect(x: -1_000_000_000, y: -1_000_000_000, width: 2_000_000_000, height: 2_000_000_000)) else {
+            throw Failure(description: "Cannot render clipped paper regressions")
+        }
+        try check(abs(red(unboundedPaper, x: 12, y: 12) - darkPaperRed) < 0.01, "infinite AppKit dirty rectangles clip to the actual bitmap (actual: \(red(unboundedPaper, x: 12, y: 12)), expected: \(darkPaperRed))")
+        try check(abs(red(oversizedPaper, x: 12, y: 12) - darkPaperRed) < 0.01, "oversized paper requests build only the visible grid")
+        var themedBody = "Default custom"
+        let canonicalText = NSMutableAttributedString(string: themedBody, attributes: [
+            .font: NSFont.systemFont(ofSize: 16), .foregroundColor: ThemeTextAttributes.color("#30343B")
+        ])
+        canonicalText.addAttribute(.foregroundColor, value: ThemeTextAttributes.color("#102040"), range: NSRange(location: 8, length: 6))
+        var themedRTF: Data? = try canonicalText.data(from: NSRange(location: 0, length: canonicalText.length), documentAttributes: [.documentType: NSAttributedString.DocumentType.rtf])
+        let originalRTF = themedRTF
+        var textCallbacks = 0
+        func themeEditor(_ theme: PageTheme) -> RichTextEditor {
+            RichTextEditor(text: Binding(get: { themedBody }, set: { themedBody = $0 }),
+                           rtfData: Binding(get: { themedRTF }, set: { themedRTF = $0 }), theme: theme,
+                           onChange: { text, data in textCallbacks += 1; themedBody = text; themedRTF = data })
+        }
+        let themeCoordinator = RichTextEditor.Coordinator(themeEditor(.dark))
+        let themeTextView = RichTextEditor.makeNativeTextView()
+        themeTextView.delegate = themeCoordinator
+        let themeScroll = NSScrollView(frame: NSRect(x: 0, y: 0, width: 640, height: 480))
+        themeScroll.documentView = themeTextView
+        window.contentView = themeScroll
+        themeCoordinator.load(text: themedBody, rtf: themedRTF, into: themeTextView)
+        let displayedCustom = themeTextView.attributedString().attribute(.foregroundColor, at: 8, effectiveRange: nil) as! NSColor
+        try check(ThemeTextAttributes.hex(displayedCustom) == PageTheme.dark.resolvedInkHex("#102040"), "dark text lifts custom ink for readability")
+        let canonicalCopy = ThemeTextAttributes.canonical(themeTextView.attributedString(), theme: .dark)
+        let restoredCustom = canonicalCopy.attribute(.foregroundColor, at: 8, effectiveRange: nil) as! NSColor
+        try check(ThemeTextAttributes.hex(restoredCustom) == "#102040", "custom rich-text ink restores its exact canonical color")
+        themeCoordinator.parent = themeEditor(.light)
+        themeCoordinator.load(text: themedBody, rtf: themedRTF, into: themeTextView)
+        themeCoordinator.parent = themeEditor(.dark)
+        themeCoordinator.load(text: themedBody, rtf: themedRTF, into: themeTextView)
+        try check(textCallbacks == 0 && themedRTF == originalRTF, "theme-only rich-text switches never write notes or change stored RTF bytes")
+        _ = window.makeFirstResponder(themeTextView)
+        themeTextView.setSelectedRange(NSRange(location: (themedBody as NSString).length, length: 0))
+        themeTextView.breakUndoCoalescing()
+        guard let themeUndo = themeTextView.undoManager else { throw Failure(description: "Themed text undo is unavailable") }
+        themeUndo.removeAllActions()
+        themeUndo.beginUndoGrouping()
+        themeTextView.insertText("!", replacementRange: themeTextView.selectedRange())
+        themeTextView.breakUndoCoalescing()
+        themeUndo.endUndoGrouping()
+        try check(themedBody.hasSuffix("!") && textCallbacks > 0, "native dark-page typing updates the canonical model")
+        guard let savedDarkRTF = themedRTF else { throw Failure(description: "Themed typing did not save rich text") }
+        let savedDarkText = try NSAttributedString(data: savedDarkRTF, options: [.documentType: NSAttributedString.DocumentType.rtf], documentAttributes: nil)
+        let savedCustom = savedDarkText.attribute(.foregroundColor, at: 8, effectiveRange: nil) as! NSColor
+        try check(ThemeTextAttributes.hex(savedCustom) == "#102040" && savedDarkText.attribute(ThemeTextAttributes.canonicalColorKey, at: 8, effectiveRange: nil) == nil,
+                  "dark-page edits persist original ink rather than the display pastel or private metadata")
+        themeUndo.undo()
+        try check(themedBody == "Default custom" && themeTextView.string == themedBody, "dark-page text undo keeps the model and view synchronized")
+        themeUndo.redo()
+        try check(themedBody == "Default custom!" && themeTextView.string == themedBody, "dark-page text redo keeps the model and view synchronized")
+        return "\(checks) native editor integration checks passed (shared text/ink page, straight lines and axis snap, instruments, grid, RTF, Unicode, formatting, undo/redo, pressure, eraser, light/dark paper and ink, unified PNG/PDF and PencilKit interchange)."
     }
 }
 #endif

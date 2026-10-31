@@ -58,15 +58,15 @@ enum MacFileActions {
         }
     }
 
-    static func exportPagePNG(_ sheet: NoteNode, paper: InkPaper, store: NotesStore) {
-        guard let data = UnifiedPageExport.png(text: sheet.body, rtfData: sheet.richTextRTF, strokes: sheet.strokes, paper: paper) else { return }
+    static func exportPagePNG(_ sheet: NoteNode, paper: InkPaper, theme: PageTheme = .light, store: NotesStore) {
+        guard let data = UnifiedPageExport.png(text: sheet.body, rtfData: sheet.richTextRTF, strokes: sheet.strokes, paper: paper, theme: theme) else { return }
         save(data, title: sheet.title + ".png", type: .png, store: store)
     }
 
-    static func exportPDF(_ sheet: NoteNode, store: NotesStore) {
+    static func exportPDF(_ sheet: NoteNode, theme: PageTheme = .light, store: NotesStore) {
         let data = UnifiedPageExport.pdf(text: sheet.body, rtfData: sheet.richTextRTF,
                                          strokes: sheet.strokes,
-                                         paper: InkPaper(rawValue: sheet.paperStyle.rawValue) ?? .dotted)
+                                         paper: InkPaper(rawValue: sheet.paperStyle.rawValue) ?? .dotted, theme: theme)
         save(data, title: sheet.title + ".pdf", type: .pdf, store: store)
     }
 
@@ -75,7 +75,12 @@ enum MacFileActions {
 
 struct NotesCommands: Commands {
     @ObservedObject var store: NotesStore
+    @ObservedObject var updater: AppUpdater
     var body: some Commands {
+        CommandGroup(after: .appInfo) {
+            Button("Check for Updates…") { updater.checkForUpdates() }
+                .disabled(updater.isConfigured && !updater.canCheckForUpdates)
+        }
         CommandGroup(replacing: .newItem) {
             Button("New Sheet…") { NotificationCenter.default.post(name: .newSheet, object: nil) }.keyboardShortcut("n")
             Button("New Workbook…") { NotificationCenter.default.post(name: .newWorkbook, object: nil) }.keyboardShortcut("n", modifiers: [.command, .shift])

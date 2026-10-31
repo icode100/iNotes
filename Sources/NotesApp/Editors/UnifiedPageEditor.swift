@@ -13,6 +13,7 @@ struct UnifiedPageEditor: NSViewRepresentable {
     var colorHex = "#314D43"
     var lineWidth: Double = 2.5
     var paper: InkPaper = .dotted
+    var theme: PageTheme = .light
     var onTextChange: ((String, Data?) -> Void)? = nil
     var onInkChange: (([InkStroke], Data?) -> Void)? = nil
     var onInputChange: ((String) -> Void)? = nil
@@ -30,9 +31,9 @@ struct UnifiedPageEditor: NSViewRepresentable {
         scroll.backgroundColor = .windowBackgroundColor
         let page = UnifiedMacPageView(frame: NSRect(origin: .zero, size: InkExport.paperSize))
         scroll.documentView = page
+        page.theme = theme
         page.textView.delegate = context.coordinator.richText
         context.coordinator.richText.load(text: text, rtf: rtfData, into: page.textView)
-        page.normalizePaperTextColors()
         configure(page, coordinator: context.coordinator, isEnabled: context.environment.isEnabled)
         return scroll
     }
@@ -41,20 +42,23 @@ struct UnifiedPageEditor: NSViewRepresentable {
         guard let page = scroll.documentView as? UnifiedMacPageView else { return }
         context.coordinator.parent = self
         context.coordinator.richText.parent = textEditor
-        if context.coordinator.richText.lastText != text || context.coordinator.richText.lastRTF != rtfData {
+        let contentChanged = context.coordinator.richText.lastText != text || context.coordinator.richText.lastRTF != rtfData
+        let themeChanged = page.theme != theme
+        page.theme = theme
+        if contentChanged || themeChanged {
             context.coordinator.richText.load(text: text, rtf: rtfData, into: page.textView)
-            page.normalizePaperTextColors()
-            page.textView.undoManager?.removeAllActions()
+            if contentChanged { page.textView.undoManager?.removeAllActions() }
         }
         configure(page, coordinator: context.coordinator, isEnabled: context.environment.isEnabled)
     }
 
     private var textEditor: RichTextEditor {
-        RichTextEditor(text: $text, rtfData: $rtfData, onChange: onTextChange)
+        RichTextEditor(text: $text, rtfData: $rtfData, theme: theme, onChange: onTextChange)
     }
 
     private func configure(_ page: UnifiedMacPageView, coordinator: Coordinator, isEnabled: Bool) {
         page.activeTool = tool
+        page.theme = theme
         page.textView.isEditable = isEnabled
         page.textView.isSelectable = isEnabled
         page.inkView.isInputEnabled = isEnabled
@@ -91,24 +95,24 @@ struct UnifiedPageEditor: NSViewRepresentable {
 
 @MainActor
 enum UnifiedPageExport {
-    static func pdf(text: String, rtfData: Data?, strokes: [InkStroke], paper: InkPaper) -> Data {
-        let page = makePage(text: text, rtfData: rtfData, strokes: strokes, paper: paper)
+    static func pdf(text: String, rtfData: Data?, strokes: [InkStroke], paper: InkPaper, theme: PageTheme = .light) -> Data {
+        let page = makePage(text: text, rtfData: rtfData, strokes: strokes, paper: paper, theme: theme)
         return page.dataWithPDF(inside: page.bounds)
     }
 
-    static func png(text: String, rtfData: Data?, strokes: [InkStroke], paper: InkPaper) -> Data? {
-        let page = makePage(text: text, rtfData: rtfData, strokes: strokes, paper: paper)
+    static func png(text: String, rtfData: Data?, strokes: [InkStroke], paper: InkPaper, theme: PageTheme = .light) -> Data? {
+        let page = makePage(text: text, rtfData: rtfData, strokes: strokes, paper: paper, theme: theme)
         guard let bitmap = page.bitmapImageRepForCachingDisplay(in: page.bounds) else { return nil }
         page.cacheDisplay(in: page.bounds, to: bitmap)
         return bitmap.representation(using: .png, properties: [:])
     }
 
-    private static func makePage(text: String, rtfData: Data?, strokes: [InkStroke], paper: InkPaper) -> UnifiedMacPageView {
+    private static func makePage(text: String, rtfData: Data?, strokes: [InkStroke], paper: InkPaper, theme: PageTheme) -> UnifiedMacPageView {
         let page = UnifiedMacPageView(frame: NSRect(origin: .zero, size: InkExport.paperSize))
-        let richText = RichTextEditor(text: .constant(text), rtfData: .constant(rtfData))
+        page.theme = theme
+        let richText = RichTextEditor(text: .constant(text), rtfData: .constant(rtfData), theme: theme)
         let coordinator = RichTextEditor.Coordinator(richText)
         coordinator.load(text: text, rtf: rtfData, into: page.textView)
-        page.normalizePaperTextColors()
         page.textView.isEditable = false
         page.textView.isSelectable = false
         page.inkView.strokes = strokes
@@ -126,6 +130,14 @@ final class UnifiedMacPageView: NSView {
     let inkView = InkDocumentView(frame: NSRect(origin: .zero, size: InkExport.paperSize))
     let textView = RichTextEditor.makeNativeTextView()
     var activeTool: InkTool = .pen
+    var theme: PageTheme = .light {
+        didSet {
+            guard theme != oldValue else { return }
+            paperView.theme = theme
+            inkView.theme = theme
+            textView.appearance = NSAppearance(named: theme == .dark ? .darkAqua : .aqua)
+        }
+    }
     var onInputChange: ((String) -> Void)?
     override var isFlipped: Bool { true }
 
@@ -140,7 +152,7 @@ final class UnifiedMacPageView: NSView {
         textView.backgroundColor = .clear
         textView.appearance = NSAppearance(named: .aqua)
         textView.usesAdaptiveColorMappingForDarkAppearance = false
-        textView.textColor = .black
+        textView.textColor = InkRenderer.color(theme.textHex)
         textView.textContainerInset = NSSize(width: 12, height: 12)
         textView.autoresizingMask = []
         textView.textContainer?.widthTracksTextView = true
@@ -193,22 +205,6 @@ final class UnifiedMacPageView: NSView {
         positionLayers()
     }
 
-    func normalizePaperTextColors() {
-        guard let storage = textView.textStorage else { return }
-        var replacements: [NSRange] = []
-        textView.effectiveAppearance.performAsCurrentDrawingAppearance {
-            storage.enumerateAttribute(.foregroundColor, in: NSRange(location: 0, length: storage.length)) { value, range, _ in
-                guard let color = value as? NSColor else { return }
-                let systemText = color.isEqual(NSColor.textColor) || color.isEqual(NSColor.labelColor) || color.isEqual(NSColor.controlTextColor)
-                let rgb = color.usingColorSpace(.deviceRGB)
-                let white = rgb.map { $0.redComponent > 0.93 && $0.greenComponent > 0.93 && $0.blueComponent > 0.93 } ?? false
-                if systemText || white { replacements.append(range) }
-            }
-        }
-        for range in replacements { storage.addAttribute(.foregroundColor, value: NSColor.black, range: range) }
-        textView.typingAttributes[.foregroundColor] = NSColor.black
-    }
-
     private func positionLayers() {
         paperView.frame = bounds
         inkView.frame = bounds
@@ -220,8 +216,11 @@ final class UnifiedMacPageView: NSView {
 @MainActor
 final class UnifiedMacPaperView: NSView {
     var paper: InkPaper = .dotted
+    var theme: PageTheme = .light {
+        didSet { if theme != oldValue { needsDisplay = true } }
+    }
     override var isFlipped: Bool { true }
     override var isOpaque: Bool { true }
-    override func draw(_ dirtyRect: NSRect) { InkRenderer.draw(strokes: [], paper: paper, in: dirtyRect) }
+    override func draw(_ dirtyRect: NSRect) { InkRenderer.draw(strokes: [], paper: paper, in: dirtyRect.intersection(bounds), theme: theme) }
 }
 #endif

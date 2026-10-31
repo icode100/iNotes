@@ -1,15 +1,15 @@
 # Build and distribution
 
-iNotes uses Apple's native UI frameworks and Swift standard libraries. There is no
-Electron runtime, embedded web browser, package manager dependency, analytics SDK,
-or bundled cloud SDK. macOS is the primary shipping target.
+iNotes uses Apple's native UI frameworks and Swift standard libraries. The one
+third-party native framework is Sparkle 2.10.1 for signed Mac updates, pinned in
+`Package.swift` and `Package.resolved`. macOS is the primary shipping target.
 
 ## Mac development
 
 Requirements:
 
 - Apple silicon Mac with macOS 14 or later.
-- Apple Swift command line tools (`xcode-select --install`) or full Xcode.
+- Full Xcode 26 or later, including its command line tools.
 - A Swift toolchain compatible with the version in `Package.swift`.
 
 From the repository root:
@@ -20,8 +20,10 @@ bash scripts/build-macos.sh
 open dist/iNotes.app
 ```
 
-Command line tools are sufficient for the macOS Swift package build. Full Xcode is
-required for iPad SDKs, simulators, signing, and device deployment.
+Command line tools can compile the Swift sources. Installer packaging requires
+Xcode's `actool` to compile `Resources/AppIcon.icon`, which contains genuine light
+and dark appearances. The build regenerates its pencil layer from the same native
+vector code as the ICNS fallback. Full Xcode also provides the iPad SDK and simulator.
 
 ## Build an app and drag-to-install DMG
 
@@ -43,7 +45,8 @@ The build script validates the property list, architecture, app signature, and D
 before publishing outputs. The verification script mounts it read-only and checks
 the packaged app and Applications shortcut.
 
-Use `VERSION=0.1.1 BUILD_NUMBER=2 bash scripts/build-macos.sh` to change the version.
+Use `VERSION=0.1.1 BUILD_NUMBER=3 bash scripts/build-macos.sh` to change the version.
+Every published update must have a larger build number than its predecessor.
 Build products stay under `dist`, module/package caches under `.build`, and the
 temporary native build scratch directory under `/private/tmp`. The scratch
 directory is removed after packaging. The script explicitly selects SwiftPM's
@@ -75,9 +78,16 @@ Supplying `NOTARY_PROFILE` uploads the DMG to Apple's notary service. No upload 
 performed by default. The script waits for acceptance, staples the ticket, and
 validates it. Apple Developer enrollment and credentials are not included.
 
+The script embeds the ARM64 Sparkle framework and its updater/installer helpers,
+preserves framework symlinks, and signs each helper before signing the framework
+and app. Unused sandbox XPC services are removed following Sparkle's documented
+procedure. The complete upstream license, including its notices, is bundled as
+`Contents/Resources/Sparkle-LICENSE`. See [update releases](UPDATES.md) for feed
+configuration, the project signing seed, and the version-tag publishing workflow.
+
 ## iPad
 
-Open `iNotes.xcodeproj` in Xcode 16 or later (Swift 6 toolchain) and select the
+Open `iNotes.xcodeproj` in Xcode 26 or later and select the
 shared `iNotes-iPad` scheme.
 The target uses the same app sources and the local `NotesCore` package, supports
 iPadOS 17 or later, and targets iPad only. Select your development team in Signing

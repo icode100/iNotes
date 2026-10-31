@@ -1,0 +1,79 @@
+{
+  "fill": {
+    "solid": "srgb:0.95000,0.98000,1.00000,1.00000"
+  },
+  "groups": [
+    {
+      "name": "Pencil",
+      "layers": [
+        {
+          "image-name": "Pencil.png",
+          "name": "Pencil",
+          "fill-specializations": [
+            {
+              "value": "automatic"
+            },
+            {
+              "appearance": "dark",
+              "value": {
+                "solid": "srgb:0.62000,0.86000,0.91000,1.00000"
+              }
+            }
+          ],
+          "glass": false
+        }
+      ],
+      "lighting": "individual",
+      "shadow": {
+        "kind": "neutral",
+        "opacity": 0.22
+      },
+      "specular": false,
+      "translucency": {
+        "enabled": false,
+        "value": 0
+      }
+    },
+    {
+      "name": "Paper",
+      "layers": [
+        {
+          "image-name": "Background.svg",
+          "name": "Paper",
+          "fill-specializations": [
+            {
+              "value": {
+                "linear-gradient": [
+                  "srgb:0.99000,1.00000,1.00000,1.00000",
+                  "srgb:0.77000,0.85000,0.89000,1.00000"
+                ]
+              }
+            },
+            {
+              "appearance": "dark",
+              "value": {
+                "linear-gradient": [
+                  "srgb:0.10000,0.16000,0.22000,1.00000",
+                  "srgb:0.02500,0.04500,0.07500,1.00000"
+                ]
+              }
+            }
+          ],
+          "glass": false
+        }
+      ],
+      "shadow": {
+        "kind": "neutral",
+        "opacity": 0
+      },
+      "specular": false,
+      "translucency": {
+        "enabled": false,
+        "value": 0
+      }
+    }
+  ],
+  "supported-platforms": {
+    "squares": "shared"
+  }
+}

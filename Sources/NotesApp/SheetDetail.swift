@@ -8,6 +8,8 @@ import AppKit
 struct SheetDetail: View {
     @EnvironmentObject private var store: NotesStore
     @EnvironmentObject private var inputDevice: InputDeviceMonitor
+    @Environment(\.colorScheme) private var colorScheme
+    @AppStorage("appearance") private var appearance = "system"
     let sheetID: UUID
     @AppStorage("inkColor") private var inkColor = "#30343B"
     @AppStorage("inkWidth") private var inkWidth = 2.5
@@ -20,6 +22,7 @@ struct SheetDetail: View {
     private var sheet: NoteNode? { store.library.node(id: sheetID) }
     private var inkTool: InkTool { InkTool(rawValue: selectedTool) ?? .pen }
     private var paper: InkPaper { InkPaper(rawValue: sheet?.paperStyle.rawValue ?? "dotted") ?? .dotted }
+    private var pageTheme: PageTheme { colorScheme == .dark ? .dark : .light }
 
     var body: some View {
         if let sheet {
@@ -52,8 +55,8 @@ struct SheetDetail: View {
                             Button("Export text…") { exportText(sheet) }
                             #if os(macOS)
                             Button("Export rich text…") { MacFileActions.exportRichText(sheet, store: store) }
-                            Button("Export sheet as PDF…") { MacFileActions.exportPDF(sheet, store: store) }
-                            Button("Export page as PNG…") { MacFileActions.exportPagePNG(sheet, paper: paper, store: store) }
+                            Button("Export sheet as PDF…") { MacFileActions.exportPDF(sheet, theme: pageTheme, store: store) }
+                            Button("Export page as PNG…") { MacFileActions.exportPagePNG(sheet, paper: paper, theme: pageTheme, store: store) }
                             #endif
                             Divider()
                             if !sheet.isTrashed {
@@ -105,7 +108,7 @@ struct SheetDetail: View {
                                   rtfData: store.binding(sheet.id, \.richTextRTF, fallback: nil),
                                   strokes: store.binding(sheet.id, \.strokes, fallback: []),
                                   pencilKitData: store.binding(sheet.id, \.pencilKitData, fallback: nil),
-                                  tool: inkTool, colorHex: inkColor, lineWidth: inkWidth, paper: paper,
+                                  tool: inkTool, colorHex: inkColor, lineWidth: inkWidth, paper: paper, theme: pageTheme,
                                   onTextChange: { text, data in store.update(sheet.id) { $0.body = text; $0.richTextRTF = data } },
                                   onInkChange: { strokes, data in store.update(sheet.id) { $0.strokes = strokes; $0.pencilKitData = data } },
                                   onInputChange: { inputDevice.report($0) })
@@ -192,9 +195,9 @@ struct SheetDetail: View {
         HStack(spacing: 9) {
             ForEach(["#30343B", "#314D43", "#3869B2", "#B14D55", "#E2B84D"], id: \.self) { hex in
                 Button { inkColor = hex } label: {
-                    Circle().fill(Color(hex: hex)).frame(width: 15, height: 15)
+                    Circle().fill(Color(hex: pageTheme.resolvedInkHex(hex))).frame(width: 15, height: 15)
                         .padding(3).overlay(Circle().stroke(inkColor == hex ? Color.secondary : .clear, lineWidth: 1))
-                }.buttonStyle(.plain).accessibilityLabel("Ink \(hex)")
+                }.buttonStyle(.plain).accessibilityLabel(inkColorName(hex))
             }
             Menu {
                 Button("Fine") { inkWidth = 1.5 }
@@ -207,8 +210,26 @@ struct SheetDetail: View {
                         Label(style.rawValue.capitalized + " paper", systemImage: style == sheet?.paperStyle ? "checkmark" : "square")
                     }
                 }
+                Divider()
+                Text("Appearance")
+                ForEach(["system", "light", "dark"], id: \.self) { choice in
+                    Button { appearance = choice } label: {
+                        Label(choice == "system" ? "Match system" : choice.capitalized,
+                              systemImage: appearance == choice ? "checkmark" : "circle.lefthalf.filled")
+                    }
+                }
             } label: { Image(systemName: "slider.horizontal.3") }
-            .help("Stroke width and page paper").accessibilityLabel("Stroke width and page paper")
+            .help("Stroke width, paper style, and appearance").accessibilityLabel("Paper and appearance")
+        }
+    }
+
+    private func inkColorName(_ hex: String) -> String {
+        switch hex {
+        case "#30343B": return pageTheme == .dark ? "Light graphite ink" : "Graphite ink"
+        case "#314D43": return "Sage ink"
+        case "#3869B2": return "Blue ink"
+        case "#B14D55": return "Rose ink"
+        default: return "Gold ink"
         }
     }
 
