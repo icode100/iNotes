@@ -1,0 +1,27 @@
+name: Native checks
+on:
+  push:
+  pull_request:
+permissions:
+  contents: read
+jobs:
+  macos:
+    runs-on: macos-15
+    steps:
+      - uses: actions/checkout@v4
+      - name: Toolchain
+        run: swift --version
+      - name: Unit and integration tests
+        run: bash scripts/test.sh
+      - name: Build and package Apple silicon app
+        run: bash scripts/build-macos.sh
+      - name: Verify disk image
+        run: bash scripts/verify-macos.sh
+      - name: Compile iPad simulator app
+        run: xcodebuild -project iNotes.xcodeproj -scheme iNotes-iPad -sdk iphonesimulator -destination 'generic/platform=iOS Simulator' -derivedDataPath "$RUNNER_TEMP/inotes-ipad-build" CODE_SIGNING_ALLOWED=NO build
+      - uses: actions/upload-artifact@v4
+        with:
+          name: iNotes-arm64-development
+          path: |
+            dist/*.dmg
+            dist/*.sha256

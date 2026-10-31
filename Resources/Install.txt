@@ -1,0 +1,14 @@
+iNotes for Apple silicon Mac
+
+Drag iNotes.app onto the Applications shortcut, then launch iNotes from Applications.
+Requires macOS 14 or later on an Apple silicon Mac.
+
+This development build is signed locally. Public distribution requires an Apple
+Developer ID signature and Apple notarization; a local signature does not establish
+the publisher's identity. Review source and build instructions in the repository.
+
+Keep your .inotes exports in a second location for backup. Google Drive storage
+requires a Drive folder or a Files provider available on your device.
+
+iNotes is open source under the MIT License. It is an independent application and
+is not affiliated with Microsoft or Google. Microsoft OneNote files are not imported.

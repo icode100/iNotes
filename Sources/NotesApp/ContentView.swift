@@ -1,0 +1,351 @@
+import SwiftUI
+import UniformTypeIdentifiers
+import NotesCore
+
+// Disambiguate the classic property wrapper from newer SDK State macros.
+typealias ViewState<Value> = SwiftUI.State<Value>
+
+extension NoteKind {
+    var symbol: String {
+        switch self { case .workbook: "books.vertical"; case .chapter: "folder"; case .topic: "folder.badge.plus"; case .sheet: "doc.text" }
+    }
+}
+
+struct NameRequest: Identifiable {
+    let id = UUID()
+    var kind: NoteKind
+    var parent: UUID?
+    var renameID: UUID?
+    var title = ""
+}
+
+struct BackupDocument: FileDocument {
+    static var readableContentTypes: [UTType] { [.iNotesArchive, .json] }
+    static var writableContentTypes: [UTType] { [.iNotesArchive, .json, .plainText, .data] }
+    var data: Data
+    init(data: Data = Data()) { self.data = data }
+    init(configuration: ReadConfiguration) throws { data = configuration.file.regularFileContents ?? Data() }
+    func fileWrapper(configuration: WriteConfiguration) throws -> FileWrapper { FileWrapper(regularFileWithContents: data) }
+}
+
+extension UTType { static var iNotesArchive: UTType { UTType(exportedAs: "io.inotes.archive", conformingTo: .json) } }
+extension Notification.Name {
+    static let newSheet = Notification.Name("iNotes.newSheet")
+    static let newWorkbook = Notification.Name("iNotes.newWorkbook")
+    static let focusSearch = Notification.Name("iNotes.focusSearch")
+}
+
+struct ContentView: View {
+    @EnvironmentObject private var store: NotesStore
+    @ViewState private var nameRequest: NameRequest?
+    @ViewState private var showImporter = false
+    @ViewState private var showExporter = false
+    @ViewState private var exportDocument = BackupDocument()
+    @ViewState private var showSettings = false
+    @ViewState private var showRecovery = false
+    @ViewState private var showEmptyTrash = false
+    @ViewState private var columnVisibility: NavigationSplitViewVisibility = .all
+    @FocusState private var searchFocused: Bool
+
+    var body: some View {
+        NavigationSplitView(columnVisibility: $columnVisibility) {
+            sidebar.navigationSplitViewColumnWidth(min: 190, ideal: 220, max: 310)
+        } content: {
+            sheetList.navigationSplitViewColumnWidth(min: 210, ideal: 260, max: 360)
+        } detail: {
+            if let sheet = store.selectedSheet {
+                SheetDetail(sheetID: sheet.id).id(sheet.id)
+            } else {
+                ContentUnavailableView {
+                    Label("Room for a new idea", systemImage: "square.and.pencil")
+                } description: {
+                    Text("Choose a sheet, or make a new one in a chapter or topic.")
+                } actions: {
+                    Button("New sheet", action: newSheet).buttonStyle(.borderedProminent)
+                }
+            }
+        }
+        .tint(Color.accentColor)
+        .toolbar {
+            ToolbarItemGroup(placement: .primaryAction) {
+                Menu {
+                    Button("New sheet", systemImage: "doc.badge.plus", action: newSheet)
+                    Button("New workbook", systemImage: "books.vertical") { nameRequest = NameRequest(kind: .workbook) }
+                    if let folder = store.folders.first(where: { $0.id == store.folderID }) {
+                        Button(folder.kind == .workbook ? "New chapter" : "New topic", systemImage: "folder.badge.plus") {
+                            nameRequest = NameRequest(kind: folder.kind == .workbook ? .chapter : .topic, parent: folder.id)
+                        }
+                    }
+                } label: { Label("Create", systemImage: "plus") }
+                .help("Create a sheet or notebook folder")
+                Menu {
+                    #if os(macOS)
+                    Button(store.driveFolder == nil ? "Connect Google Drive folder…" : "Change backup folder…") { MacFileActions.chooseDriveFolder(store) }
+                    if store.driveFolder != nil {
+                        Button("Back up to Drive now") { store.backupToDrive() }
+                        Button("Disconnect backup folder") { store.disconnectDrive() }
+                    }
+                    Divider()
+                    #endif
+                    Button("Export library backup…") { exportLibrary() }
+                    Button("Import library backup…") { showImporter = true }
+                    Divider()
+                    if store.recoveryAvailable {
+                        Button("Recover previous local version…") { showRecovery = true }
+                    }
+                    Button("About storage & backups") { showSettings = true }
+                } label: {
+                    Label("Backups", systemImage: store.driveFolder == nil ? "externaldrive" : "externaldrive.badge.checkmark")
+                }
+                .help("Library backups and Google Drive")
+            }
+        }
+        .sheet(item: $nameRequest) { request in
+            NameDialog(request: request) { title in
+                if let id = request.renameID { store.rename(id, to: title) }
+                else { store.create(request.kind, title: title, parent: request.parent) }
+            }
+        }
+        .sheet(isPresented: $showSettings) { StorageInfoView() }
+        .confirmationDialog("Restore the previous local version?", isPresented: $showRecovery, titleVisibility: .visible) {
+            Button("Restore Previous Version") { store.recoverPreviousVersion() }
+        } message: { Text("The damaged library will be preserved in a separate file before the previous version is restored.") }
+        .confirmationDialog("Permanently empty Trash?", isPresented: $showEmptyTrash, titleVisibility: .visible) {
+            Button("Empty Trash", role: .destructive) { store.emptyTrash() }
+        } message: { Text("Deleted folders, sheets, and their attachments will be removed from this library. Keep an exported backup if you might need them.") }
+        .alert("iNotes needs your attention", isPresented: Binding(get: { store.errorMessage != nil }, set: { if !$0 { store.errorMessage = nil } })) {
+            Button("OK") { store.errorMessage = nil }
+        } message: { Text(store.errorMessage ?? "") }
+        .fileImporter(isPresented: $showImporter, allowedContentTypes: [.iNotesArchive, .json], allowsMultipleSelection: false) { result in
+            do {
+                guard let url = try result.get().first else { return }
+                let access = url.startAccessingSecurityScopedResource()
+                defer { if access { url.stopAccessingSecurityScopedResource() } }
+                store.importArchive(try LibraryArchive.read(from: url))
+            } catch { store.errorMessage = error.localizedDescription }
+        }
+        .fileExporter(isPresented: $showExporter, document: exportDocument, contentType: .iNotesArchive, defaultFilename: "iNotes Backup") { result in
+            if case .failure(let error) = result { store.errorMessage = error.localizedDescription }
+        }
+        .onReceive(NotificationCenter.default.publisher(for: .newSheet)) { _ in newSheet() }
+        .onReceive(NotificationCenter.default.publisher(for: .newWorkbook)) { _ in nameRequest = NameRequest(kind: .workbook) }
+        .onReceive(NotificationCenter.default.publisher(for: .focusSearch)) { _ in searchFocused = true }
+    }
+
+    private var sidebar: some View {
+        VStack(spacing: 0) {
+            List {
+                Section {
+                    ForEach(LibraryFilter.allCases, id: \.self) { filter in
+                        Button {
+                            store.folderID = nil; store.filter = filter; store.search = ""
+                            store.sheetID = store.visibleSheets.first?.id
+                        } label: {
+                            HStack {
+                                Label(filter.rawValue, systemImage: filter == .all ? "square.stack" : filter == .favorites ? "star" : "trash")
+                                Spacer()
+                                if store.folderID == nil && store.filter == filter { Circle().fill(Color.accentColor).frame(width: 6, height: 6) }
+                            }.contentShape(Rectangle())
+                        }.buttonStyle(.plain).padding(.vertical, 4)
+                    }
+                }
+                Section("WORKBOOKS") {
+                    ForEach(store.children(nil)) { root in folderRow(root) }
+                    Button { nameRequest = NameRequest(kind: .workbook) } label: { Label("New workbook", systemImage: "plus") }
+                        .buttonStyle(.plain).foregroundStyle(.secondary).padding(.vertical, 5)
+                }
+                if store.filter == .trash {
+                    Section("Deleted folders") {
+                        ForEach(store.library.nodes.filter { $0.isTrashed && $0.kind != .sheet && (parentIsVisible($0)) }) { node in
+                            HStack {
+                                Label(node.title, systemImage: node.kind.symbol)
+                                Spacer()
+                                Button("Restore") { store.restore(node.id) }.buttonStyle(.borderless)
+                            }
+                        }
+                    }
+                    Button("Empty Trash…", role: .destructive) { showEmptyTrash = true }
+                        .disabled(!store.library.nodes.contains { $0.isTrashed })
+                }
+            }.listStyle(.sidebar)
+            VStack(alignment: .leading, spacing: 5) {
+                Label(store.saveStatus, systemImage: store.dirty ? "circle.dotted" : "checkmark.circle")
+                    .font(.caption).foregroundStyle(store.dirty ? Color.orange : Color.secondary)
+                if let last = store.lastBackup {
+                    Text("Drive backup \(last, style: .relative) ago").font(.caption2).foregroundStyle(.secondary)
+                }
+                Text("iNotes · local first").font(.caption2).foregroundStyle(.tertiary)
+            }.frame(maxWidth: .infinity, alignment: .leading).padding(16)
+        }.navigationTitle("iNotes")
+    }
+
+    private func parentIsVisible(_ node: NoteNode) -> Bool {
+        guard let parent = store.library.node(id: node.parentID ?? UUID()) else { return true }
+        return !parent.isTrashed
+    }
+
+    private func folderRow(_ node: NoteNode) -> some View {
+        FolderTreeRow(node: node, choose: { store.chooseFolder($0) }, request: { nameRequest = $0 })
+    }
+
+    private var sheetList: some View {
+        VStack(spacing: 0) {
+            HStack {
+                Image(systemName: "magnifyingglass").foregroundStyle(.secondary)
+                TextField("Search all notes", text: $store.search).textFieldStyle(.plain).focused($searchFocused)
+                    .accessibilityLabel("Search all notes")
+                if !store.search.isEmpty { Button { store.search = "" } label: { Image(systemName: "xmark.circle.fill") }.buttonStyle(.plain).foregroundStyle(.secondary) }
+            }.padding(12).background(.quaternary.opacity(0.35))
+            List(selection: $store.sheetID) {
+                ForEach(store.visibleSheets) { sheet in
+                    VStack(alignment: .leading, spacing: 7) {
+                        HStack(spacing: 6) {
+                            Text(sheet.title).font(.headline).lineLimit(2)
+                            if sheet.isFavorite { Image(systemName: "star.fill").font(.caption2).foregroundStyle(.orange) }
+                        }
+                        Text(sheet.body.isEmpty ? (sheet.strokes.isEmpty && sheet.pencilKitData == nil ? "Empty sheet" : "Handwritten notes") : sheet.body.replacingOccurrences(of: "\n", with: " "))
+                            .font(.caption).foregroundStyle(.secondary).lineLimit(2)
+                        Text(store.breadcrumb(sheet.parentID)).font(.caption2).foregroundStyle(.tertiary).lineLimit(1)
+                    }.padding(.vertical, 8).tag(sheet.id)
+                    .contextMenu {
+                        if sheet.isTrashed { Button("Restore sheet") { store.restore(sheet.id) } }
+                        else {
+                            Button(sheet.isFavorite ? "Remove from favorites" : "Add to favorites") { store.update(sheet.id) { $0.isFavorite.toggle() } }
+                            Button("Rename…") { nameRequest = NameRequest(kind: .sheet, renameID: sheet.id, title: sheet.title) }
+                            Button("Duplicate") { store.duplicate(sheet.id) }
+                            MoveMenu(node: sheet)
+                            Divider()
+                            Button("Move to Trash", role: .destructive) { store.trash(sheet.id) }
+                        }
+                    }
+                }
+            }.listStyle(.inset)
+            if store.visibleSheets.isEmpty {
+                Text(store.filter == .trash ? "Trash is empty" : store.search.isEmpty ? "No sheets here yet" : "No matching notes")
+                    .font(.callout).foregroundStyle(.secondary).padding()
+            }
+            HStack {
+                Text("\(store.visibleSheets.count) sheets").font(.caption).foregroundStyle(.secondary)
+                Spacer()
+                if store.filter != .trash { Button(action: newSheet) { Label("New sheet", systemImage: "square.and.pencil") }.labelStyle(.iconOnly).buttonStyle(.plain).help("New sheet (⌘N)") }
+            }.padding(12)
+        }
+        .navigationTitle(store.search.isEmpty ? (store.library.node(id: store.folderID ?? UUID())?.title ?? store.filter.rawValue) : "Search results")
+    }
+
+    private func newSheet() {
+        let current = store.folders.first { $0.id == store.folderID }
+        let target = (current?.kind == .chapter || current?.kind == .topic) ? current?.id
+            : store.folders.first(where: { $0.kind == .chapter && (current == nil || $0.parentID == current?.id) })?.id
+        if let target { nameRequest = NameRequest(kind: .sheet, parent: target) }
+        else if let workbook = current?.kind == .workbook ? current : store.folders.first(where: { $0.kind == .workbook }) {
+            nameRequest = NameRequest(kind: .chapter, parent: workbook.id)
+        } else { nameRequest = NameRequest(kind: .workbook) }
+    }
+
+    private func exportLibrary() {
+        do { exportDocument = BackupDocument(data: try store.archiveData()); showExporter = true }
+        catch { store.errorMessage = error.localizedDescription }
+    }
+}
+
+struct FolderTreeRow: View {
+    @EnvironmentObject private var store: NotesStore
+    var node: NoteNode
+    var choose: (UUID) -> Void
+    var request: (NameRequest) -> Void
+    @ViewState private var expanded = true
+
+    var body: some View {
+        DisclosureGroup(isExpanded: $expanded) {
+            ForEach(store.children(node.id)) { child in
+                FolderTreeRow(node: child, choose: choose, request: request)
+            }
+        } label: {
+            Button { choose(node.id) } label: {
+                Label(node.title, systemImage: node.kind.symbol)
+                    .fontWeight(store.folderID == node.id ? .semibold : .regular)
+                    .foregroundStyle(store.folderID == node.id ? Color.accentColor : Color.primary)
+                    .frame(maxWidth: .infinity, alignment: .leading).contentShape(Rectangle())
+            }.buttonStyle(.plain).padding(.vertical, 4)
+            .contextMenu {
+                Button(node.kind == .workbook ? "New chapter…" : "New topic…") { request(NameRequest(kind: node.kind == .workbook ? .chapter : .topic, parent: node.id)) }
+                if node.kind != .workbook { Button("New sheet…") { request(NameRequest(kind: .sheet, parent: node.id)) } }
+                Divider()
+                Button("Rename…") { request(NameRequest(kind: node.kind, renameID: node.id, title: node.title)) }
+                MoveMenu(node: node)
+                Divider()
+                Button("Move to Trash", role: .destructive) { store.trash(node.id) }
+            }
+        }
+    }
+}
+
+struct MoveMenu: View {
+    @EnvironmentObject private var store: NotesStore
+    let node: NoteNode
+    private var destinations: [NoteNode] {
+        store.folders.filter { destination in
+            destination.id != node.parentID && !store.isDescendant(destination.id, of: node.id) &&
+            (node.kind == .chapter ? destination.kind == .workbook : (node.kind == .sheet || node.kind == .topic) && destination.kind != .workbook)
+        }
+    }
+    var body: some View {
+        if node.kind != .workbook {
+            Menu("Move to") {
+                ForEach(destinations) { folder in
+                    Button(store.breadcrumb(folder.id)) { store.move(node.id, to: folder.id) }
+                }
+                if destinations.isEmpty { Text("No other destinations") }
+            }
+        }
+    }
+}
+
+struct NameDialog: View {
+    @Environment(\.dismiss) private var dismiss
+    @ViewState var request: NameRequest
+    var completion: (String) -> Void
+    @FocusState private var focused: Bool
+    var body: some View {
+        VStack(alignment: .leading, spacing: 20) {
+            Label(request.renameID == nil ? "New \(request.kind.rawValue)" : "Rename \(request.kind.rawValue)", systemImage: request.kind.symbol)
+                .font(.title2.weight(.semibold))
+            TextField("Name", text: $request.title).textFieldStyle(.roundedBorder).focused($focused)
+                .onSubmit { submit() }
+            HStack {
+                Spacer()
+                Button("Cancel") { dismiss() }.keyboardShortcut(.cancelAction)
+                Button(request.renameID == nil ? "Create" : "Rename", action: submit)
+                    .keyboardShortcut(.defaultAction).disabled(request.title.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty || request.title.count > 256)
+            }
+        }.padding(28).frame(minWidth: 340).onAppear { focused = true }
+    }
+    private func submit() {
+        let title = request.title.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !title.isEmpty, title.count <= 256 else { return }
+        completion(title); dismiss()
+    }
+}
+
+struct StorageInfoView: View {
+    @EnvironmentObject private var store: NotesStore
+    @Environment(\.dismiss) private var dismiss
+    var body: some View {
+        VStack(alignment: .leading, spacing: 18) {
+            Label("Your notes, close to home", systemImage: "externaldrive.badge.checkmark").font(.title2.weight(.semibold))
+            Text("iNotes saves automatically on this device. Local saves keep a previous version for recovery. Export a library backup to keep an independent copy.")
+            Text("Google Drive").font(.headline)
+            #if os(macOS)
+            Text("Install Google Drive for desktop, then connect a folder inside My Drive. iNotes writes a new backup after changes, at most once per minute, and whenever you choose Back up now. Drive handles the upload. Backups are never removed automatically.")
+            Text("Connected folder: \(store.driveFolder?.lastPathComponent ?? "None")").font(.callout).foregroundStyle(.secondary)
+            #else
+            Text("Export a library backup and choose Google Drive in Files. Install the Google Drive app and enable its Files location first.")
+            #endif
+            Text("To transfer notes between devices, import an .inotes backup. Import adds a separate copy with new identifiers. Backups do not merge concurrent edits automatically.").font(.callout)
+            Text("Attachments are embedded in the portable archive. The library limit is 64 MiB; individual attachments are limited to 10 MiB. Text and ink share one page. Rich text, paper style, portable pen paths, and native PencilKit data are preserved; advanced PencilKit tools can look different on Mac.").font(.caption).foregroundStyle(.secondary)
+            Text("iNotes 0.1 · Open source under the MIT license").font(.caption).foregroundStyle(.secondary)
+            HStack { Spacer(); Button("Done") { dismiss() }.keyboardShortcut(.defaultAction) }
+        }.padding(28).frame(maxWidth: 520)
+    }
+}

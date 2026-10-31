@@ -1,0 +1,10 @@
+.build/
+.build-core/
+.swiftpm/
+dist/
+.DS_Store
+*.xcuserstate
+xcuserdata/
+.release-work/
+TestResults/
+*.inotes

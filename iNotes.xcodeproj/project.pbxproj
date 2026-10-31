@@ -1,0 +1,159 @@
+// !$*UTF8*$!
+{
+	archiveVersion = 1;
+	classes = {};
+	objectVersion = 60;
+	objects = {
+
+/* Begin PBXBuildFile section */
+		A10000000000000000000001 /* iNotesApp.swift in Sources */ = {isa = PBXBuildFile; fileRef = A20000000000000000000001 /* iNotesApp.swift */; };
+		A10000000000000000000002 /* NotesStore.swift in Sources */ = {isa = PBXBuildFile; fileRef = A20000000000000000000002 /* NotesStore.swift */; };
+		A10000000000000000000003 /* ContentView.swift in Sources */ = {isa = PBXBuildFile; fileRef = A20000000000000000000003 /* ContentView.swift */; };
+		A10000000000000000000004 /* RichTextEditor.swift in Sources */ = {isa = PBXBuildFile; fileRef = A20000000000000000000004 /* RichTextEditor.swift */; };
+		A10000000000000000000005 /* InkEditor.swift in Sources */ = {isa = PBXBuildFile; fileRef = A20000000000000000000005 /* InkEditor.swift */; };
+		A10000000000000000000006 /* PencilEditor.swift in Sources */ = {isa = PBXBuildFile; fileRef = A20000000000000000000006 /* PencilEditor.swift */; };
+		A10000000000000000000007 /* NotesCore in Frameworks */ = {isa = PBXBuildFile; productRef = A90000000000000000000001 /* NotesCore */; };
+		A10000000000000000000009 /* SheetDetail.swift in Sources */ = {isa = PBXBuildFile; fileRef = A20000000000000000000009 /* SheetDetail.swift */; };
+		A1000000000000000000000A /* MacFileActions.swift in Sources */ = {isa = PBXBuildFile; fileRef = A2000000000000000000000A /* MacFileActions.swift */; };
+		A1000000000000000000000B /* EditorDiagnostics.swift in Sources */ = {isa = PBXBuildFile; fileRef = A2000000000000000000000B /* EditorDiagnostics.swift */; };
+		A1000000000000000000000C /* InputDeviceMonitor.swift in Sources */ = {isa = PBXBuildFile; fileRef = A2000000000000000000000C /* InputDeviceMonitor.swift */; };
+		A1000000000000000000000D /* UnifiedPageEditor+iOS.swift in Sources */ = {isa = PBXBuildFile; fileRef = A2000000000000000000000D /* UnifiedPageEditor+iOS.swift */; };
+		A1000000000000000000000E /* UnifiedPageEditor.swift in Sources */ = {isa = PBXBuildFile; fileRef = A2000000000000000000000E /* UnifiedPageEditor.swift */; };
+/* End PBXBuildFile section */
+
+/* Begin PBXFileReference section */
+		A20000000000000000000001 /* iNotesApp.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = iNotesApp.swift; sourceTree = "<group>"; };
+		A20000000000000000000002 /* NotesStore.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = NotesStore.swift; sourceTree = "<group>"; };
+		A20000000000000000000003 /* ContentView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ContentView.swift; sourceTree = "<group>"; };
+		A20000000000000000000004 /* RichTextEditor.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = RichTextEditor.swift; sourceTree = "<group>"; };
+		A20000000000000000000005 /* InkEditor.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = InkEditor.swift; sourceTree = "<group>"; };
+		A20000000000000000000006 /* PencilEditor.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = PencilEditor.swift; sourceTree = "<group>"; };
+		A20000000000000000000007 /* iNotes.app */ = {isa = PBXFileReference; explicitFileType = wrapper.application; includeInIndex = 0; path = iNotes.app; sourceTree = BUILT_PRODUCTS_DIR; };
+		A20000000000000000000008 /* iPad-Info.plist */ = {isa = PBXFileReference; lastKnownFileType = text.plist.xml; path = "Resources/iPad-Info.plist"; sourceTree = SOURCE_ROOT; };
+		A20000000000000000000009 /* SheetDetail.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SheetDetail.swift; sourceTree = "<group>"; };
+		A2000000000000000000000A /* MacFileActions.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = MacFileActions.swift; sourceTree = "<group>"; };
+		A2000000000000000000000B /* EditorDiagnostics.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = EditorDiagnostics.swift; sourceTree = "<group>"; };
+		A2000000000000000000000C /* InputDeviceMonitor.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = InputDeviceMonitor.swift; sourceTree = "<group>"; };
+		A2000000000000000000000D /* UnifiedPageEditor+iOS.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = "UnifiedPageEditor+iOS.swift"; sourceTree = "<group>"; };
+		A2000000000000000000000E /* UnifiedPageEditor.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = UnifiedPageEditor.swift; sourceTree = "<group>"; };
+/* End PBXFileReference section */
+
+/* Begin PBXFrameworksBuildPhase section */
+		A30000000000000000000001 /* Frameworks */ = {
+			isa = PBXFrameworksBuildPhase;
+			buildActionMask = 2147483647;
+			files = (A10000000000000000000007 /* NotesCore in Frameworks */);
+			runOnlyForDeploymentPostprocessing = 0;
+		};
+/* End PBXFrameworksBuildPhase section */
+
+/* Begin PBXGroup section */
+		A40000000000000000000001 = {
+			isa = PBXGroup;
+			children = (A40000000000000000000002 /* NotesApp */, A20000000000000000000008 /* iPad-Info.plist */, A40000000000000000000004 /* Products */);
+			sourceTree = "<group>";
+		};
+		A40000000000000000000002 /* NotesApp */ = {
+			isa = PBXGroup;
+			children = (A20000000000000000000001 /* iNotesApp.swift */, A20000000000000000000002 /* NotesStore.swift */, A20000000000000000000003 /* ContentView.swift */, A20000000000000000000009 /* SheetDetail.swift */, A2000000000000000000000A /* MacFileActions.swift */, A2000000000000000000000C /* InputDeviceMonitor.swift */, A40000000000000000000003 /* Editors */);
+			path = Sources/NotesApp;
+			sourceTree = "<group>";
+		};
+		A40000000000000000000003 /* Editors */ = {
+			isa = PBXGroup;
+			children = (A20000000000000000000004 /* RichTextEditor.swift */, A20000000000000000000005 /* InkEditor.swift */, A20000000000000000000006 /* PencilEditor.swift */, A2000000000000000000000B /* EditorDiagnostics.swift */, A2000000000000000000000D /* UnifiedPageEditor+iOS.swift */, A2000000000000000000000E /* UnifiedPageEditor.swift */);
+			path = Editors;
+			sourceTree = "<group>";
+		};
+		A40000000000000000000004 /* Products */ = {
+			isa = PBXGroup;
+			children = (A20000000000000000000007 /* iNotes.app */);
+			name = Products;
+			sourceTree = "<group>";
+		};
+/* End PBXGroup section */
+
+/* Begin PBXNativeTarget section */
+		A50000000000000000000001 /* iNotes-iPad */ = {
+			isa = PBXNativeTarget;
+			buildConfigurationList = A80000000000000000000002 /* Build configuration list for PBXNativeTarget "iNotes-iPad" */;
+			buildPhases = (A60000000000000000000001 /* Sources */, A30000000000000000000001 /* Frameworks */, A60000000000000000000002 /* Resources */);
+			buildRules = ();
+			dependencies = ();
+			name = "iNotes-iPad";
+			packageProductDependencies = (A90000000000000000000001 /* NotesCore */);
+			productName = iNotes;
+			productReference = A20000000000000000000007 /* iNotes.app */;
+			productType = "com.apple.product-type.application";
+		};
+/* End PBXNativeTarget section */
+
+/* Begin PBXProject section */
+		A50000000000000000000002 /* Project object */ = {
+			isa = PBXProject;
+			attributes = {BuildIndependentTargetsInParallel = 1; LastUpgradeCheck = 1600; TargetAttributes = {A50000000000000000000001 = {CreatedOnToolsVersion = 16.0; }; }; };
+			buildConfigurationList = A80000000000000000000001 /* Build configuration list for PBXProject "iNotes" */;
+			compatibilityVersion = "Xcode 15.0";
+			developmentRegion = en;
+			hasScannedForEncodings = 0;
+			knownRegions = (en, Base);
+			mainGroup = A40000000000000000000001;
+			packageReferences = (A90000000000000000000002 /* XCLocalSwiftPackageReference "." */);
+			productRefGroup = A40000000000000000000004 /* Products */;
+			projectDirPath = "";
+			projectRoot = "";
+			targets = (A50000000000000000000001 /* iNotes-iPad */);
+		};
+/* End PBXProject section */
+
+/* Begin PBXResourcesBuildPhase section */
+		A60000000000000000000002 /* Resources */ = {isa = PBXResourcesBuildPhase; buildActionMask = 2147483647; files = (); runOnlyForDeploymentPostprocessing = 0; };
+/* End PBXResourcesBuildPhase section */
+
+/* Begin PBXSourcesBuildPhase section */
+		A60000000000000000000001 /* Sources */ = {
+			isa = PBXSourcesBuildPhase;
+			buildActionMask = 2147483647;
+			files = (A10000000000000000000001 /* iNotesApp.swift in Sources */, A10000000000000000000002 /* NotesStore.swift in Sources */, A10000000000000000000003 /* ContentView.swift in Sources */, A10000000000000000000009 /* SheetDetail.swift in Sources */, A1000000000000000000000A /* MacFileActions.swift in Sources */, A1000000000000000000000C /* InputDeviceMonitor.swift in Sources */, A10000000000000000000004 /* RichTextEditor.swift in Sources */, A10000000000000000000005 /* InkEditor.swift in Sources */, A10000000000000000000006 /* PencilEditor.swift in Sources */, A1000000000000000000000B /* EditorDiagnostics.swift in Sources */, A1000000000000000000000D /* UnifiedPageEditor+iOS.swift in Sources */, A1000000000000000000000E /* UnifiedPageEditor.swift in Sources */);
+			runOnlyForDeploymentPostprocessing = 0;
+		};
+/* End PBXSourcesBuildPhase section */
+
+/* Begin XCBuildConfiguration section */
+		A70000000000000000000001 /* Debug */ = {
+			isa = XCBuildConfiguration;
+			buildSettings = {CLANG_ENABLE_MODULES = YES; DEBUG_INFORMATION_FORMAT = dwarf; ENABLE_TESTABILITY = YES; GCC_OPTIMIZATION_LEVEL = 0; IPHONEOS_DEPLOYMENT_TARGET = 17.0; SDKROOT = iphoneos; SWIFT_ACTIVE_COMPILATION_CONDITIONS = DEBUG; SWIFT_OPTIMIZATION_LEVEL = "-Onone"; SWIFT_VERSION = 5.0; };
+			name = Debug;
+		};
+		A70000000000000000000002 /* Release */ = {
+			isa = XCBuildConfiguration;
+			buildSettings = {CLANG_ENABLE_MODULES = YES; DEBUG_INFORMATION_FORMAT = "dwarf-with-dsym"; IPHONEOS_DEPLOYMENT_TARGET = 17.0; SDKROOT = iphoneos; SWIFT_COMPILATION_MODE = wholemodule; SWIFT_OPTIMIZATION_LEVEL = "-O"; SWIFT_VERSION = 5.0; VALIDATE_PRODUCT = YES; };
+			name = Release;
+		};
+		A70000000000000000000003 /* Debug */ = {
+			isa = XCBuildConfiguration;
+			buildSettings = {ARCHS = "$(ARCHS_STANDARD)"; CODE_SIGN_STYLE = Automatic; CURRENT_PROJECT_VERSION = 1; GENERATE_INFOPLIST_FILE = YES; INFOPLIST_FILE = "Resources/iPad-Info.plist"; INFOPLIST_KEY_CFBundleDisplayName = iNotes; INFOPLIST_KEY_UIApplicationSceneManifest_Generation = YES; INFOPLIST_KEY_UILaunchScreen_Generation = YES; INFOPLIST_KEY_UISupportedInterfaceOrientations_iPad = "UIInterfaceOrientationPortrait UIInterfaceOrientationPortraitUpsideDown UIInterfaceOrientationLandscapeLeft UIInterfaceOrientationLandscapeRight"; LD_RUNPATH_SEARCH_PATHS = ("$(inherited)", "@executable_path/Frameworks"); MARKETING_VERSION = 0.1.0; PRODUCT_BUNDLE_IDENTIFIER = io.inotes.app; PRODUCT_NAME = iNotes; SUPPORTED_PLATFORMS = "iphoneos iphonesimulator"; SUPPORTS_MACCATALYST = NO; SUPPORTS_MAC_DESIGNED_FOR_IPHONE_IPAD = NO; TARGETED_DEVICE_FAMILY = 2; };
+			name = Debug;
+		};
+		A70000000000000000000004 /* Release */ = {
+			isa = XCBuildConfiguration;
+			buildSettings = {ARCHS = "$(ARCHS_STANDARD)"; CODE_SIGN_STYLE = Automatic; CURRENT_PROJECT_VERSION = 1; GENERATE_INFOPLIST_FILE = YES; INFOPLIST_FILE = "Resources/iPad-Info.plist"; INFOPLIST_KEY_CFBundleDisplayName = iNotes; INFOPLIST_KEY_UIApplicationSceneManifest_Generation = YES; INFOPLIST_KEY_UILaunchScreen_Generation = YES; INFOPLIST_KEY_UISupportedInterfaceOrientations_iPad = "UIInterfaceOrientationPortrait UIInterfaceOrientationPortraitUpsideDown UIInterfaceOrientationLandscapeLeft UIInterfaceOrientationLandscapeRight"; LD_RUNPATH_SEARCH_PATHS = ("$(inherited)", "@executable_path/Frameworks"); MARKETING_VERSION = 0.1.0; PRODUCT_BUNDLE_IDENTIFIER = io.inotes.app; PRODUCT_NAME = iNotes; SUPPORTED_PLATFORMS = "iphoneos iphonesimulator"; SUPPORTS_MACCATALYST = NO; SUPPORTS_MAC_DESIGNED_FOR_IPHONE_IPAD = NO; TARGETED_DEVICE_FAMILY = 2; };
+			name = Release;
+		};
+/* End XCBuildConfiguration section */
+
+/* Begin XCConfigurationList section */
+		A80000000000000000000001 /* Build configuration list for PBXProject "iNotes" */ = {isa = XCConfigurationList; buildConfigurations = (A70000000000000000000001 /* Debug */, A70000000000000000000002 /* Release */); defaultConfigurationIsVisible = 0; defaultConfigurationName = Release; };
+		A80000000000000000000002 /* Build configuration list for PBXNativeTarget "iNotes-iPad" */ = {isa = XCConfigurationList; buildConfigurations = (A70000000000000000000003 /* Debug */, A70000000000000000000004 /* Release */); defaultConfigurationIsVisible = 0; defaultConfigurationName = Release; };
+/* End XCConfigurationList section */
+
+/* Begin XCLocalSwiftPackageReference section */
+		A90000000000000000000002 /* XCLocalSwiftPackageReference "." */ = {isa = XCLocalSwiftPackageReference; relativePath = .; };
+/* End XCLocalSwiftPackageReference section */
+
+/* Begin XCSwiftPackageProductDependency section */
+		A90000000000000000000001 /* NotesCore */ = {isa = XCSwiftPackageProductDependency; package = A90000000000000000000002 /* XCLocalSwiftPackageReference "." */; productName = NotesCore; };
+/* End XCSwiftPackageProductDependency section */
+	};
+	rootObject = A50000000000000000000002 /* Project object */;
+}

@@ -1,0 +1,385 @@
+import SwiftUI
+import NotesCore
+
+enum InkTool: String, CaseIterable { case text, pen, line, pencil, marker, highlighter, eraser }
+enum InkPaper: String, CaseIterable { case blank, ruled, dotted, grid }
+
+enum InkLineGeometry {
+    /// Small deviations snap to table axes; Shift can force the closest axis.
+    static func snappedEnd(start: InkPoint, end: InkPoint, forceAxis: Bool = false) -> InkPoint {
+        var snapped = end
+        let dx = abs(end.x - start.x), dy = abs(end.y - start.y)
+        let tolerance = tan(8 * Double.pi / 180)
+        if (forceAxis && dx >= dy) || dy <= dx * tolerance { snapped.y = start.y }
+        else if forceAxis || dx <= dy * tolerance { snapped.x = start.x }
+        return snapped
+    }
+}
+
+extension InkStyle {
+    var widthMultiplier: Double {
+        switch self {
+        case .pen: 1
+        case .pencil: 0.8
+        case .marker: 1.8
+        case .highlighter: 4
+        }
+    }
+}
+
+#if os(macOS)
+import AppKit
+
+struct InkEditor: NSViewRepresentable {
+    @Binding var strokes: [InkStroke]
+    var colorHex = "#314D43"
+    var lineWidth: Double = 2.5
+    var tool: InkTool = .pen
+    var paper: InkPaper = .dotted
+    var onInputChange: ((String) -> Void)? = nil
+
+    func makeNSView(context: Context) -> NSScrollView {
+        let scroll = NSScrollView()
+        scroll.hasVerticalScroller = true
+        scroll.hasHorizontalScroller = true
+        scroll.autohidesScrollers = true
+        scroll.allowsMagnification = true
+        scroll.minMagnification = 0.25
+        scroll.maxMagnification = 4
+        scroll.backgroundColor = .windowBackgroundColor
+        let canvas = InkDocumentView(frame: NSRect(origin: .zero, size: InkExport.paperSize))
+        scroll.documentView = canvas
+        configure(canvas, isEnabled: context.environment.isEnabled)
+        return scroll
+    }
+
+    func updateNSView(_ scroll: NSScrollView, context: Context) {
+        guard let canvas = scroll.documentView as? InkDocumentView else { return }
+        configure(canvas, isEnabled: context.environment.isEnabled)
+    }
+
+    private func configure(_ canvas: InkDocumentView, isEnabled: Bool) {
+        canvas.isInputEnabled = isEnabled
+        canvas.colorHex = colorHex
+        canvas.lineWidth = max(0.5, min(30, lineWidth))
+        canvas.tool = tool
+        if canvas.paper != paper { canvas.paper = paper; canvas.needsDisplay = true }
+        if !canvas.isDrawing, canvas.strokes != strokes {
+            canvas.strokes = strokes
+            canvas.needsDisplay = true
+        }
+        canvas.onChange = { value in strokes = value }
+        canvas.onInputChange = onInputChange
+    }
+}
+
+@MainActor
+enum InkExport {
+    static let paperSize = NSSize(width: 1600, height: 2200)
+
+    static func png(strokes: [InkStroke], paper: InkPaper = .dotted) -> Data? {
+        guard let bitmap = NSBitmapImageRep(
+            bitmapDataPlanes: nil, pixelsWide: Int(paperSize.width), pixelsHigh: Int(paperSize.height),
+            bitsPerSample: 8, samplesPerPixel: 4, hasAlpha: true, isPlanar: false,
+            colorSpaceName: .deviceRGB, bytesPerRow: 0, bitsPerPixel: 0
+        ), let context = NSGraphicsContext(bitmapImageRep: bitmap) else { return nil }
+        NSGraphicsContext.saveGraphicsState()
+        NSGraphicsContext.current = context
+        context.cgContext.translateBy(x: 0, y: paperSize.height)
+        context.cgContext.scaleBy(x: 1, y: -1)
+        InkRenderer.draw(strokes: strokes, paper: paper, in: NSRect(origin: .zero, size: paperSize))
+        context.flushGraphics()
+        NSGraphicsContext.restoreGraphicsState()
+        return bitmap.representation(using: .png, properties: [:])
+    }
+
+    static func pdf(strokes: [InkStroke], paper: InkPaper = .dotted) -> Data {
+        let canvas = InkDocumentView(frame: NSRect(origin: .zero, size: paperSize))
+        canvas.strokes = strokes
+        canvas.paper = paper
+        return canvas.dataWithPDF(inside: canvas.bounds)
+    }
+}
+
+@MainActor
+enum InkRenderer {
+    static func draw(strokes: [InkStroke], paper: InkPaper, in dirtyRect: NSRect, drawsPaper: Bool = true) {
+        if drawsPaper {
+            NSColor.white.setFill()
+            dirtyRect.fill()
+            NSColor(white: 0.88, alpha: 1).set()
+            let spacing: CGFloat = 28
+            switch paper {
+        case .blank: break
+        case .ruled, .grid:
+            let path = NSBezierPath()
+            for y in stride(from: floor(dirtyRect.minY / spacing) * spacing, through: dirtyRect.maxY, by: spacing) {
+                path.move(to: NSPoint(x: dirtyRect.minX, y: y))
+                path.line(to: NSPoint(x: dirtyRect.maxX, y: y))
+            }
+            if paper == .grid {
+                for x in stride(from: floor(dirtyRect.minX / spacing) * spacing, through: dirtyRect.maxX, by: spacing) {
+                    path.move(to: NSPoint(x: x, y: dirtyRect.minY))
+                    path.line(to: NSPoint(x: x, y: dirtyRect.maxY))
+                }
+            }
+            path.lineWidth = 0.7
+            path.stroke()
+        case .dotted:
+            for y in stride(from: floor(dirtyRect.minY / spacing) * spacing, through: dirtyRect.maxY, by: spacing) {
+                for x in stride(from: floor(dirtyRect.minX / spacing) * spacing, through: dirtyRect.maxX, by: spacing) {
+                    NSBezierPath(ovalIn: NSRect(x: x - 0.8, y: y - 0.8, width: 1.6, height: 1.6)).fill()
+                }
+            }
+            }
+        }
+        for stroke in strokes { draw(stroke) }
+    }
+
+    private static func draw(_ stroke: InkStroke) {
+        guard let first = stroke.points.first, first.x.isFinite, first.y.isFinite else { return }
+        let inkColor = color(stroke.colorHex)
+        let baseWidth = (stroke.width.isFinite ? max(0.5, min(100, stroke.width)) : 2.5) * stroke.style.widthMultiplier
+        if stroke.points.count == 1 {
+            let width = baseWidth * pressure(first.pressure)
+            inkColor.withAlphaComponent(stroke.style == .highlighter ? 0.25 : stroke.style == .pencil ? 0.7 : 1).set()
+            NSBezierPath(ovalIn: NSRect(x: first.x - width / 2, y: first.y - width / 2, width: width, height: width)).fill()
+            return
+        }
+        // Translucent tools are drawn in ONE operation, so neighboring segments
+        // and self-intersections do not acquire dark seams from repeated alpha.
+        if stroke.style == .highlighter || stroke.style == .marker {
+            let path = NSBezierPath()
+            path.move(to: NSPoint(x: first.x, y: first.y))
+            for index in 1..<stroke.points.count { appendCurve(to: path, points: stroke.points, at: index) }
+            let meanPressure = stroke.points.reduce(0.0) { $0 + max(0, min(1, $1.pressure)) } / Double(stroke.points.count)
+            path.lineWidth = baseWidth * (0.7 + 0.3 * meanPressure)
+            path.lineCapStyle = stroke.style == .highlighter ? .butt : .round
+            path.lineJoinStyle = .round
+            inkColor.withAlphaComponent(stroke.style == .highlighter ? 0.25 : 0.96).set()
+            path.stroke()
+            return
+        }
+        for index in 1..<stroke.points.count {
+            let previous = stroke.points[index - 1]
+            let point = stroke.points[index]
+            guard previous.x.isFinite, previous.y.isFinite, point.x.isFinite, point.y.isFinite else { continue }
+            let path = NSBezierPath()
+            path.move(to: NSPoint(x: previous.x, y: previous.y))
+            appendCurve(to: path, points: stroke.points, at: index)
+            let force = (previous.pressure + point.pressure) / 2
+            path.lineWidth = baseWidth * pressure(force)
+            path.lineCapStyle = .round
+            path.lineJoinStyle = .round
+            inkColor.withAlphaComponent(stroke.style == .pencil ? 0.3 + 0.58 * max(0, min(1, force)) : 1).set()
+            path.stroke()
+        }
+    }
+
+    private static func appendCurve(to path: NSBezierPath, points: [InkPoint], at index: Int) {
+        let p0 = points[max(0, index - 2)], p1 = points[index - 1]
+        let p2 = points[index], p3 = points[min(points.count - 1, index + 1)]
+        guard [p0.x, p0.y, p1.x, p1.y, p2.x, p2.y, p3.x, p3.y].allSatisfy(\.isFinite) else { return }
+        path.curve(to: NSPoint(x: p2.x, y: p2.y),
+                   controlPoint1: NSPoint(x: p1.x + (p2.x - p0.x) / 6, y: p1.y + (p2.y - p0.y) / 6),
+                   controlPoint2: NSPoint(x: p2.x - (p3.x - p1.x) / 6, y: p2.y - (p3.y - p1.y) / 6))
+    }
+
+    private static func pressure(_ value: Double) -> Double {
+        value.isFinite ? 0.35 + 0.65 * max(0, min(1, value)) : 1
+    }
+
+    private static func color(_ hex: String) -> NSColor {
+        let digits = hex.trimmingCharacters(in: CharacterSet(charactersIn: "#"))
+        guard digits.count == 6, let value = UInt32(digits, radix: 16) else { return .black }
+        return NSColor(red: Double((value >> 16) & 255) / 255,
+                       green: Double((value >> 8) & 255) / 255,
+                       blue: Double(value & 255) / 255, alpha: 1)
+    }
+}
+
+@MainActor
+final class InkDocumentView: NSView {
+    var strokes: [InkStroke] = []
+    var colorHex = "#314D43"
+    var lineWidth: Double = 2.5
+    var tool: InkTool = .pen
+    var paper: InkPaper = .dotted
+    var drawsPaper = true
+    var onChange: (([InkStroke]) -> Void)?
+    var onInputChange: ((String) -> Void)?
+    var isInputEnabled = true {
+        didSet {
+            setAccessibilityEnabled(isInputEnabled)
+            if !isInputEnabled, isDrawing {
+                strokes = beforeGesture
+                activeStroke = nil
+                isLineGesture = false
+                isDrawing = false
+                beforeGesture = []
+                needsDisplay = true
+            }
+        }
+    }
+    private(set) var isDrawing = false
+    private var activeStroke: InkStroke?
+    private var isLineGesture = false
+    private var beforeGesture: [InkStroke] = []
+    private var tabletEraserInProximity = false
+    private var lastInputDescription: String?
+    private let localUndoManager = UndoManager()
+
+    override var isFlipped: Bool { true }
+    override var isOpaque: Bool { drawsPaper }
+    override var acceptsFirstResponder: Bool { isInputEnabled }
+    override var undoManager: UndoManager? { localUndoManager }
+
+    override init(frame frameRect: NSRect) {
+        super.init(frame: frameRect)
+        setAccessibilityElement(true)
+        setAccessibilityRole(.image)
+        setAccessibilityLabel("Drawing canvas")
+        setAccessibilityHelp("Draw with a mouse or pressure sensitive pen tablet. Pinch to zoom. Use the eraser to remove a stroke. Undo is available with Command Z.")
+    }
+
+    required init?(coder: NSCoder) { fatalError("init(coder:) is unavailable") }
+
+    override func resetCursorRects() { addCursorRect(bounds, cursor: .crosshair) }
+
+    override func draw(_ dirtyRect: NSRect) {
+        InkRenderer.draw(strokes: activeStroke.map { strokes + [$0] } ?? strokes, paper: paper, in: dirtyRect, drawsPaper: drawsPaper)
+    }
+
+    override func mouseDown(with event: NSEvent) {
+        guard isInputEnabled else { return }
+        reportInput(event)
+        window?.makeFirstResponder(self)
+        beforeGesture = strokes
+        isDrawing = true
+        isLineGesture = false
+        let point = inkPoint(event)
+        if tool == .eraser || tabletEraserInProximity {
+            erase(at: point)
+        } else {
+            isLineGesture = tool == .line
+            activeStroke = InkStroke(points: [point], colorHex: colorHex, width: lineWidth,
+                                     style: InkStyle(rawValue: tool.rawValue) ?? .pen)
+            needsDisplay = true
+        }
+    }
+
+    override func mouseDragged(with event: NSEvent) {
+        guard isInputEnabled, isDrawing else { return }
+        reportInput(event)
+        continueGesture(event)
+    }
+
+    private func continueGesture(_ event: NSEvent) {
+        let point = inkPoint(event)
+        if activeStroke != nil {
+            if isLineGesture { updateLineEnd(event); return }
+            guard let previous = activeStroke?.points.last else { return }
+            let distance = hypot(point.x - previous.x, point.y - previous.y)
+            guard distance >= 0.4, (activeStroke?.points.count ?? 0) < 100_000 else { return }
+            activeStroke?.points.append(point)
+            let padding = lineWidth * (activeStroke?.style.widthMultiplier ?? 1) + 8
+            let recent = Array(activeStroke?.points.suffix(4) ?? [])
+            let minX = recent.map(\.x).min() ?? point.x, maxX = recent.map(\.x).max() ?? point.x
+            let minY = recent.map(\.y).min() ?? point.y, maxY = recent.map(\.y).max() ?? point.y
+            setNeedsDisplay(NSRect(x: minX - padding, y: minY - padding,
+                                  width: maxX - minX + padding * 2, height: maxY - minY + padding * 2))
+        } else {
+            erase(at: point)
+        }
+    }
+
+    override func mouseUp(with event: NSEvent) {
+        guard isInputEnabled, isDrawing else { return }
+        if isLineGesture { updateLineEnd(event) }
+        let actionName = isLineGesture ? "Straight Line" : "Drawing"
+        if let activeStroke { strokes.append(activeStroke) }
+        activeStroke = nil
+        isLineGesture = false
+        isDrawing = false
+        if strokes != beforeGesture {
+            registerUndo(previous: beforeGesture, actionName: actionName)
+            onChange?(strokes)
+        }
+        beforeGesture = []
+        needsDisplay = true
+    }
+
+    override func tabletProximity(with event: NSEvent) {
+        tabletEraserInProximity = event.isEnteringProximity && event.pointingDeviceType == .eraser
+        if event.isEnteringProximity { reportInputDescription(tabletEraserInProximity ? "Tablet eraser detected" : "Pen tablet detected") }
+    }
+
+    override func tabletPoint(with event: NSEvent) {
+        reportInputDescription("Pen tablet detected")
+        if isInputEnabled, isDrawing { continueGesture(event) }
+    }
+
+    private func reportInput(_ event: NSEvent) {
+        reportInputDescription(event.type == .tabletPoint || event.subtype == .tabletPoint ? "Pen tablet detected" : "Mouse / trackpad")
+    }
+
+    private func reportInputDescription(_ description: String) {
+        guard lastInputDescription != description else { return }
+        lastInputDescription = description
+        onInputChange?(description)
+    }
+
+    @objc func undo(_ sender: Any?) { localUndoManager.undo() }
+    @objc func redo(_ sender: Any?) { localUndoManager.redo() }
+
+    private func registerUndo(previous: [InkStroke], actionName: String = "Drawing") {
+        localUndoManager.registerUndo(withTarget: self) { target in
+            let current = target.strokes
+            target.strokes = previous
+            target.registerUndo(previous: current, actionName: actionName)
+            target.onChange?(previous)
+            target.needsDisplay = true
+        }
+        localUndoManager.setActionName(actionName)
+    }
+
+    private func updateLineEnd(_ event: NSEvent) {
+        guard let start = activeStroke?.points.first else { return }
+        let oldEnd = activeStroke?.points.last ?? start
+        var end = inkPoint(event)
+        if event.pressure <= 0 { end.pressure = oldEnd.pressure }
+        end = InkLineGeometry.snappedEnd(start: start, end: end, forceAxis: event.modifierFlags.contains(.shift))
+        activeStroke?.points = [start, end]
+        let padding = lineWidth + 8
+        let minX = min(start.x, oldEnd.x, end.x), maxX = max(start.x, oldEnd.x, end.x)
+        let minY = min(start.y, oldEnd.y, end.y), maxY = max(start.y, oldEnd.y, end.y)
+        setNeedsDisplay(NSRect(x: minX - padding, y: minY - padding,
+                              width: maxX - minX + padding * 2, height: maxY - minY + padding * 2))
+    }
+
+    private func inkPoint(_ event: NSEvent) -> InkPoint {
+        let location = convert(event.locationInWindow, from: nil)
+        return InkPoint(x: max(0, min(bounds.width, location.x)), y: max(0, min(bounds.height, location.y)),
+                        pressure: event.pressure > 0 ? Double(event.pressure) : 1)
+    }
+
+    private func erase(at point: InkPoint) {
+        let previousCount = strokes.count
+        strokes.removeAll { stroke in
+            let radius = max(12, stroke.width / 2 + 8)
+            if stroke.points.count == 1, let only = stroke.points.first {
+                return hypot(only.x - point.x, only.y - point.y) <= radius
+            }
+            for index in 1..<stroke.points.count {
+                let a = stroke.points[index - 1], b = stroke.points[index]
+                let dx = b.x - a.x, dy = b.y - a.y
+                let lengthSquared = dx * dx + dy * dy
+                let fraction = lengthSquared > 0 ? max(0, min(1, ((point.x - a.x) * dx + (point.y - a.y) * dy) / lengthSquared)) : 0
+                if hypot(point.x - (a.x + fraction * dx), point.y - (a.y + fraction * dy)) <= radius { return true }
+            }
+            return false
+        }
+        if strokes.count != previousCount { needsDisplay = true }
+    }
+}
+#endif
