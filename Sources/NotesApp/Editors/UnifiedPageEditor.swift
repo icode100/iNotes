@@ -152,9 +152,16 @@ final class UnifiedMacPageView: NSView {
 
     override func hitTest(_ point: NSPoint) -> NSView? {
         let location = convert(point, from: superview)
+        return inputView(at: location, event: NSApp.currentEvent)
+    }
+
+    static func inputIsTablet(event: NSEvent?) -> Bool {
+        event.map { $0.isPenPointEvent || $0.isPenProximityEvent } ?? false
+    }
+
+    func inputView(at location: NSPoint, event: NSEvent?) -> NSView? {
         guard bounds.contains(location) else { return nil }
-        let event = NSApp.currentEvent
-        let tablet = event?.type == .tabletPoint || event?.subtype == .tabletPoint || event?.subtype == .tabletProximity
+        let tablet = Self.inputIsTablet(event: event)
         // A stylus always writes. The text tool changes mouse/trackpad input;
         // text and handwriting remain visible on the same sheet in either case.
         if activeTool == .text, !tablet, textView.frame.contains(location) {

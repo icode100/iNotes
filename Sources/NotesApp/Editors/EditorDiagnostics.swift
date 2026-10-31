@@ -196,6 +196,50 @@ enum EditorDiagnostics {
                   "transparent ink overlays typed text on the same paper")
         let textPoint = page.convert(NSPoint(x: 80, y: 80), to: page.superview)
         try check(page.hitTest(textPoint) === page.textView, "text tool routes mouse input to native rich text")
+        var unrelatedEvents: [NSEvent] = []
+        for type in [NSEvent.EventType.keyDown, .keyUp] {
+            guard let key = NSEvent.keyEvent(with: type, location: .zero, modifierFlags: [], timestamp: 0,
+                                             windowNumber: 0, context: nil, characters: "a", charactersIgnoringModifiers: "a",
+                                             isARepeat: false, keyCode: 0) else { throw Failure(description: "Cannot construct key regression event") }
+            unrelatedEvents.append(key)
+        }
+        guard let cursor = NSEvent.enterExitEvent(with: .cursorUpdate, location: .zero, modifierFlags: [], timestamp: 0,
+                                                  windowNumber: 0, context: nil, eventNumber: 1, trackingNumber: 0, userData: nil) else {
+            throw Failure(description: "Cannot construct cursor-update regression event")
+        }
+        unrelatedEvents.append(cursor)
+        for type in [NSEvent.EventType.appKitDefined, .systemDefined, .applicationDefined] {
+            guard let other = NSEvent.otherEvent(with: type, location: .zero, modifierFlags: [], timestamp: 0,
+                                                 windowNumber: 0, context: nil, subtype: NSEvent.EventSubtype.tabletPoint.rawValue,
+                                                 data1: 0, data2: 0) else { throw Failure(description: "Cannot construct menu/system regression event") }
+            unrelatedEvents.append(other)
+        }
+        for unrelated in unrelatedEvents {
+            try check(!unrelated.isPenPointEvent && !unrelated.isPenProximityEvent && unrelated.safeInkPressure == nil
+                      && page.inputView(at: NSPoint(x: 80, y: 80), event: unrelated) === page.textView,
+                      "key/cursor/menu event type \(unrelated.type.rawValue) routes safely without tablet-only getters")
+        }
+        try check(!UnifiedMacPageView.inputIsTablet(event: nil), "no current event is safe during view layout")
+        try check(!down.isPenPointEvent && !down.isPenProximityEvent && down.safeInkPressure != nil,
+                  "ordinary mouse input retains valid pressure sampling")
+        let moved = try event(.mouseMoved, x: 100, y: 100, pressure: 0)
+        try check(!moved.isPenPointEvent && !moved.isPenProximityEvent && moved.safeInkPressure == nil,
+                  "mouse hover never reads the unsupported pressure getter")
+        guard let tabletMouse = CGEvent(mouseEventSource: nil, mouseType: .leftMouseDown,
+                                        mouseCursorPosition: CGPoint(x: 100, y: 100), mouseButton: .left) else {
+            throw Failure(description: "Cannot construct local tablet mouse regression event")
+        }
+        tabletMouse.setIntegerValueField(.mouseEventSubtype, value: Int64(NSEvent.EventSubtype.tabletPoint.rawValue))
+        guard let tabletMouseEvent = NSEvent(cgEvent: tabletMouse) else { throw Failure(description: "Cannot wrap local tablet mouse event") }
+        try check(tabletMouseEvent.isPenPointEvent && !tabletMouseEvent.isPenProximityEvent
+                  && page.inputView(at: NSPoint(x: 80, y: 80), event: tabletMouseEvent) === page.inkView,
+                  "tablet mouse subtype still routes pen input over the text tool")
+        for nativeType in [CGEventType.tabletPointer, .tabletProximity] {
+            guard let native = CGEvent(source: nil) else { throw Failure(description: "Cannot construct local native tablet event") }
+            native.type = nativeType
+            guard let nativeEvent = NSEvent(cgEvent: native) else { throw Failure(description: "Cannot wrap native tablet event") }
+            try check(UnifiedMacPageView.inputIsTablet(event: nativeEvent), "native tablet event type \(nativeType.rawValue) short-circuits subtype access")
+        }
         page.activeTool = .pencil
         try check(page.hitTest(textPoint) === page.inkView, "pencil tool routes the same page coordinates to ink")
         let combinedPDF = UnifiedPageExport.pdf(text: pageText, rtfData: pageRTF, strokes: pageStrokes, paper: .grid)

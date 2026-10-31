@@ -86,13 +86,13 @@ final class InputDeviceMonitor: ObservableObject {
 
     #if os(macOS)
     private func observe(_ event: NSEvent) {
-        if event.type == .tabletProximity || event.subtype == .tabletProximity {
+        if event.isPenProximityEvent {
             if penInRange != event.isEnteringProximity { penInRange = event.isEnteringProximity }
             if event.isEnteringProximity {
                 let label = event.pointingDeviceType == .eraser ? "Tablet eraser detected" : "Pen tablet detected"
                 if activity != label { activity = label }
             } else if activity != nil { activity = "Pen tablet ready" }
-        } else if event.type == .tabletPoint || event.subtype == .tabletPoint {
+        } else if event.isPenPointEvent {
             // Tablet points can arrive hundreds of times per second. Publish a
             // state transition once, so tracking a pen does not rebuild the UI.
             if !penInRange { penInRange = true }

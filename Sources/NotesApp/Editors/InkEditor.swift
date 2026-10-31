@@ -30,6 +30,44 @@ extension InkStyle {
 #if os(macOS)
 import AppKit
 
+extension NSEvent {
+    /// AppKit can hit-test while currentEvent is a key or cursor update. Its
+    /// subtype getter raises an Objective-C exception for those event classes.
+    private var supportsTabletMouseSubtype: Bool {
+        switch type {
+        case .leftMouseDown, .leftMouseUp, .leftMouseDragged,
+             .rightMouseDown, .rightMouseUp, .rightMouseDragged,
+             .otherMouseDown, .otherMouseUp, .otherMouseDragged, .mouseMoved:
+            true
+        default:
+            false
+        }
+    }
+
+    var isPenPointEvent: Bool {
+        if type == .tabletPoint { return true }
+        guard supportsTabletMouseSubtype else { return false }
+        return subtype == .tabletPoint
+    }
+
+    var isPenProximityEvent: Bool {
+        if type == .tabletProximity { return true }
+        guard supportsTabletMouseSubtype else { return false }
+        return subtype == .tabletProximity
+    }
+
+    var safeInkPressure: Float? {
+        switch type {
+        case .leftMouseDown, .leftMouseUp, .leftMouseDragged,
+             .rightMouseDown, .rightMouseUp, .rightMouseDragged,
+             .otherMouseDown, .otherMouseUp, .otherMouseDragged, .tabletPoint, .pressure:
+            pressure
+        default:
+            nil
+        }
+    }
+}
+
 struct InkEditor: NSViewRepresentable {
     @Binding var strokes: [InkStroke]
     var colorHex = "#314D43"
@@ -310,17 +348,19 @@ final class InkDocumentView: NSView {
     }
 
     override func tabletProximity(with event: NSEvent) {
+        guard event.isPenProximityEvent else { return }
         tabletEraserInProximity = event.isEnteringProximity && event.pointingDeviceType == .eraser
         if event.isEnteringProximity { reportInputDescription(tabletEraserInProximity ? "Tablet eraser detected" : "Pen tablet detected") }
     }
 
     override func tabletPoint(with event: NSEvent) {
+        guard event.isPenPointEvent else { return }
         reportInputDescription("Pen tablet detected")
         if isInputEnabled, isDrawing { continueGesture(event) }
     }
 
     private func reportInput(_ event: NSEvent) {
-        reportInputDescription(event.type == .tabletPoint || event.subtype == .tabletPoint ? "Pen tablet detected" : "Mouse / trackpad")
+        reportInputDescription(event.isPenPointEvent ? "Pen tablet detected" : "Mouse / trackpad")
     }
 
     private func reportInputDescription(_ description: String) {
@@ -347,7 +387,7 @@ final class InkDocumentView: NSView {
         guard let start = activeStroke?.points.first else { return }
         let oldEnd = activeStroke?.points.last ?? start
         var end = inkPoint(event)
-        if event.pressure <= 0 { end.pressure = oldEnd.pressure }
+        if (event.safeInkPressure ?? 0) <= 0 { end.pressure = oldEnd.pressure }
         end = InkLineGeometry.snappedEnd(start: start, end: end, forceAxis: event.modifierFlags.contains(.shift))
         activeStroke?.points = [start, end]
         let padding = lineWidth + 8
@@ -359,8 +399,9 @@ final class InkDocumentView: NSView {
 
     private func inkPoint(_ event: NSEvent) -> InkPoint {
         let location = convert(event.locationInWindow, from: nil)
+        let pressure = event.safeInkPressure ?? 0
         return InkPoint(x: max(0, min(bounds.width, location.x)), y: max(0, min(bounds.height, location.y)),
-                        pressure: event.pressure > 0 ? Double(event.pressure) : 1)
+                        pressure: pressure > 0 ? Double(pressure) : 1)
     }
 
     private func erase(at point: InkPoint) {
