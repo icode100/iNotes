@@ -76,7 +76,26 @@ struct StandaloneTestRunner {
         let library = NoteLibraryTests()
         let repository = LibraryRepositoryTests()
         let themes = PageThemeTests()
+        let pages = PageContentTests()
+        let geometry = PageSelectionGeometryTests()
+        let backups = BackupArchiveTests()
         let tests: [(String, XCTestCase, () throws -> Void)] = [
+            ("mixed page archive and search", pages, pages.testMixedPageArchiveRoundTripAndSearch),
+            ("legacy page object migration", pages, pages.testLegacyArchiveDefaultsAndPromotesBeforeAddingObjects),
+            ("invalid page objects", pages, pages.testInvalidPageObjectsRejectWithoutChangingSavedNote),
+            ("mixed page snapshots", pages, pages.testMixedSnapshotAndCopyPreserveAllContent),
+            ("safe archive version", pages, pages.testVersionOneCannotSilentlyExportNewObjects),
+            ("bounded mixed clipboard", pages, pages.testClipboardRejectsOversizedAndInvalidObjects),
+            ("mixed page import", pages, pages.testImportedPagePreservesPositionedContentAndProtectsVersion),
+            ("lasso crossing strokes", geometry, geometry.testCrossingStrokeSelectsEvenWhenBothEndpointsOutside),
+            ("lasso thick ink and dots", geometry, geometry.testBoundaryAndThickInkAndDotsAreSelectable),
+            ("lasso text geometry", geometry, geometry.testTextRectangleCanEncloseLassoAndLassoCanEncloseText),
+            ("lasso concave and invalid input", geometry, geometry.testConcaveAndInvalidPolygons),
+            ("selection ink preservation", geometry, geometry.testTranslationPreservesIdentityStylePressureAndCanonicalColor),
+            ("independent cloud folder backups", backups, backups.testTwoDestinationsKeepIndependentCompleteArchives),
+            ("versioned backups", backups, backups.testVersionedWritesNeverReplaceAnExistingBackup),
+            ("failed cloud folder backup", backups, backups.testUnavailableDestinationAndInvalidArchivePreserveLocalData),
+            ("independent backup scheduling", backups, backups.testScheduleThrottlesTargetsAndRetriesIndependently),
             ("theme text and ink contrast", themes, themes.testDefaultTextAndDarkInkContrast),
             ("theme palette storage roundtrip", themes, themes.testKnownPaletteRoundTripsBetweenDisplayAndStorage),
             ("theme custom hue resolution", themes, themes.testCustomDarkHuesLightenButBrightColorsStayUnchanged),

@@ -1,7 +1,7 @@
 import Foundation
 
 public struct NoteLibrary: Codable, Equatable, Sendable {
-    public static let currentFormatVersion = 1
+    public static let currentFormatVersion = 2
     public var formatVersion: Int
     public private(set) var nodes: [NoteNode]
     public private(set) var modifiedAt: Date
@@ -59,13 +59,14 @@ public struct NoteLibrary: Codable, Equatable, Sendable {
 
     public mutating func update(_ node: NoteNode) throws {
         guard let index = nodes.firstIndex(where: { $0.id == node.id }) else { throw LibraryError.nodeNotFound }
-        guard formatVersion == Self.currentFormatVersion else { throw LibraryError.unsupportedVersion(formatVersion) }
+        guard (1...Self.currentFormatVersion).contains(formatVersion) else { throw LibraryError.unsupportedVersion(formatVersion) }
         let previous = nodes[index]
         var candidate = self
         var replacement = node
         replacement.title = try Self.cleanTitle(replacement.title)
         replacement.updatedAt = Date()
         candidate.nodes[index] = replacement
+        if !replacement.textBoxes.isEmpty || !replacement.equations.isEmpty { candidate.formatVersion = Self.currentFormatVersion }
         if previous.parentID == replacement.parentID, previous.kind == replacement.kind,
            previous.isTrashed == replacement.isTrashed, previous.order == replacement.order {
             // Existing structure is unchanged. Avoid scanning every other sheet's ink on each keypress.
@@ -169,6 +170,7 @@ public struct NoteLibrary: Codable, Equatable, Sendable {
         }
         let roots = imported.filter { $0.parentID == nil }.map(\.id)
         var candidate = self
+        candidate.formatVersion = max(formatVersion, incoming.formatVersion)
         candidate.nodes.append(contentsOf: imported); candidate.touch()
         _ = try LibraryArchive.encode(candidate)
         self = candidate
@@ -179,13 +181,16 @@ public struct NoteLibrary: Codable, Equatable, Sendable {
         let tokens = query.split(whereSeparator: \.isWhitespace).map { String($0) }
         return nodes.filter { item in
             guard includingTrash || !item.isTrashed, !favoritesOnly || item.isFavorite else { return false }
-            let haystack = ([item.title, item.body] + item.tags).joined(separator: "\n")
+            let haystack = ([item.title, item.body] + item.tags + item.textBoxes.map(\.text) + item.equations.map(\.latex)).joined(separator: "\n")
             return tokens.allSatisfy { haystack.range(of: $0, options: [.caseInsensitive, .diacriticInsensitive]) != nil }
         }.sorted { $0.updatedAt > $1.updatedAt }
     }
 
     public func validate() throws {
-        guard formatVersion == Self.currentFormatVersion else { throw LibraryError.unsupportedVersion(formatVersion) }
+        guard (1...Self.currentFormatVersion).contains(formatVersion) else { throw LibraryError.unsupportedVersion(formatVersion) }
+        if formatVersion == 1, nodes.contains(where: { !$0.textBoxes.isEmpty || !$0.equations.isEmpty }) {
+            throw LibraryError.invalidData("Movable text and equations require archive format 2.")
+        }
         guard nodes.count <= 50_000 else { throw LibraryError.invalidData("Too many items.") }
         guard Set(nodes.map(\.id)).count == nodes.count else { throw LibraryError.duplicateID }
         let lookup = Dictionary(uniqueKeysWithValues: nodes.map { ($0.id, $0) })
@@ -240,6 +245,27 @@ public struct NoteLibrary: Codable, Equatable, Sendable {
 
     private static func validatePayload(_ node: NoteNode, previous: NoteNode? = nil) throws {
         _ = try cleanTitle(node.title)
+        if previous?.textBoxes != node.textBoxes {
+            guard node.textBoxes.count <= 10_000,
+                  Set(node.textBoxes.map(\.id)).count == node.textBoxes.count else { throw LibraryError.duplicateID }
+            guard node.textBoxes.allSatisfy({ $0.x.isFinite && $0.y.isFinite && $0.width.isFinite
+                && (0...100_000).contains($0.x) && (0...100_000).contains($0.y)
+                && (20...10_000).contains($0.width) && $0.text.utf8.count <= LibraryArchive.maximumBytes }) else {
+                throw LibraryError.invalidData("A text box has invalid coordinates or content.")
+            }
+        }
+        if previous?.equations != node.equations {
+            guard node.equations.count <= 10_000,
+                  Set(node.equations.map(\.id)).count == node.equations.count else { throw LibraryError.duplicateID }
+            guard node.equations.allSatisfy({ !$0.latex.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
+                && $0.latex.count <= NoteEquation.maximumSourceLength && $0.x.isFinite && $0.y.isFinite
+                && $0.width.isFinite && $0.height.isFinite && $0.fontSize.isFinite
+                && (0...100_000).contains($0.x) && (0...100_000).contains($0.y)
+                && (20...10_000).contains($0.width) && (20...10_000).contains($0.height)
+                && (8...120).contains($0.fontSize) }) else {
+                throw LibraryError.invalidData("An equation has invalid source, coordinates, or font size.")
+            }
+        }
         if previous?.strokes != node.strokes {
             for stroke in node.strokes {
                 guard stroke.width.isFinite, stroke.width > 0, stroke.width <= 100,

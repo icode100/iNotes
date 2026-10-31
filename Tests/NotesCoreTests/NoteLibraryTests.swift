@@ -293,6 +293,7 @@ final class NoteLibraryTests: XCTestCase {
         node.paperStyle = .grid
         try library.update(node)
         var archive = try XCTUnwrap(JSONSerialization.jsonObject(with: LibraryArchive.encode(library)) as? [String: Any])
+        archive["formatVersion"] = 1
         var nodes = try XCTUnwrap(archive["nodes"] as? [[String: Any]])
         for index in nodes.indices {
             nodes[index].removeValue(forKey: "paperStyle")

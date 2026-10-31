@@ -74,22 +74,27 @@ public struct NoteNode: Identifiable, Codable, Equatable, Sendable {
     public var updatedAt: Date
     public var order: Int
     public var paperStyle: PaperStyle
+    public var textBoxes: [PageTextBox]
+    public var equations: [NoteEquation]
 
     public init(id: UUID = UUID(), parentID: UUID? = nil, kind: NoteKind, title: String,
                 body: String = "", richTextRTF: Data? = nil, strokes: [InkStroke] = [],
                 pencilKitData: Data? = nil, attachments: [NoteAttachment] = [], tags: [String] = [],
                 isFavorite: Bool = false, isTrashed: Bool = false,
-                createdAt: Date = Date(), updatedAt: Date = Date(), order: Int = 0, paperStyle: PaperStyle = .dotted) {
+                createdAt: Date = Date(), updatedAt: Date = Date(), order: Int = 0, paperStyle: PaperStyle = .dotted,
+                textBoxes: [PageTextBox] = [], equations: [NoteEquation] = []) {
         self.id = id; self.parentID = parentID; self.kind = kind; self.title = title
         self.body = body; self.richTextRTF = richTextRTF; self.strokes = strokes
         self.pencilKitData = pencilKitData; self.attachments = attachments; self.tags = tags
         self.isFavorite = isFavorite; self.isTrashed = isTrashed
         self.createdAt = createdAt; self.updatedAt = updatedAt; self.order = order; self.paperStyle = paperStyle
+        self.textBoxes = textBoxes; self.equations = equations
     }
 
     private enum CodingKeys: String, CodingKey {
         case id, parentID, kind, title, body, richTextRTF, strokes, pencilKitData, attachments
         case tags, isFavorite, isTrashed, createdAt, updatedAt, order, paperStyle
+        case textBoxes, equations
     }
 
     public init(from decoder: Decoder) throws {
@@ -110,6 +115,8 @@ public struct NoteNode: Identifiable, Codable, Equatable, Sendable {
         updatedAt = try values.decode(Date.self, forKey: .updatedAt)
         order = try values.decode(Int.self, forKey: .order)
         paperStyle = try values.decodeIfPresent(PaperStyle.self, forKey: .paperStyle) ?? .dotted
+        textBoxes = try values.decodeIfPresent([PageTextBox].self, forKey: .textBoxes) ?? []
+        equations = try values.decodeIfPresent([NoteEquation].self, forKey: .equations) ?? []
     }
 }
 
