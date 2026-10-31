@@ -53,7 +53,7 @@ Requires an Apple silicon Mac and macOS 14+. Building the installer requires ful
 open dist/iNotes.app
 ```
 
-The default installer is `dist/iNotes-0.2.0-arm64.dmg` (version 0.2.0, development build 4). Open it and drag iNotes into Applications. Local builds use ad hoc signing. Public distribution requires Developer ID signing and Apple notarization; see [build instructions](docs/BUILD.md).
+The default installer is `dist/iNotes-0.2.1-arm64.dmg` (version 0.2.1, development build 5). Open it and drag iNotes into Applications. Local builds use ad hoc signing. Public distribution requires Developer ID signing and Apple notarization; see [build instructions](docs/BUILD.md).
 
 ## iPad
 

@@ -61,7 +61,11 @@ extension UnifiedMacPageView {
         for box in textBoxes {
             let view = textBoxViews[box.id] ?? MacPageTextBoxView(frame: .zero)
             view.editor.pageUndoManager = selectionController?.history
-            if view.superview == nil { addSubview(view, positioned: .below, relativeTo: inkView); textBoxViews[box.id] = view }
+            if view.superview == nil {
+                view.editor.pageCursorProvider = { [weak self] in self?.activePageCursor }
+                addSubview(view, positioned: .below, relativeTo: inkView)
+                textBoxViews[box.id] = view
+            }
             view.configure(box, theme: theme, paper: paperView.paper, editable: editable, onChange: { onTextBoxChange(box.id, $0, $1) })
         }
         for equation in equations {

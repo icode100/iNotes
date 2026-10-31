@@ -59,6 +59,33 @@ Local host: Apple silicon ARM64, macOS 27.2 (26B123), Apple Swift 6.4.2, full
 Xcode 27.2 (27B52). Hosted workflows use the `macos-26` runner; the recorded
 0.1.x hosted runs used Xcode 26.6.
 
+### 0.2.1 cursor regression validation
+
+The native body and movable text boxes could restore an I-beam after selecting
+an ink tool. They now defer cursor ownership to the selected page tool, and ink
+tracking restores the current tip when entering the visible paper. Re-selecting
+the same tool refreshes its cursor; clipped, offscreen paper does not replace a
+toolbar/search cursor. Text retains native cursor handling.
+
+- Local build 5 passed all 50 XCTest tests with zero failures (0.738 seconds).
+- The packaged Mac app passed 159 native editor checks, including 31 new cursor
+  regressions: late body/textbox updates, all ink tools, canvas entry, stationary
+  reselection, width/zoom changes, viewport clipping, and return to Text. It also
+  passed 31 equation, 8 shortcut, 12 ruled-layout, 16 updater-configuration checks,
+  and store/backup integration checks.
+- Cursor tests inspect `NSCursor.current` after native view callbacks. The
+  offscreen-window fixture supplies a key-window/pointer position for stationary
+  checks without activating the app or moving the physical pointer. This is
+  native regression coverage, not a physical stylus hover test.
+- CI and release workflows now run the native editor suite after packaging, so
+  these cursor regressions must pass before a release is published.
+- The local ARM64 DMG passed read-only mounting, strict signatures, resource
+  checks, checksum validation, and mounted-app persistence/backup checks.
+
+Evidence: `/private/tmp/inotes-cursor-tests.log` and
+`/private/tmp/inotes-cursor-native.log`. Hosted release results are recorded
+after verification.
+
 ### 0.2.0 local feature validation
 
 | Check | Result |

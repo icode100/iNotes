@@ -234,6 +234,21 @@ struct RichTextEditor: NSViewRepresentable {
 
 @MainActor
 final class NotesTextView: NSTextView {
+    // Native text tracking still receives cursor updates underneath the ink
+    // layer. Follow the page's active tool without disabling native editing.
+    var pageCursorProvider: (() -> NSCursor?)?
+
+    override func resetCursorRects() {
+        // The ink/selection layer covers the page in these modes. Avoid an
+        // overlapping text rectangle that could cache an old nib width/zoom.
+        if pageCursorProvider?() == nil { super.resetCursorRects() }
+    }
+
+    override func cursorUpdate(with event: NSEvent) {
+        if let cursor = pageCursorProvider?() { cursor.set() }
+        else { super.cursorUpdate(with: event) }
+    }
+
     var usesRuledPaper = false
     override var textContainerOrigin: NSPoint {
         var origin = super.textContainerOrigin

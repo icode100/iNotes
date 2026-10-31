@@ -222,7 +222,6 @@ final class UnifiedMacPageView: NSView {
     var activeTool: InkTool = .pen {
         didSet {
             guard activeTool != oldValue else { return }
-            window?.invalidateCursorRects(for: selectionView)
             focus(tool: activeTool)
         }
     }
@@ -254,6 +253,7 @@ final class UnifiedMacPageView: NSView {
         textView.autoresizingMask = []
         textView.textContainer?.widthTracksTextView = true
         textView.onTabletProximity = { [weak inkView] event in inkView?.tabletProximity(with: event) }
+        textView.pageCursorProvider = { [weak self] in self?.activePageCursor }
         positionLayers()
     }
 
@@ -289,6 +289,30 @@ final class UnifiedMacPageView: NSView {
         if tool == .text { window?.makeFirstResponder(textView) }
         else if tool == .select || tool == .lasso { window?.makeFirstResponder(selectionView) }
         else { window?.makeFirstResponder(inkView) }
+        refreshToolCursor()
+    }
+
+    /// Text keeps AppKit's native cursor handling. Every other tool owns the
+    /// cursor over both blank paper and the text layers underneath its ink.
+    var activePageCursor: NSCursor? {
+        switch activeTool {
+        case .text: nil
+        case .select: .arrow
+        case .lasso: .crosshair
+        default: inkView.tipCursor()
+        }
+    }
+
+    func refreshToolCursor() {
+        inkView.tool = activeTool == .text ? .pen : activeTool
+        inkView.showsTipCursor = activeTool != .text && activeTool != .select && activeTool != .lasso
+        let cursorViews: [NSView] = [textView, inkView, selectionView] + textBoxViews.values.map(\.editor)
+        for view in cursorViews {
+            window?.invalidateCursorRects(for: view)
+        }
+        guard let window, window.isKeyWindow, !isHiddenOrHasHiddenAncestor,
+              visibleRect.contains(convert(window.mouseLocationOutsideOfEventStream, from: nil)) else { return }
+        (activePageCursor ?? .iBeam).set()
     }
 
     override func tabletProximity(with event: NSEvent) { inkView.tabletProximity(with: event) }

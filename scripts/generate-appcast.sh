@@ -2,7 +2,7 @@
 set -euo pipefail
 ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 cd "$ROOT"
-VERSION="${VERSION:-0.2.0}"
+VERSION="${VERSION:-0.2.1}"
 ARCHIVE="${1:-$ROOT/dist/iNotes-$VERSION-arm64.dmg}"
 OUTPUT="${2:-$ROOT/dist/update}"
 UPDATE_PRIVATE_KEY_FILE="${UPDATE_PRIVATE_KEY_FILE:-$ROOT/.private/updates/ed25519.key}"

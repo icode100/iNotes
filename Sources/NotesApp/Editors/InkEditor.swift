@@ -310,7 +310,12 @@ final class InkDocumentView: NSView {
     private var lastInputDescription: String?
     private let localUndoManager = UndoManager()
     private var magnificationObservation: NSKeyValueObservation?
-    var showsTipCursor = true { didSet { if showsTipCursor != oldValue { invalidateTipCursor() } } }
+    private var tipTrackingArea: NSTrackingArea?
+    var showsTipCursor = true {
+        didSet {
+            if showsTipCursor != oldValue { updateTrackingAreas(); invalidateTipCursor() }
+        }
+    }
 
     override var isFlipped: Bool { true }
     override var isOpaque: Bool { drawsPaper }
@@ -327,7 +332,30 @@ final class InkDocumentView: NSView {
 
     required init?(coder: NSCoder) { fatalError("init(coder:) is unavailable") }
 
-    override func resetCursorRects() { if showsTipCursor { addCursorRect(bounds, cursor: tipCursor()) } }
+    override func resetCursorRects() { if showsTipCursor { addCursorRect(visibleRect, cursor: tipCursor()) } }
+
+    override func updateTrackingAreas() {
+        if let tipTrackingArea { removeTrackingArea(tipTrackingArea) }
+        tipTrackingArea = nil
+        super.updateTrackingAreas()
+        if showsTipCursor {
+            let area = NSTrackingArea(rect: .zero,
+                                      options: [.cursorUpdate, .mouseEnteredAndExited, .activeInKeyWindow, .inVisibleRect],
+                                      owner: self, userInfo: nil)
+            addTrackingArea(area)
+            tipTrackingArea = area
+        }
+    }
+
+    override func cursorUpdate(with event: NSEvent) {
+        if showsTipCursor { tipCursor().set() }
+        else { super.cursorUpdate(with: event) }
+    }
+
+    override func mouseEntered(with event: NSEvent) {
+        if showsTipCursor { tipCursor().set() }
+        else { super.mouseEntered(with: event) }
+    }
 
     override func viewDidMoveToWindow() { super.viewDidMoveToWindow(); observeMagnification() }
     override func viewDidMoveToSuperview() { super.viewDidMoveToSuperview(); observeMagnification() }
@@ -347,7 +375,8 @@ final class InkDocumentView: NSView {
     private func invalidateTipCursor() {
         window?.invalidateCursorRects(for: self)
         if showsTipCursor, let window, window.isKeyWindow,
-           bounds.contains(convert(window.mouseLocationOutsideOfEventStream, from: nil)) {
+           !isHiddenOrHasHiddenAncestor,
+           visibleRect.contains(convert(window.mouseLocationOutsideOfEventStream, from: nil)) {
             tipCursor().set()
         }
     }

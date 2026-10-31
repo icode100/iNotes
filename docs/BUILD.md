@@ -38,9 +38,9 @@ bash scripts/verify-macos.sh
 The build creates:
 
 - `dist/iNotes.app`: native ARM64 app bundle.
-- `dist/iNotes-0.2.0-arm64.dmg`: compressed disk image containing the app, an
+- `dist/iNotes-0.2.1-arm64.dmg`: compressed disk image containing the app, an
   Applications shortcut, and installation instructions.
-- `dist/iNotes-0.2.0-arm64.dmg.sha256`: SHA-256 checksum.
+- `dist/iNotes-0.2.1-arm64.dmg.sha256`: SHA-256 checksum.
 
 Open the disk image and drag iNotes to Applications. The DMG does not install
 background services, kernel extensions, browser runtimes, or privileged helpers.
@@ -48,7 +48,7 @@ The build script validates the property list, architecture, app signature, and D
 before publishing outputs. The verification script mounts it read-only and checks
 the packaged app and Applications shortcut.
 
-The defaults are version 0.2.0 and development build 4. To publish an update,
+The defaults are version 0.2.1 and development build 5. To publish an update,
 choose a build number greater than the latest published `CFBundleVersion`.
 For example, `VERSION=0.2.1 BUILD_NUMBER=1005 bash scripts/build-macos.sh` is
 appropriate when the latest published build is 1004. Check the actual release

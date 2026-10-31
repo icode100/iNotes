@@ -16,6 +16,8 @@ jobs:
         run: bash scripts/test.sh
       - name: Build and package Apple silicon app
         run: bash scripts/build-macos.sh
+      - name: Native editor and cursor regressions
+        run: dist/iNotes.app/Contents/MacOS/iNotes --smoke-test --editor-test
       - name: Verify disk image
         run: bash scripts/verify-macos.sh
       - name: Compile iPad simulator app

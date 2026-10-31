@@ -53,7 +53,7 @@ The appcast command prepares `dist/update/appcast.xml`. It uses Sparkle's offici
 using Apple CryptoKit and the committed public key. It does not upload anything.
 This example assumes the latest published build is 1004; check the actual
 published `CFBundleVersion` and use a larger number. Development defaults
-(`0.2.0`, build 4) are separate from the release workflow's `1000 + GITHUB_RUN_NUMBER`.
+(`0.2.1`, build 5) are separate from the release workflow's `1000 + GITHUB_RUN_NUMBER`.
 The feed points to the matching `v0.2.1` release's DMG. Never edit a signed appcast
 after generation. Re-run the script if its contents change. The last command
 checks valid signatures and rejects changed feeds, unsigned feeds, changed

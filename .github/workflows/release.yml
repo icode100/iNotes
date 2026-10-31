@@ -43,6 +43,7 @@ jobs:
         run: bash scripts/build-macos.sh
       - name: Verify installed bundle and update signatures
         run: |
+          dist/iNotes.app/Contents/MacOS/iNotes --smoke-test --editor-test
           bash scripts/verify-macos.sh
           bash scripts/generate-appcast.sh
           bash scripts/test-update-signatures.sh

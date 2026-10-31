@@ -5,6 +5,16 @@ import NotesCore
 import PencilKit
 import PDFKit
 
+/// Models a key window with a local pointer position for stationary-cursor
+/// tests without activating this offscreen app or moving the user's pointer.
+private final class EditorDiagnosticWindow: NSWindow {
+    var testPointerLocation: NSPoint?
+    override var isKeyWindow: Bool { testPointerLocation != nil || super.isKeyWindow }
+    override var mouseLocationOutsideOfEventStream: NSPoint {
+        testPointerLocation ?? super.mouseLocationOutsideOfEventStream
+    }
+}
+
 /// Explicitly invoked by --self-test. No global input events or user files are used.
 @MainActor
 enum EditorDiagnostics {
@@ -30,7 +40,7 @@ enum EditorDiagnostics {
             rtfData: Binding(get: { rtf }, set: { rtf = $0 })
         )
         let hosting = NSHostingView(rootView: richEditor)
-        let window = NSWindow(contentRect: NSRect(x: -4000, y: -4000, width: 640, height: 480),
+        let window = EditorDiagnosticWindow(contentRect: NSRect(x: -4000, y: -4000, width: 640, height: 480),
                               styleMask: [.titled, .resizable], backing: .buffered, defer: false)
         window.isReleasedWhenClosed = false
         window.contentView = hosting
@@ -251,6 +261,72 @@ enum EditorDiagnostics {
                       && page.inputView(at: NSPoint(x: 80, y: 80), event: unrelated) === page.textView,
                       "key/cursor/menu event type \(unrelated.type.rawValue) routes safely without tablet-only getters")
         }
+        // Exercise native cursor ownership, not just the generated artwork.
+        // NSTextView can receive a late update after the toolbar changed tools.
+        let cursorBox = PageTextBox(x: 200, y: 140, width: 200, text: "Cursor regression")
+        page.displayObjects(textBoxes: [cursorBox], equations: [], editable: true,
+                            onTextBoxChange: { _, _, _ in }, onEquationEdit: nil)
+        guard let boxEditor = page.textBoxViews[cursorBox.id]?.editor else {
+            throw Failure(description: "Cursor test text box did not mount")
+        }
+        defer { NSCursor.arrow.set() }
+        for tool in [InkTool.pen, .pencil, .marker, .highlighter, .line, .eraser, .select, .lasso] {
+            page.activeTool = tool
+            let expected = page.activePageCursor!
+            for nativeText in [page.textView, boxEditor] {
+                NSCursor.iBeam.set()
+                nativeText.cursorUpdate(with: cursor)
+                try check(NSCursor.current === expected,
+                          "\(tool.rawValue) replaces stale I-beam from native body and movable text cursor updates")
+            }
+            if page.inkView.showsTipCursor {
+                NSCursor.iBeam.set()
+                page.inkView.cursorUpdate(with: cursor)
+                try check(NSCursor.current === expected, "\(tool.rawValue) ink tracking restores the live tip")
+            }
+        }
+        page.activeTool = .pen
+        page.inkView.updateTrackingAreas()
+        try check(page.inkView.trackingAreas.contains { $0.options.contains([.cursorUpdate, .inVisibleRect, .activeInKeyWindow]) },
+                  "ink has cursor tracking over the visible page")
+        guard let entry = NSEvent.enterExitEvent(with: .mouseEntered, location: .zero, modifierFlags: [], timestamp: 0,
+                                                 windowNumber: window.windowNumber, context: nil, eventNumber: 2,
+                                                 trackingNumber: 0, userData: nil) else { throw Failure(description: "Cannot create local entry event") }
+        NSCursor.iBeam.set()
+        page.inkView.mouseEntered(with: entry)
+        try check(NSCursor.current === page.inkView.tipCursor(), "entering paper replaces the I-beam with the pen dot")
+        window.testPointerLocation = page.convert(NSPoint(x: 80, y: 80), to: nil)
+        NSCursor.iBeam.set()
+        page.focus(tool: .pen)
+        try check(NSCursor.current === page.inkView.tipCursor(), "reselecting unchanged Pen repairs a stationary stale I-beam (key: \(window.isKeyWindow), visible: \(page.visibleRect), point: \(page.convert(window.mouseLocationOutsideOfEventStream, from: nil)), hidden: \(page.isHiddenOrHasHiddenAncestor))")
+        let thinCursor = page.inkView.tipCursor()
+        page.inkView.lineWidth = 12
+        page.textView.cursorUpdate(with: cursor)
+        try check(NSCursor.current === page.inkView.tipCursor() && NSCursor.current !== thinCursor,
+                  "text-layer cursor updates use the current pen width")
+        if let scroll = page.enclosingScrollView {
+            scroll.magnification = 1.5
+            boxEditor.cursorUpdate(with: cursor)
+            try check(NSCursor.current === page.inkView.tipCursor(), "textbox cursor updates follow page zoom")
+            scroll.magnification = 1
+        }
+        // Outside the clipped viewport, reselecting a tool must not replace a
+        // toolbar/search cursor, even if the point is within the long page.
+        window.testPointerLocation = page.convert(NSPoint(x: 80, y: 1800), to: nil)
+        NSCursor.iBeam.set()
+        page.focus(tool: .pen)
+        try check(NSCursor.current === NSCursor.iBeam, "offscreen paper does not override cursors outside the viewport")
+        window.testPointerLocation = nil
+        page.inkView.lineWidth = 2.5
+        page.activeTool = .text
+        for nativeText in [page.textView, boxEditor] {
+            NSCursor.arrow.set()
+            nativeText.cursorUpdate(with: cursor)
+            try check(NSCursor.current === NSCursor.iBeam, "returning to Text restores the native I-beam")
+        }
+        try check(!page.inkView.showsTipCursor && !page.inkView.trackingAreas.contains { $0.options.contains(.cursorUpdate) },
+                  "Text mode removes ink cursor tracking")
+        page.displayObjects(textBoxes: [], equations: [], editable: true, onTextBoxChange: { _, _, _ in }, onEquationEdit: nil)
         try check(!UnifiedMacPageView.inputIsTablet(event: nil), "no current event is safe during view layout")
         try check(!down.isPenPointEvent && !down.isPenProximityEvent && down.safeInkPressure != nil,
                   "ordinary mouse input retains valid pressure sampling")
