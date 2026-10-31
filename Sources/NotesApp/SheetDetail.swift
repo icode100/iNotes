@@ -48,28 +48,37 @@ struct SheetDetail: View {
                             }.font(.caption).foregroundStyle(.secondary)
                         }
                         Spacer(minLength: 8)
-                        Button { store.update(sheet.id) { $0.isFavorite.toggle() } } label: {
-                            Image(systemName: sheet.isFavorite ? "star.fill" : "star").foregroundStyle(sheet.isFavorite ? Color.orange : Color.secondary)
-                        }.buttonStyle(.plain).help("Favorite sheet").disabled(sheet.isTrashed)
-                        Menu {
-                            Button("Export text…") { exportText(sheet) }
-                            #if os(macOS)
-                            Button("Export rich text…") { MacFileActions.exportRichText(sheet, store: store) }
-                            Button("Export sheet as PDF…") { MacFileActions.exportPDF(sheet, theme: pageTheme, store: store) }
-                            Button("Export page as PNG…") { MacFileActions.exportPagePNG(sheet, paper: paper, theme: pageTheme, store: store) }
-                            #endif
-                            Divider()
-                            if !sheet.isTrashed {
-                                Button("Duplicate sheet") { store.duplicate(sheet.id) }
-                                MoveMenu(node: sheet)
+                        HStack(alignment: .center, spacing: 6) {
+                            Button { store.update(sheet.id) { $0.isFavorite.toggle() } } label: {
+                                Image(systemName: sheet.isFavorite ? "star.fill" : "star")
+                                    .foregroundStyle(sheet.isFavorite ? Color.orange : Color.secondary)
+                                    .frame(width: 30, height: 30)
+                            }.buttonStyle(.plain).help("Favorite sheet").disabled(sheet.isTrashed)
+                                .accessibilityLabel(sheet.isFavorite ? "Remove from favorites" : "Favorite sheet")
+                            Menu {
+                                Button("Export text…") { exportText(sheet) }
+                                #if os(macOS)
+                                Button("Export rich text…") { MacFileActions.exportRichText(sheet, store: store) }
+                                Button("Export sheet as PDF…") { MacFileActions.exportPDF(sheet, theme: pageTheme, store: store) }
+                                Button("Export page as PNG…") { MacFileActions.exportPagePNG(sheet, paper: paper, theme: pageTheme, store: store) }
+                                #endif
                                 Divider()
-                                Button("Move to Trash", role: .destructive) { store.trash(sheet.id) }
+                                if !sheet.isTrashed {
+                                    Button("Duplicate sheet") { store.duplicate(sheet.id) }
+                                    MoveMenu(node: sheet)
+                                    Divider()
+                                    Button("Move to Trash", role: .destructive) { store.trash(sheet.id) }
+                                }
+                            } label: {
+                                Image(systemName: "ellipsis.circle").frame(width: 30, height: 30)
                             }
-                        } label: { Image(systemName: "ellipsis.circle") }
-                        #if os(macOS)
-                        .menuStyle(.borderlessButton)
-                        #endif
-                        .frame(width: 24)
+                            #if os(macOS)
+                            .menuStyle(.borderlessButton)
+                            .menuIndicator(.hidden)
+                            #endif
+                            .frame(width: 30, height: 30)
+                            .help("More sheet actions").accessibilityLabel("More sheet actions")
+                        }.font(.system(size: 18)).frame(height: 30)
                     }
                     TagsField(tags: store.binding(sheet.id, \.tags, fallback: [])).disabled(sheet.isTrashed)
                 }.padding(.horizontal, 30).padding(.top, 25).padding(.bottom, 18)

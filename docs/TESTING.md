@@ -55,17 +55,17 @@ those behaviors.
 
 ## Recorded results — 31 October 2026
 
-Host: Apple silicon ARM64, macOS 27.2 (26B123), Apple Swift 6.4.2, full Xcode 27.2
-(27B52).
+Local host: Apple silicon ARM64, macOS 27.2 (26B123), Apple Swift 6.4.2, full
+Xcode 27.2 (27B52). Hosted runs below used the `macos-26` runner and Xcode 26.6.
 
 | Check | Result |
 | --- | --- |
 | Shared model and persistence XCTest | Passed through `scripts/test.sh`: 34 tests, 0 failures, including legacy archives, instrument/paper persistence, size limits, recovery, conflict checks, theme contrast, palette conversion, custom-color handling, and unchanged archived ink |
 | Native macOS debug compilation | Passed using SwiftPM's native build system and isolated scratch directory |
-| App `--smoke-test` | Passed in the final hardened build: save, reopen, archive import, versioned folder backup, oversized-update rejection, final save on quit, 16 signed-update configuration checks, and failed-save restart protection/retry after repairing storage |
+| App `--smoke-test` | Passed: save, reopen, archive import, versioned folder backup, oversized-update rejection, final save on quit, 16 signed-update configuration checks, and failed-save restart protection/retry after repairing storage |
 | iPad project metadata | Passed plist/XML checks; shared app/editor sources are registered in the target |
 | Native AppKit editor integration | Passed: 87 checks covering the shared text/ink page, straight lines and axis snapping, instruments, long pages, RTF/Unicode/formatting, undo/redo, pressure, eraser, combined PNG/PDF export, PencilKit interchange, light/dark rendering, canonical rich-text colors, theme-only changes without saves, and bounded dirty-rectangle drawing |
-| Release app and DMG | Passed in the final hardened ARM64 build: local signature, property list, checksum, read-only mounted image, Applications link, and mounted-app smoke checks |
+| Local app and DMG | Passed for local 0.1.0 build 2 and 0.1.2 build 3 ARM64 artifacts: local signature, property list, checksum, read-only mounted image, Applications link, and mounted-app smoke checks. Local 0.1.2 Mac and iPad compilation also passed |
 | iPad simulator compilation | Passed with full Xcode: `iNotes-iPad` scheme, iPadOS simulator SDK, signing disabled; no source compile errors |
 | iPad simulator launch, themes, and persistence | Passed on a fresh iPad Pro 11-inch (M5), iPadOS 27.2 ARM64 simulator: install, launch, relaunch, unchanged saved library, and live switches in both light/dark directions with the shared page and native tool palette |
 | iPad native editor integration | Passed: 32 opt-in DEBUG checks against a real simulator `PKCanvasView` and native `UndoManager`, covering straight lines, snapping, pressure, per-gesture undo/redo, portable pen conversion, stronger paper guides, adaptive ink, custom-color restoration, theme changes without persistence, and canonical storage of new dark-page strokes |
@@ -76,12 +76,22 @@ Host: Apple silicon ARM64, macOS 27.2 (26B123), Apple Swift 6.4.2, full Xcode 27
 | Live Mac paper and ink themes | Passed all six combinations of light/dark with grid, ruled, and dotted paper. Guides remained visible, existing text/ink adapted, theme-only switches left saved archive bytes unchanged, and newly drawn dark-page strokes retained canonical stored colors |
 | Tracking/menu/export live regression | Passed in the corrected release: More menu opened and tracked safely, plain-text export opened the native save panel, UTF-8 bullets/keyboard symbols saved to the correct `.txt` file, and the app remained running with no new crash report |
 | Straight-line live Mac check | Passed: horizontal and vertical lines persisted as exact two-endpoint strokes alongside unchanged typed text and grid paper |
+| Local header alignment | Passed in local 0.1.2 build 3 in light and dark appearances: star and More icons share a centerline, the redundant menu chevron is hidden, and spacing is comfortable. Favorite toggling updates the filled star and list marker; the complete More menu remains functional |
+| Hosted GitHub CI | Passed [Native checks run 41189297677](https://github.com/icode100/iNotes/actions/runs/41189297677) at source revision `559eeea`: unit/integration tests, ARM64 packaging, mounted-DMG verification, and iPad simulator compilation |
+| Hosted signed release | Passed [release run 41189300121](https://github.com/icode100/iNotes/actions/runs/41189300121) at source revision `559eeea`, publishing [v0.1.1](https://github.com/icode100/iNotes/releases/tag/v0.1.1) with its DMG, checksum, and signed appcast after package and signature checks |
+| Public release download verification | Passed after independently downloading [v0.1.1 assets](https://github.com/icode100/iNotes/releases/tag/v0.1.1): CryptoKit validated the public appcast and DMG signatures against the committed public key, and the DMG matched its published SHA-256 checksum |
 
-The final release app contains 6,675,198 bytes of files (6.37 MiB), including
+The historical **local 0.1.0 build 2** app contains 6,675,198 bytes of files
+(6.37 MiB), including
 1,378,628 bytes (1.31 MiB) for Sparkle. These logical file counts exclude duplicate
-symlink targets. The compressed DMG is 4,225,365 bytes (4.03 MiB). Artifact sizes
-do not measure RAM. The DMG SHA-256 is
+symlink targets. Its compressed DMG is 4,225,365 bytes (4.03 MiB), with SHA-256
 `4c20db3e9715b14de5d8125dbe14aef205dd3260fcaebcdc8ec7f1a3f0b538b3`.
+
+The **local 0.1.2 build 3** app contains 6,729,790 bytes of files (6.42 MiB), and
+its compressed DMG is 4,235,934 bytes (4.04 MiB), with SHA-256
+`bafcc7bf5bbdf823c09eccbd7c993368f5adbdbf8f7f6468494612ee55b3871b`.
+These measurements identify local artifacts; use the checksum asset attached to
+each published release for that download. Artifact sizes do not measure RAM.
 
 The backup smoke test used a temporary local folder to validate archive creation
 and contents. It did not upload through a Google account. iPadOS compilation,
@@ -141,9 +151,9 @@ Build and device results are recorded in the root README or the change report.
 Deployment targets declare intended minimums; they do not establish compatibility
 with every intermediate OS version. Unless explicitly recorded as passed, assume
 physical tablet, physical iPad, Apple Pencil, cloud upload, Gatekeeper on a second Mac, and
-older macOS checks remain unverified. GitHub release publication, a hosted CI run,
-and an end-to-end update from an installed older version through the public
-GitHub feed have not been exercised by the local signature/configuration probes.
+older macOS checks remain unverified. Hosted CI and v0.1.1 publication passed as
+recorded above. An end-to-end update from an installed older version through the
+public GitHub feed has not been exercised by the signature/configuration probes.
 
 Use temporary test libraries for destructive recovery tests. Keep independent
 exports of real notes. Google Drive folder backup relies on the user's installed
