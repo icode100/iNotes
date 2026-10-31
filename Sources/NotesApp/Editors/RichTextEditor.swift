@@ -237,6 +237,8 @@ final class NotesTextView: NSTextView {
     // Native text tracking still receives cursor updates underneath the ink
     // layer. Follow the page's active tool without disabling native editing.
     var pageCursorProvider: (() -> NSCursor?)?
+    var allowsPageTextUndo: (() -> Bool)?
+    var onPageUndoComplete: (() -> Void)?
 
     override func resetCursorRects() {
         // The ink/selection layer covers the page in these modes. Avoid an
@@ -258,7 +260,49 @@ final class NotesTextView: NSTextView {
         return origin
     }
     static weak var activeEditor: NotesTextView?
-    var pageUndoManager: UndoManager?
+    var pageUndoManager: UndoManager? {
+        didSet {
+            guard pageUndoManager !== oldValue else { return }
+            if let state = undoInteractionState {
+                undoInteractionState = nil
+                isEditable = state.editable
+                isSelectable = state.selectable
+            }
+            for observer in pageUndoObservers { NotificationCenter.default.removeObserver(observer) }
+            pageUndoObservers = []
+            guard let pageUndoManager else { return }
+            for name in [Notification.Name.NSUndoManagerWillUndoChange, .NSUndoManagerWillRedoChange] {
+                pageUndoObservers.append(NotificationCenter.default.addObserver(forName: name, object: pageUndoManager, queue: .main) { [weak self] _ in
+                    MainActor.assumeIsolated {
+                        guard let self, !self.isEditable, self.allowsPageTextUndo?() == true else { return }
+                        self.undoInteractionState = (self.isEditable, self.isSelectable)
+                        // AppKit's native text undo refuses edits to a read-only
+                        // text view. Allow only this synchronous history action.
+                        self.isEditable = true
+                    }
+                })
+            }
+            for name in [Notification.Name.NSUndoManagerDidUndoChange, .NSUndoManagerDidRedoChange] {
+                pageUndoObservers.append(NotificationCenter.default.addObserver(forName: name, object: pageUndoManager, queue: .main) { [weak self] _ in
+                    MainActor.assumeIsolated {
+                        guard let self, let state = self.undoInteractionState else { return }
+                        self.undoInteractionState = nil
+                        self.isEditable = state.editable
+                        self.isSelectable = state.selectable
+                        self.onPageUndoComplete?()
+                        self.window?.invalidateCursorRects(for: self)
+                        if let window = self.window, window.isKeyWindow, !self.isHiddenOrHasHiddenAncestor,
+                           self.visibleRect.contains(self.convert(window.mouseLocationOutsideOfEventStream, from: nil)) {
+                            self.pageCursorProvider?()?.set()
+                        }
+                    }
+                })
+            }
+        }
+    }
+    private var pageUndoObservers: [NSObjectProtocol] = []
+    private var undoInteractionState: (editable: Bool, selectable: Bool)?
+    deinit { for observer in pageUndoObservers { NotificationCenter.default.removeObserver(observer) } }
     override var undoManager: UndoManager? { pageUndoManager ?? super.undoManager }
     var onTabletProximity: ((NSEvent) -> Void)?
     override func becomeFirstResponder() -> Bool {

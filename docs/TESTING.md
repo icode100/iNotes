@@ -59,13 +59,69 @@ Local host: Apple silicon ARM64, macOS 27.2 (26B123), Apple Swift 6.4.2, full
 Xcode 27.2 (27B52). Hosted workflows use the `macos-26` runner; the recorded
 0.1.x hosted runs used Xcode 26.6.
 
+### 0.2.2 local cursor and production validation
+
+The second live candidate fixes the observed ink-tool hover cursor by disabling
+native body/textbox editing and selection while an ink tool is selected. Text
+mode restores native editing; double-clicking a movable text box selects Text.
+The preceding page/clip-only candidate still showed the I-beam.
+
+- Actual toolbar clicks selected Pen, Pencil, Marker, and Highlighter. A
+  user-approved native hover probe moved the pointer with `CGWarpMouseCursorPosition`
+  and queued mouse-moved events in the app's own `NSApp` event queue. It did not
+  change system permissions; external event posting was denied by TCC.
+- The trace recorded the actual `NSCursor.currentSystem` tip for each tool:
+  Pen 9×9, Pencil 8×8, Marker 14×14, and Highlighter 24×24 pixels. Captures of the
+  system cursor were visually checked as three dot tips and a chisel tip.
+- Selecting Text and sending real keyboard input `pbh` produced the literal
+  text `Cursor typing check: pbh`.
+
+Evidence: `/private/tmp/inotes-cursor-live/candidate2-trace.log` and the
+`system-pen`, `system-pencil`, `system-marker`, and `system-highlighter` cursor
+captures in the same directory. Clean production validation follows. Physical
+tablet pressure/tilt and physical stylus hover remain unverified.
+
+The final clean production build, 0.2.2 build 6, passed all 50 XCTest tests with
+zero failures (0.709 seconds). Its app bundle passed 195 native editor checks,
+31 equation checks, 8 shortcut checks, 12 ruled-layout checks, 16 updater
+configuration checks, and store/backup integration checks. The mounted DMG
+passed strict signatures, ARM64 architecture, and resource verification. The
+production source and app contain no temporary diagnostic probes.
+
+A clean QA app used the same compiled production code in an isolated app copy
+with a separate bundle ID and test-library configuration. Actual keyboard input typed `z` in
+Text, selected Pen, then used Command-Z to remove `z`, Command-Shift-Z to
+restore it, and Command-Z to remove it again. A user-approved native pointer
+warp over this app, followed by actual keyboard undo, retained the 9×9 system
+Pen cursor; its captured dot was visually verified in
+`/private/tmp/inotes-cursor-release/final-system-cursor.png`.
+
+The first edit of the loaded fixture normalized a Core Text font fallback for
+the `⌘` glyph from Helvetica Neue to Lucida Grande; the body text and ink stayed
+unchanged. Repeated undo from that normalized baseline restored exact page
+content and RTF, verified by comparing `ui-before-normalized.json` with the QA
+library's saved `Library.json`. This does not establish byte-identical imported
+RTF after the first edit.
+
+Final local evidence: `/private/tmp/inotes-cursor-release/build.log`,
+`/private/tmp/inotes-cursor-release/tests.log`,
+`/private/tmp/inotes-cursor-release/native.log`, and
+`/private/tmp/inotes-cursor-release/verify.log`. Hosted CI and public-release
+verification for 0.2.2 are pending.
+
 ### 0.2.1 cursor regression validation
 
+**Failed cursor fix in 0.2.1:** after testing the new local 0.2.1 build,
+the user confirmed that both mouse and tablet still showed an I-beam with an
+ink tool selected. The native callback checks below passed, but they did not
+establish the cursor shown during actual use. Live evidence for the subsequent
+0.2.2 candidate is recorded above.
+
 The native body and movable text boxes could restore an I-beam after selecting
-an ink tool. They now defer cursor ownership to the selected page tool, and ink
-tracking restores the current tip when entering the visible paper. Re-selecting
-the same tool refreshes its cursor; clipped, offscreen paper does not replace a
-toolbar/search cursor. Text retains native cursor handling.
+an ink tool. This build added selected-tool cursor providers, ink tracking, and
+same-tool refresh intended to address that behavior. Clipped/offscreen cursor
+handling and Text-mode behavior were covered by the direct callback fixtures;
+these fixtures did not catch the remaining live cursor failure in 0.2.1.
 
 - Local build 5 passed all 50 XCTest tests with zero failures (0.738 seconds).
 - The packaged Mac app passed 159 native editor checks, including 31 new cursor
@@ -83,8 +139,15 @@ toolbar/search cursor. Text retains native cursor handling.
   checks, checksum validation, and mounted-app persistence/backup checks.
 
 Evidence: `/private/tmp/inotes-cursor-tests.log` and
-`/private/tmp/inotes-cursor-native.log`. Hosted release results are recorded
-after verification.
+`/private/tmp/inotes-cursor-native.log`.
+
+### 0.2.1 hosted release verification
+
+| Check | Result |
+| --- | --- |
+| Hosted Native checks | Passed [run 41200356265](https://github.com/icode100/iNotes/actions/runs/41200356265) at source revision [`f159330`](https://github.com/icode100/iNotes/commit/f159330926aa3ca6a3830812e67e47326757e0c9): shared tests, Mac packaging, native cursor/editor checks, mounted-DMG verification, and iPad simulator compilation |
+| Signed release workflow | Passed [run 41200686415](https://github.com/icode100/iNotes/actions/runs/41200686415). Workflow success does not resolve the user-reported cursor issue above |
+| Public assets | Independent public-asset verification has not been recorded |
 
 ### 0.2.0 local feature validation
 
@@ -124,7 +187,7 @@ Artifact sizes do not measure RAM.
 | --- | --- |
 | Signed macOS release workflow | Passed [run 41198905582](https://github.com/icode100/iNotes/actions/runs/41198905582) at source revision [`608ebb7`](https://github.com/icode100/iNotes/commit/608ebb732f518a7a1b2d962492863754055958dc), publishing [v0.2.0](https://github.com/icode100/iNotes/releases/tag/v0.2.0) |
 | Hosted Native checks | Passed [run 41198904250](https://github.com/icode100/iNotes/actions/runs/41198904250) at source revision `608ebb7`: shared tests, ARM64 packaging, mounted-DMG verification, and iPad simulator compilation |
-| Public release assets | Passed independent download of [v0.2.0 assets](https://github.com/icode100/iNotes/releases/tag/v0.2.0): CryptoKit verified the build 1004 appcast and DMG Ed25519 signatures against the committed public key; the DMG matched its published SHA-256 checksum. The default `/releases/latest/download/appcast.xml` was byte-identical to the verified v0.2.0 feed |
+| Public release assets | Passed independent download of [v0.2.0 assets](https://github.com/icode100/iNotes/releases/tag/v0.2.0): CryptoKit verified the build 1004 appcast and DMG Ed25519 signatures against the committed public key; the DMG matched its published SHA-256 checksum. At that verification time, the default `/releases/latest/download/appcast.xml` was byte-identical to the verified v0.2.0 feed |
 | Mounted public installer | Passed independent public-DMG mount, checksum, strict app/framework/helper signatures, ARM64 verification, native icon/font resources, and store/backup smoke checks |
 | Published Mac app runtime | Passed the published SDK 26 app on macOS 27.2: 127 editor checks, 31 equation checks, 8 shortcut checks, 12 ruled-layout checks, 16 updater configuration checks, and store/backup integration. The local SDK 27 app passed 128 editor checks; SDK-specific coverage accounts for the count difference |
 

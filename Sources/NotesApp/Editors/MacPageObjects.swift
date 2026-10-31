@@ -63,10 +63,11 @@ extension UnifiedMacPageView {
             view.editor.pageUndoManager = selectionController?.history
             if view.superview == nil {
                 view.editor.pageCursorProvider = { [weak self] in self?.activePageCursor }
+                view.editor.allowsPageTextUndo = { [weak self] in self?.inkView.isInputEnabled == true }
                 addSubview(view, positioned: .below, relativeTo: inkView)
                 textBoxViews[box.id] = view
             }
-            view.configure(box, theme: theme, paper: paperView.paper, editable: editable, onChange: { onTextBoxChange(box.id, $0, $1) })
+            view.configure(box, theme: theme, paper: paperView.paper, editable: editable && activeTool == .text, onChange: { onTextBoxChange(box.id, $0, $1) })
         }
         for equation in equations {
             let view = equationViews[equation.id] ?? EquationDisplayView(frame: .zero)

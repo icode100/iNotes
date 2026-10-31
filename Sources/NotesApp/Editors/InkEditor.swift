@@ -288,6 +288,7 @@ final class InkDocumentView: NSView {
     var drawsPaper = true
     var onChange: (([InkStroke]) -> Void)?
     var onInputChange: ((String) -> Void)?
+    var onTipCursorChange: (() -> Void)?
     weak var pageSelectionHistory: UndoManager?
     var isInputEnabled = true {
         didSet {
@@ -374,6 +375,7 @@ final class InkDocumentView: NSView {
 
     private func invalidateTipCursor() {
         window?.invalidateCursorRects(for: self)
+        onTipCursorChange?()
         if showsTipCursor, let window, window.isKeyWindow,
            !isHiddenOrHasHiddenAncestor,
            visibleRect.contains(convert(window.mouseLocationOutsideOfEventStream, from: nil)) {

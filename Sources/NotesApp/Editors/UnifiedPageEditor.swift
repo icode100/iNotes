@@ -104,11 +104,11 @@ struct UnifiedPageEditor: NSViewRepresentable {
                 pencilKitData = content.pencilKitData; textBoxes = content.textBoxes; equations = content.equations
             }
         }
+        page.inkView.isInputEnabled = isEnabled
         page.activeTool = tool
         page.theme = theme
-        page.textView.isEditable = isEnabled
-        page.textView.isSelectable = isEnabled
-        page.inkView.isInputEnabled = isEnabled
+        page.textView.isEditable = isEnabled && tool == .text
+        page.textView.isSelectable = isEnabled && tool == .text
         page.inkView.showsTipCursor = tool != .text && tool != .select && tool != .lasso
         page.inkView.tool = tool == .text ? .pen : tool
         page.inkView.colorHex = colorHex
@@ -219,6 +219,7 @@ final class UnifiedMacPageView: NSView {
     weak var selectionController: MacPageSelectionController?
     var textBoxViews: [UUID: MacPageTextBoxView] = [:]
     var equationViews: [UUID: EquationDisplayView] = [:]
+    private var toolTrackingArea: NSTrackingArea?
     var activeTool: InkTool = .pen {
         didSet {
             guard activeTool != oldValue else { return }
@@ -245,6 +246,8 @@ final class UnifiedMacPageView: NSView {
         addSubview(selectionView)
         inkView.drawsPaper = false
         textView.drawsBackground = false
+        textView.isEditable = false
+        textView.isSelectable = false
         textView.backgroundColor = .clear
         textView.appearance = NSAppearance(named: .aqua)
         textView.usesAdaptiveColorMappingForDarkAppearance = false
@@ -254,10 +257,41 @@ final class UnifiedMacPageView: NSView {
         textView.textContainer?.widthTracksTextView = true
         textView.onTabletProximity = { [weak inkView] event in inkView?.tabletProximity(with: event) }
         textView.pageCursorProvider = { [weak self] in self?.activePageCursor }
+        textView.allowsPageTextUndo = { [weak self] in self?.inkView.isInputEnabled == true }
+        textView.onPageUndoComplete = { [weak self] in self?.refreshToolCursor() }
+        inkView.onTipCursorChange = { [weak self] in self?.updateDocumentCursor() }
         positionLayers()
     }
 
     required init?(coder: NSCoder) { fatalError("init(coder:) is unavailable") }
+
+    override func viewDidMoveToWindow() {
+        super.viewDidMoveToWindow()
+        refreshToolCursor()
+    }
+
+    override func updateTrackingAreas() {
+        if let toolTrackingArea { removeTrackingArea(toolTrackingArea) }
+        toolTrackingArea = nil
+        super.updateTrackingAreas()
+        if activeTool != .text {
+            let area = NSTrackingArea(rect: .zero, options: [.cursorUpdate, .activeInKeyWindow, .inVisibleRect],
+                                      owner: self, userInfo: nil)
+            addTrackingArea(area)
+            toolTrackingArea = area
+        }
+    }
+
+    override func resetCursorRects() {
+        if let cursor = activePageCursor { addCursorRect(visibleRect, cursor: cursor) }
+    }
+
+    override func cursorUpdate(with event: NSEvent) {
+        // Updates from the top selection layer travel through this parent,
+        // not through its sibling ink view.
+        if let cursor = activePageCursor { cursor.set() }
+        else { super.cursorUpdate(with: event) }
+    }
 
     override func hitTest(_ point: NSPoint) -> NSView? {
         let location = convert(point, from: superview)
@@ -286,6 +320,13 @@ final class UnifiedMacPageView: NSView {
     func focus(tool: InkTool) {
         textView.breakUndoCoalescing()
         for box in textBoxViews.values { box.editor.breakUndoCoalescing() }
+        // NSTextView's internal hover tracking also sets an I-beam. Retire
+        // native text interaction while another tool owns the shared page.
+        let editsText = inkView.isInputEnabled && tool == .text
+        for editor in [textView] + textBoxViews.values.map(\.editor) {
+            editor.isEditable = editsText
+            editor.isSelectable = editsText
+        }
         if tool == .text { window?.makeFirstResponder(textView) }
         else if tool == .select || tool == .lasso { window?.makeFirstResponder(selectionView) }
         else { window?.makeFirstResponder(inkView) }
@@ -306,6 +347,8 @@ final class UnifiedMacPageView: NSView {
     func refreshToolCursor() {
         inkView.tool = activeTool == .text ? .pen : activeTool
         inkView.showsTipCursor = activeTool != .text && activeTool != .select && activeTool != .lasso
+        updateTrackingAreas()
+        updateDocumentCursor()
         let cursorViews: [NSView] = [textView, inkView, selectionView] + textBoxViews.values.map(\.editor)
         for view in cursorViews {
             window?.invalidateCursorRects(for: view)
@@ -313,6 +356,13 @@ final class UnifiedMacPageView: NSView {
         guard let window, window.isKeyWindow, !isHiddenOrHasHiddenAncestor,
               visibleRect.contains(convert(window.mouseLocationOutsideOfEventStream, from: nil)) else { return }
         (activePageCursor ?? .iBeam).set()
+    }
+
+    private func updateDocumentCursor() {
+        // AppKit also resolves document hover through NSClipView. Keep that
+        // owner synchronized with tool, nib, color, theme and magnification.
+        enclosingScrollView?.documentCursor = activePageCursor ?? .iBeam
+        window?.invalidateCursorRects(for: self)
     }
 
     override func tabletProximity(with event: NSEvent) { inkView.tabletProximity(with: event) }

@@ -446,6 +446,10 @@ final class MacPageSelectionView: NSView {
                 controller.onEquationEdit?(equation); return
             }
             if let box = controller.content.textBoxes.reversed().first(where: { page.textBoxViews[$0.id]?.frame.contains(CGPoint(x: point.x, y: point.y)) == true }), let view = page.textBoxViews[box.id] {
+                // Explicit double-click editing selects Text in the toolbar
+                // too, so subsequent model refreshes keep this editor active.
+                page.activeTool = .text
+                ToolShortcuts.activate(.text)
                 window?.makeFirstResponder(view.editor); view.editor.selectAll(nil); return
             }
         }

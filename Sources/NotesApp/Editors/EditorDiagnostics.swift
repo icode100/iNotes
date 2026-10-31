@@ -231,6 +231,7 @@ enum EditorDiagnostics {
             return view.subviews.lazy.compactMap(findPage).first
         }
         guard let page = findPage(sharedHost) else { throw Failure(description: "Shared page did not mount") }
+        guard let pageScroll = page.enclosingScrollView else { throw Failure(description: "Shared page scroll view did not mount") }
         try check(page.textView.string == pageText && page.inkView.strokes == pageStrokes, "text and ink mount on the same paper")
         try check(!page.textView.drawsBackground && !page.inkView.drawsPaper
                   && page.subviews.firstIndex(of: page.textView)! < page.subviews.firstIndex(of: page.inkView)!
@@ -272,7 +273,16 @@ enum EditorDiagnostics {
         defer { NSCursor.arrow.set() }
         for tool in [InkTool.pen, .pencil, .marker, .highlighter, .line, .eraser, .select, .lasso] {
             page.activeTool = tool
+            try check(!page.textView.isEditable && !page.textView.isSelectable && !boxEditor.isEditable && !boxEditor.isSelectable,
+                      "\(tool.rawValue) retires native text interaction and its internal hover tracking")
             let expected = page.activePageCursor!
+            NSCursor.iBeam.set()
+            page.cursorUpdate(with: cursor)
+            try check(NSCursor.current === expected, "\(tool.rawValue) parent page owns cursor updates")
+            NSCursor.iBeam.set()
+            page.selectionView.cursorUpdate(with: cursor)
+            try check(NSCursor.current === expected, "\(tool.rawValue) overlay cursor updates resolve through the page responder chain")
+            try check(pageScroll.documentCursor === expected, "\(tool.rawValue) keeps the enclosing scroll document cursor synchronized")
             for nativeText in [page.textView, boxEditor] {
                 NSCursor.iBeam.set()
                 nativeText.cursorUpdate(with: cursor)
@@ -302,14 +312,13 @@ enum EditorDiagnostics {
         let thinCursor = page.inkView.tipCursor()
         page.inkView.lineWidth = 12
         page.textView.cursorUpdate(with: cursor)
-        try check(NSCursor.current === page.inkView.tipCursor() && NSCursor.current !== thinCursor,
+        try check(NSCursor.current === page.inkView.tipCursor() && NSCursor.current !== thinCursor && pageScroll.documentCursor === NSCursor.current,
                   "text-layer cursor updates use the current pen width")
-        if let scroll = page.enclosingScrollView {
-            scroll.magnification = 1.5
-            boxEditor.cursorUpdate(with: cursor)
-            try check(NSCursor.current === page.inkView.tipCursor(), "textbox cursor updates follow page zoom")
-            scroll.magnification = 1
-        }
+        pageScroll.magnification = 1.5
+        boxEditor.cursorUpdate(with: cursor)
+        try check(NSCursor.current === page.inkView.tipCursor() && pageScroll.documentCursor === NSCursor.current,
+                  "textbox and document cursor updates follow page zoom")
+        pageScroll.magnification = 1
         // Outside the clipped viewport, reselecting a tool must not replace a
         // toolbar/search cursor, even if the point is within the long page.
         window.testPointerLocation = page.convert(NSPoint(x: 80, y: 1800), to: nil)
@@ -319,6 +328,9 @@ enum EditorDiagnostics {
         window.testPointerLocation = nil
         page.inkView.lineWidth = 2.5
         page.activeTool = .text
+        try check(page.textView.isEditable && page.textView.isSelectable && boxEditor.isEditable && boxEditor.isSelectable,
+                  "Text restores native body and movable textbox interaction")
+        try check(pageScroll.documentCursor === NSCursor.iBeam, "Text restores the enclosing document I-beam")
         for nativeText in [page.textView, boxEditor] {
             NSCursor.arrow.set()
             nativeText.cursorUpdate(with: cursor)
@@ -735,6 +747,36 @@ enum EditorDiagnostics {
         do { _ = try PortableInkConverter.validatedClipboardDrawing(sparseLongDrawing.dataRepresentation(), fallback: []) }
         catch let error as LibraryError { samplingBudgetRejected = error == .tooLarge }
         try check(samplingBudgetRejected, "sparse long native clipboard paths are rejected before portable resampling amplifies their point count")
+        var editableBox = PageTextBox(x: 100, y: 100, width: 200, text: "Edit me")
+        selector.load(PageContent(textBoxes: [editableBox]))
+        func renderEditableBox() {
+            selectionPage.displayObjects(textBoxes: [editableBox], equations: [], editable: true,
+                                         onTextBoxChange: { _, text, rtf in editableBox.text = text; editableBox.rtfData = rtf },
+                                         onEquationEdit: nil)
+        }
+        renderEditableBox()
+        selectionPage.activeTool = .select
+        let editScroll = NSScrollView(frame: NSRect(x: 0, y: 0, width: 640, height: 480))
+        editScroll.documentView = selectionPage
+        window.contentView = editScroll
+        let editPoint = selectionPage.convert(NSPoint(x: 110, y: 110), to: nil)
+        guard let doubleClick = NSEvent.mouseEvent(with: .leftMouseDown, location: editPoint, modifierFlags: [], timestamp: 0,
+                                                   windowNumber: window.windowNumber, context: nil, eventNumber: 0, clickCount: 2, pressure: 0),
+              let editableView = selectionPage.textBoxViews[editableBox.id]?.editor else {
+            throw Failure(description: "Cannot prepare textbox double-click regression")
+        }
+        selectionPage.selectionView.mouseDown(with: doubleClick)
+        try check(selectionPage.activeTool == .text && editableView.isEditable && window.firstResponder === editableView,
+                  "double-clicking a selected textbox enters Text and focuses its native editor")
+        selector.history.beginUndoGrouping()
+        editableView.insertText("Changed", replacementRange: editableView.selectedRange())
+        selector.history.endUndoGrouping()
+        renderEditableBox()
+        selector.history.beginUndoGrouping()
+        editableView.insertText(" again", replacementRange: editableView.selectedRange())
+        selector.history.endUndoGrouping()
+        try check(editableBox.text == "Changed again" && editableView.isEditable,
+                  "textbox editing continues after a model refresh in Text mode")
         return "\(checks) native editor integration checks passed (shared text/ink page, straight lines, formatting, pressure, dark/light, searchable export, mixed text/ink lasso, atomic move/delete/undo, canonical rich text, native PencilKit masks and clipboard validation)."
     }
 }
