@@ -9,14 +9,32 @@ struct UnifiedPageEditor: NSViewRepresentable {
     @Binding var rtfData: Data?
     @Binding var strokes: [InkStroke]
     @Binding var pencilKitData: Data?
+    @Binding var textBoxes: [PageTextBox]
+    @Binding var equations: [NoteEquation]
     var tool: InkTool = .pen
     var colorHex = "#314D43"
     var lineWidth: Double = 2.5
     var paper: InkPaper = .dotted
     var theme: PageTheme = .light
+    var onPageChange: ((PageContent) -> Void)? = nil
+    var onEquationEdit: ((NoteEquation) -> Void)? = nil
     var onTextChange: ((String, Data?) -> Void)? = nil
     var onInkChange: (([InkStroke], Data?) -> Void)? = nil
     var onInputChange: ((String) -> Void)? = nil
+
+    init(text: Binding<String>, rtfData: Binding<Data?>, strokes: Binding<[InkStroke]>, pencilKitData: Binding<Data?>,
+         textBoxes: Binding<[PageTextBox]> = .constant([]), equations: Binding<[NoteEquation]> = .constant([]),
+         tool: InkTool = .pen, colorHex: String = "#314D43", lineWidth: Double = 2.5,
+         paper: InkPaper = .dotted, theme: PageTheme = .light,
+         onTextChange: ((String, Data?) -> Void)? = nil, onInkChange: (([InkStroke], Data?) -> Void)? = nil,
+         onInputChange: ((String) -> Void)? = nil, onPageChange: ((PageContent) -> Void)? = nil,
+         onEquationEdit: ((NoteEquation) -> Void)? = nil) {
+        _text = text; _rtfData = rtfData; _strokes = strokes; _pencilKitData = pencilKitData
+        _textBoxes = textBoxes; _equations = equations; self.tool = tool; self.colorHex = colorHex
+        self.lineWidth = lineWidth; self.paper = paper; self.theme = theme
+        self.onTextChange = onTextChange; self.onInkChange = onInkChange; self.onInputChange = onInputChange
+        self.onPageChange = onPageChange; self.onEquationEdit = onEquationEdit
+    }
 
     func makeCoordinator() -> Coordinator { Coordinator(self) }
 
@@ -33,6 +51,11 @@ struct UnifiedPageEditor: NSViewRepresentable {
         scroll.documentView = page
         page.theme = theme
         page.textView.delegate = context.coordinator.richText
+        page.selectionController = context.coordinator.selection
+        page.textView.pageUndoManager = context.coordinator.selection.history
+        page.inkView.pageSelectionHistory = context.coordinator.selection.history
+        context.coordinator.selection.page = page
+        page.selectionView.controller = context.coordinator.selection
         context.coordinator.richText.load(text: text, rtf: rtfData, into: page.textView)
         configure(page, coordinator: context.coordinator, isEnabled: context.environment.isEnabled)
         return scroll
@@ -47,7 +70,6 @@ struct UnifiedPageEditor: NSViewRepresentable {
         page.theme = theme
         if contentChanged || themeChanged {
             context.coordinator.richText.load(text: text, rtf: rtfData, into: page.textView)
-            if contentChanged { page.textView.undoManager?.removeAllActions() }
         }
         configure(page, coordinator: context.coordinator, isEnabled: context.environment.isEnabled)
     }
@@ -57,22 +79,51 @@ struct UnifiedPageEditor: NSViewRepresentable {
     }
 
     private func configure(_ page: UnifiedMacPageView, coordinator: Coordinator, isEnabled: Bool) {
+        let value = PageContent(text: text, rtfData: rtfData, strokes: strokes, pencilKitData: pencilKitData, textBoxes: textBoxes, equations: equations)
+        coordinator.selection.load(value)
+        page.textView.pageUndoManager = coordinator.selection.history
+        coordinator.richText.parent.onChange = { [weak coordinator] text, rtf in coordinator?.nativeTextChanged(text, rtf: rtf) }
+        page.inkView.pageSelectionHistory = coordinator.selection.history
+        coordinator.selection.onEquationEdit = onEquationEdit
+        coordinator.selection.onRender = { [weak page, weak coordinator] content in
+            guard let page, let coordinator else { return }
+            coordinator.richText.parent = RichTextEditor(text: .constant(content.text), rtfData: .constant(content.rtfData), theme: theme,
+                                                        onChange: { [weak coordinator] text, rtf in coordinator?.nativeTextChanged(text, rtf: rtf) })
+            if coordinator.richText.lastText != content.text || coordinator.richText.lastRTF != content.rtfData {
+                coordinator.richText.load(text: content.text, rtf: content.rtfData, into: page.textView)
+            }
+            page.inkView.strokes = content.strokes
+            page.inkView.needsDisplay = true
+            coordinator.renderObjects(content, on: page, enabled: isEnabled)
+            page.resizePaperToContent()
+        }
+        coordinator.selection.onCommit = { content in
+            if let onPageChange { onPageChange(content) }
+            else {
+                text = content.text; rtfData = content.rtfData; strokes = content.strokes
+                pencilKitData = content.pencilKitData; textBoxes = content.textBoxes; equations = content.equations
+            }
+        }
         page.activeTool = tool
         page.theme = theme
         page.textView.isEditable = isEnabled
         page.textView.isSelectable = isEnabled
         page.inkView.isInputEnabled = isEnabled
+        page.inkView.showsTipCursor = tool != .text && tool != .select && tool != .lasso
         page.inkView.tool = tool == .text ? .pen : tool
         page.inkView.colorHex = colorHex
         page.inkView.lineWidth = max(0.5, min(30, lineWidth))
         if page.inkView.paper != paper { page.inkView.paper = paper; page.inkView.needsDisplay = true }
         if page.paperView.paper != paper { page.paperView.paper = paper; page.paperView.needsDisplay = true }
+        RuledTextLayout.attach(to: page.textView, paper: paper, pageOriginY: page.textView.frame.minY)
+        coordinator.renderObjects(value, on: page, enabled: isEnabled)
         if !page.inkView.isDrawing, page.inkView.strokes != strokes {
             page.inkView.strokes = strokes
-            page.inkView.undoManager?.removeAllActions()
             page.inkView.needsDisplay = true
         }
         page.inkView.onChange = { value in
+            coordinator.selection.content.strokes = value
+            coordinator.selection.content.pencilKitData = nil
             if let onInkChange { onInkChange(value, nil) }
             else { strokes = value; pencilKitData = nil }
         }
@@ -85,29 +136,63 @@ struct UnifiedPageEditor: NSViewRepresentable {
     final class Coordinator {
         var parent: UnifiedPageEditor
         let richText: RichTextEditor.Coordinator
+        let selection = MacPageSelectionController()
+        private var toolFocusObserver: NSObjectProtocol?
 
         init(_ parent: UnifiedPageEditor) {
             self.parent = parent
             richText = RichTextEditor.Coordinator(parent.textEditor)
+            toolFocusObserver = NotificationCenter.default.addObserver(forName: .noteToolFocus, object: nil, queue: .main) { [weak self] notification in
+                MainActor.assumeIsolated {
+                    guard let self, let page = self.selection.page, page.window?.isKeyWindow == true,
+                          let tool = notification.object as? InkTool else { return }
+                    page.focus(tool: tool)
+                }
+            }
+        }
+
+        deinit { if let toolFocusObserver { NotificationCenter.default.removeObserver(toolFocusObserver) } }
+
+        func nativeTextChanged(_ text: String, rtf: Data?) {
+            selection.content.text = text; selection.content.rtfData = rtf
+            if let callback = parent.onTextChange { callback(text, rtf) }
+            else { parent.text = text; parent.rtfData = rtf }
+        }
+
+        func renderObjects(_ content: PageContent, on page: UnifiedMacPageView, enabled: Bool) {
+            page.displayObjects(textBoxes: content.textBoxes, equations: content.equations, editable: enabled,
+                                onTextBoxChange: { [weak self, weak page] id, text, rtf in
+                guard let self, let page, let index = self.selection.content.textBoxes.firstIndex(where: { $0.id == id }) else { return }
+                var value = self.selection.content
+                value.textBoxes[index].text = text; value.textBoxes[index].rtfData = rtf
+                self.selection.content = value
+                self.selection.onCommit?(value)
+                page.resizePaperToContent()
+            }, onEquationEdit: parent.onEquationEdit)
         }
     }
 }
 
 @MainActor
 enum UnifiedPageExport {
-    static func pdf(text: String, rtfData: Data?, strokes: [InkStroke], paper: InkPaper, theme: PageTheme = .light) -> Data {
-        let page = makePage(text: text, rtfData: rtfData, strokes: strokes, paper: paper, theme: theme)
+    static func pdf(text: String, rtfData: Data?, strokes: [InkStroke], paper: InkPaper, theme: PageTheme = .light, textBoxes: [PageTextBox] = [], equations: [NoteEquation] = []) -> Data {
+        let page = makePage(text: text, rtfData: rtfData, strokes: strokes, paper: paper, theme: theme, textBoxes: textBoxes, equations: equations)
         return page.dataWithPDF(inside: page.bounds)
     }
 
-    static func png(text: String, rtfData: Data?, strokes: [InkStroke], paper: InkPaper, theme: PageTheme = .light) -> Data? {
-        let page = makePage(text: text, rtfData: rtfData, strokes: strokes, paper: paper, theme: theme)
+    static func png(text: String, rtfData: Data?, strokes: [InkStroke], paper: InkPaper, theme: PageTheme = .light, textBoxes: [PageTextBox] = [], equations: [NoteEquation] = []) -> Data? {
+        let page = makePage(text: text, rtfData: rtfData, strokes: strokes, paper: paper, theme: theme, textBoxes: textBoxes, equations: equations)
+        // AppKit caches at the current backing scale (normally 2x Retina).
+        // Bound actual raster pixels before allocating a giant object page.
+        let scale = NSScreen.main?.backingScaleFactor ?? 2
+        guard page.bounds.width.isFinite, page.bounds.height.isFinite,
+              page.bounds.width * page.bounds.height * scale * scale <= 40_000_000 else { return nil }
         guard let bitmap = page.bitmapImageRepForCachingDisplay(in: page.bounds) else { return nil }
         page.cacheDisplay(in: page.bounds, to: bitmap)
         return bitmap.representation(using: .png, properties: [:])
     }
 
-    private static func makePage(text: String, rtfData: Data?, strokes: [InkStroke], paper: InkPaper, theme: PageTheme) -> UnifiedMacPageView {
+    private static func makePage(text: String, rtfData: Data?, strokes: [InkStroke], paper: InkPaper, theme: PageTheme, textBoxes: [PageTextBox], equations: [NoteEquation]) -> UnifiedMacPageView {
         let page = UnifiedMacPageView(frame: NSRect(origin: .zero, size: InkExport.paperSize))
         page.theme = theme
         let richText = RichTextEditor(text: .constant(text), rtfData: .constant(rtfData), theme: theme)
@@ -119,6 +204,7 @@ enum UnifiedPageExport {
         page.inkView.paper = paper
         page.paperView.paper = paper
         page.inkView.isInputEnabled = false
+        page.displayObjects(textBoxes: textBoxes, equations: equations, editable: false, onTextBoxChange: { _,_,_ in }, onEquationEdit: nil)
         page.resizePaperToContent()
         return page
     }
@@ -129,7 +215,17 @@ final class UnifiedMacPageView: NSView {
     let paperView = UnifiedMacPaperView(frame: NSRect(origin: .zero, size: InkExport.paperSize))
     let inkView = InkDocumentView(frame: NSRect(origin: .zero, size: InkExport.paperSize))
     let textView = RichTextEditor.makeNativeTextView()
-    var activeTool: InkTool = .pen
+    let selectionView = MacPageSelectionView(frame: .zero)
+    weak var selectionController: MacPageSelectionController?
+    var textBoxViews: [UUID: MacPageTextBoxView] = [:]
+    var equationViews: [UUID: EquationDisplayView] = [:]
+    var activeTool: InkTool = .pen {
+        didSet {
+            guard activeTool != oldValue else { return }
+            window?.invalidateCursorRects(for: selectionView)
+            focus(tool: activeTool)
+        }
+    }
     var theme: PageTheme = .light {
         didSet {
             guard theme != oldValue else { return }
@@ -147,6 +243,7 @@ final class UnifiedMacPageView: NSView {
         addSubview(paperView)
         addSubview(textView)
         addSubview(inkView)
+        addSubview(selectionView)
         inkView.drawsPaper = false
         textView.drawsBackground = false
         textView.backgroundColor = .clear
@@ -173,19 +270,31 @@ final class UnifiedMacPageView: NSView {
 
     func inputView(at location: NSPoint, event: NSEvent?) -> NSView? {
         guard bounds.contains(location) else { return nil }
-        let tablet = Self.inputIsTablet(event: event)
-        // A stylus always writes. The text tool changes mouse/trackpad input;
-        // text and handwriting remain visible on the same sheet in either case.
-        if activeTool == .text, !tablet, textView.frame.contains(location) {
+        if activeTool == .select || activeTool == .lasso { return selectionView }
+        // The active tool owns pointer routing. Text accepts mouse and tablet
+        // caret selection; an attached or hovering pen never changes the tool.
+        // Both native text and handwriting remain visible on the same paper.
+        if activeTool == .text {
             onInputChange?("Keyboard / text")
+            if let box = textBoxViews.values.first(where: { $0.frame.contains(location) }) { return box.editor }
+            if let equation = equationViews.values.first(where: { $0.frame.contains(location) }) { return equation }
             return textView
         }
         return inkView
     }
 
+    func focus(tool: InkTool) {
+        textView.breakUndoCoalescing()
+        for box in textBoxViews.values { box.editor.breakUndoCoalescing() }
+        if tool == .text { window?.makeFirstResponder(textView) }
+        else if tool == .select || tool == .lasso { window?.makeFirstResponder(selectionView) }
+        else { window?.makeFirstResponder(inkView) }
+    }
+
     override func tabletProximity(with event: NSEvent) { inkView.tabletProximity(with: event) }
 
     func resizePaperToContent() {
+        RuledTextLayout.attach(to: textView, paper: paperView.paper, pageOriginY: textView.frame.minY)
         let manager = textView.layoutManager
         if let container = textView.textContainer { manager?.ensureLayout(for: container) }
         let usedHeight = textView.textContainer.flatMap { manager?.usedRect(for: $0).height } ?? 0
@@ -200,7 +309,9 @@ final class UnifiedMacPageView: NSView {
         ).height
         let textHeight = max(usedHeight, measuredHeight) + 104
         let inkHeight = inkView.strokes.lazy.flatMap(\.points).map(\.y).max().map { $0 + 80 } ?? 0
-        let height = max(InkExport.paperSize.height, textHeight, inkHeight)
+        let objectHeight = max(textBoxViews.values.map { $0.frame.maxY + 80 }.max() ?? 0,
+                               equationViews.values.map { $0.frame.maxY + 80 }.max() ?? 0)
+        let height = max(InkExport.paperSize.height, textHeight, inkHeight, objectHeight)
         if abs(frame.height - height) > 1 { setFrameSize(NSSize(width: InkExport.paperSize.width, height: height)) }
         positionLayers()
     }
@@ -208,8 +319,10 @@ final class UnifiedMacPageView: NSView {
     private func positionLayers() {
         paperView.frame = bounds
         inkView.frame = bounds
+        selectionView.frame = bounds
         textView.frame = NSRect(x: 40, y: 40, width: bounds.width - 80, height: bounds.height - 80)
         textView.textContainer?.containerSize = NSSize(width: textView.bounds.width, height: CGFloat.greatestFiniteMagnitude)
+        RuledTextLayout.attach(to: textView, paper: paperView.paper, pageOriginY: textView.frame.minY)
     }
 }
 

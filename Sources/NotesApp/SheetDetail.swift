@@ -19,6 +19,7 @@ struct SheetDetail: View {
     @ViewState private var exportData = BackupDocument()
     @ViewState private var exportType: UTType = .plainText
     @ViewState private var exportName = "Note"
+    @ViewState private var equationDraft: NoteEquation?
     private var sheet: NoteNode? { store.library.node(id: sheetID) }
     private var inkTool: InkTool { InkTool(rawValue: selectedTool) ?? .pen }
     private var paper: InkPaper { InkPaper(rawValue: sheet?.paperStyle.rawValue ?? "dotted") ?? .dotted }
@@ -44,7 +45,7 @@ struct SheetDetail: View {
                             HStack(spacing: 10) {
                                 Text(sheet.updatedAt.formatted(date: .abbreviated, time: .shortened))
                                 Text("·")
-                                Text("\(sheet.body.split(whereSeparator: \.isWhitespace).count) words")
+                                Text("\(([sheet.body] + sheet.textBoxes.map(\.text)).joined(separator: " ").split(whereSeparator: \.isWhitespace).count) words")
                             }.font(.caption).foregroundStyle(.secondary)
                         }
                         Spacer(minLength: 8)
@@ -87,6 +88,8 @@ struct SheetDetail: View {
                     ScrollView(.horizontal, showsIndicators: false) {
                         HStack(spacing: 12) {
                             drawingTools
+                            selectionActions
+                            equationActions
                             Divider().frame(height: 22)
                             inkSettings
                             #if os(macOS)
@@ -117,15 +120,33 @@ struct SheetDetail: View {
                                   rtfData: store.binding(sheet.id, \.richTextRTF, fallback: nil),
                                   strokes: store.binding(sheet.id, \.strokes, fallback: []),
                                   pencilKitData: store.binding(sheet.id, \.pencilKitData, fallback: nil),
+                                  textBoxes: store.binding(sheet.id, \.textBoxes, fallback: []),
+                                  equations: store.binding(sheet.id, \.equations, fallback: []),
                                   tool: inkTool, colorHex: inkColor, lineWidth: inkWidth, paper: paper, theme: pageTheme,
                                   onTextChange: { text, data in store.update(sheet.id) { $0.body = text; $0.richTextRTF = data } },
                                   onInkChange: { strokes, data in store.update(sheet.id) { $0.strokes = strokes; $0.pencilKitData = data } },
-                                  onInputChange: { inputDevice.report($0) })
+                                  onInputChange: { inputDevice.report($0) },
+                                  onPageChange: { content in store.update(sheet.id) { $0.pageContent = content } },
+                                  onEquationEdit: { equationDraft = $0 })
                     .frame(maxWidth: .infinity, maxHeight: .infinity).disabled(sheet.isTrashed)
                 if !sheet.attachments.isEmpty { attachments(sheet) }
             }
             .background(editorBackground)
             .navigationTitle(sheet.title)
+            .onReceive(NotificationCenter.default.publisher(for: .noteToolShortcut)) { note in
+                if let tool = note.object as? InkTool, !sheet.isTrashed { selectTool(tool) }
+            }
+            #if os(iOS)
+            .navigationBarTitleDisplayMode(.inline)
+            #endif
+            .sheet(item: $equationDraft) { equation in
+                EquationEditor(equation: equation, theme: pageTheme) { saved in
+                    store.update(sheet.id) { note in
+                        if let index = note.equations.firstIndex(where: { $0.id == saved.id }) { note.equations[index] = saved }
+                        else { note.equations.append(saved) }
+                    }
+                }
+            }
             .fileImporter(isPresented: $showAttachmentImporter, allowedContentTypes: [.item], allowsMultipleSelection: true) { result in
                 do { for url in try result.get() { try attach(url, to: sheet.id) } }
                 catch { store.errorMessage = error.localizedDescription }
@@ -172,6 +193,8 @@ struct SheetDetail: View {
     private var drawingTools: some View {
         HStack(spacing: 3) {
             toolButton(.text, title: "Text", symbol: "textformat")
+            toolButton(.select, title: "Select", symbol: "cursorarrow")
+            toolButton(.lasso, title: "Lasso", symbol: "lasso")
             toolButton(.pen, title: "Pen", symbol: "pencil.tip")
             toolButton(.line, title: "Straight line", symbol: "line.diagonal")
             toolButton(.pencil, title: "Pencil", symbol: "pencil")
@@ -182,22 +205,66 @@ struct SheetDetail: View {
     }
 
     private func toolButton(_ tool: InkTool, title: String, symbol: String) -> some View {
-        Button {
-            selectedTool = tool.rawValue
-            switch tool {
-            case .pen: inkWidth = 2.5
-            case .line: inkWidth = 2.5; inkColor = "#30343B"
-            case .pencil: inkWidth = 1.5
-            case .marker: inkWidth = 4
-            case .highlighter: inkWidth = 4.5; inkColor = "#E2B84D"
-            case .text, .eraser: break
-            }
-        } label: {
+        Button { selectTool(tool) } label: {
             Image(systemName: symbol).font(.system(size: 15)).frame(width: 30, height: 30)
                 .background(inkTool == tool ? Color.accentColor.opacity(0.18) : .clear, in: RoundedRectangle(cornerRadius: 6))
         }.buttonStyle(.plain)
-            .help(tool == .line ? "Draw a straight line. Nearby horizontal and vertical lines snap into place; hold Shift on Mac to lock an axis." : "\(title) tool")
+            .help((tool == .line ? "Draw a straight line. Nearby horizontal and vertical lines snap into place; hold Shift on Mac to lock an axis." : "\(title) tool.") + " " + ToolShortcuts.help(for: tool))
             .accessibilityLabel("\(title) tool")
+    }
+
+    private func selectTool(_ tool: InkTool) {
+        selectedTool = tool.rawValue
+        switch tool {
+        case .pen: inkWidth = 2.5
+        case .line: inkWidth = 2.5; inkColor = "#30343B"
+        case .pencil: inkWidth = 1.5
+        case .marker: inkWidth = 4
+        case .highlighter: inkWidth = 4.5; inkColor = "#E2B84D"
+        case .text, .select, .lasso, .eraser: break
+        }
+        NotificationCenter.default.post(name: .noteToolFocus, object: tool)
+    }
+
+    @ViewBuilder
+    private var selectionActions: some View {
+        if inkTool == .select || inkTool == .lasso {
+            Menu {
+                selectionAction("Copy selection", .copy)
+                selectionAction("Cut selection", .cut)
+                selectionAction("Paste", .paste)
+                selectionAction("Duplicate selection", .duplicate)
+                selectionAction("Delete selection", .delete)
+                Divider()
+                selectionAction("Undo selection change", .undo)
+                selectionAction("Redo selection change", .redo)
+                Divider()
+                selectionAction("Select all page content", .selectAll)
+                selectionAction("Clear selection", .clear)
+            } label: { Image(systemName: "square.dashed").frame(width: 30, height: 30) }
+            .help("Selection actions").accessibilityLabel("Selection actions")
+        }
+    }
+
+    private func selectionAction(_ title: String, _ command: PageSelectionCommand) -> some View {
+        Button(title) { NotificationCenter.default.post(name: .pageSelectionCommand, object: command) }
+    }
+
+    private var equationActions: some View {
+        Menu {
+            Button("Insert equation…") {
+                let bottom = max(sheet?.equations.map { $0.y + $0.height }.max() ?? 60,
+                                 sheet?.strokes.flatMap(\.points).map(\.y).max() ?? 60)
+                equationDraft = NoteEquation(x: 60, y: min(99_000, bottom + 30))
+            }
+            if let equations = sheet?.equations, !equations.isEmpty {
+                Divider()
+                ForEach(equations) { equation in
+                    Button("Edit: " + String(equation.latex.prefix(48))) { equationDraft = equation }
+                }
+            }
+        } label: { Image(systemName: "function").frame(width: 30, height: 30) }
+        .help("Insert or edit a LaTeX equation").accessibilityLabel("Equations")
     }
 
     private var inkSettings: some View {
@@ -286,7 +353,7 @@ struct SheetDetail: View {
     }
 
     private func exportText(_ sheet: NoteNode) {
-        exportData = BackupDocument(data: Data((sheet.title + "\n\n" + sheet.body).utf8))
+        exportData = BackupDocument(data: Data((sheet.title + "\n\n" + sheet.plainTextExport).utf8))
         exportType = .plainText
         exportName = sheet.title
         showExporter = true

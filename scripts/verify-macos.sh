@@ -1,7 +1,7 @@
 #!/bin/bash
 set -euo pipefail
 ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
-VERSION="${VERSION:-0.1.0}"
+VERSION="${VERSION:-0.2.0}"
 DMG="${1:-$ROOT/dist/iNotes-$VERSION-arm64.dmg}"
 if [[ ! -f "$DMG" ]]; then
   echo "DMG not found: $DMG" >&2
@@ -56,6 +56,24 @@ test "$(/usr/libexec/PlistBuddy -c 'Print :LSMinimumSystemVersion' "$APP/Content
 test "$(/usr/libexec/PlistBuddy -c 'Print :CFBundleIconName' "$APP/Contents/Info.plist")" = "AppIcon"
 test -f "$APP/Contents/Resources/AppIcon.icns"
 test -f "$APP/Contents/Resources/Assets.car"
+test -s "$APP/Contents/Resources/SwiftMath-LICENSE"
+MATH_FONTS="$APP/Contents/Resources/SwiftMath_SwiftMath.bundle/mathFonts.bundle"
+test -s "$MATH_FONTS/latinmodern-math.otf"
+test -s "$MATH_FONTS/latinmodern-math.plist"
+test -s "$MATH_FONTS/LICENSE"
+test -s "$MATH_FONTS/GUST-FONT-LICENSE.txt"
+python3 - "$MATH_FONTS" <<'PY'
+from pathlib import Path
+import plistlib, sys
+fonts = Path(sys.argv[1])
+assert {path.name for path in fonts.glob('*.otf')} == {'latinmodern-math.otf'}, 'Unexpected bundled math fonts'
+assert {path.name for path in fonts.glob('*.plist')} == {'latinmodern-math.plist'}, 'Unexpected math font layout tables'
+with (fonts / 'latinmodern-math.otf').open('rb') as source:
+    assert source.read(4) == b'OTTO', 'Invalid OpenType math font'
+with (fonts / 'latinmodern-math.plist').open('rb') as source:
+    assert plistlib.load(source)['version'] == '1.3', 'Invalid math layout tables'
+print('Verified complete Latin Modern math font, native layout tables and license notices; unused fonts omitted.')
+PY
 assetutil --info "$APP/Contents/Resources/Assets.car" > "$ICON_INFO"
 python3 - "$ICON_INFO" <<'PY'
 import json

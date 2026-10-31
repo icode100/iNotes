@@ -7,7 +7,7 @@ typealias ViewState<Value> = SwiftUI.State<Value>
 
 extension NoteKind {
     var symbol: String {
-        switch self { case .workbook: "books.vertical"; case .chapter: "folder"; case .topic: "folder.badge.plus"; case .sheet: "doc.text" }
+        switch self { case .workbook: "books.vertical"; case .chapter: "rectangle.stack"; case .topic: "folder"; case .sheet: "doc.text" }
     }
 }
 
@@ -39,6 +39,7 @@ struct ContentView: View {
     @EnvironmentObject private var store: NotesStore
     @ViewState private var nameRequest: NameRequest?
     @ViewState private var showImporter = false
+    @ViewState private var backupFolderDestination: BackupDestination?
     @ViewState private var showExporter = false
     @ViewState private var exportDocument = BackupDocument()
     @ViewState private var showSettings = false
@@ -70,7 +71,6 @@ struct ContentView: View {
             ToolbarItemGroup(placement: .primaryAction) {
                 Menu {
                     Button("New sheet", systemImage: "doc.badge.plus", action: newSheet)
-                    Button("New workbook", systemImage: "books.vertical") { nameRequest = NameRequest(kind: .workbook) }
                     if let folder = store.folders.first(where: { $0.id == store.folderID }) {
                         Button(folder.kind == .workbook ? "New chapter" : "New topic", systemImage: "folder.badge.plus") {
                             nameRequest = NameRequest(kind: folder.kind == .workbook ? .chapter : .topic, parent: folder.id)
@@ -79,23 +79,25 @@ struct ContentView: View {
                 } label: { Label("Create", systemImage: "plus") }
                 .help("Create a sheet or notebook folder")
                 Menu {
-                    #if os(macOS)
-                    Button(store.driveFolder == nil ? "Connect Google Drive folder…" : "Change backup folder…") { MacFileActions.chooseDriveFolder(store) }
-                    if store.driveFolder != nil {
-                        Button("Back up to Drive now") { store.backupToDrive() }
-                        Button("Disconnect backup folder") { store.disconnectDrive() }
+                    ForEach([BackupDestination.iCloudDrive, .googleDrive]) { destination in
+                        Menu {
+                            Button(store.backupFolder(for: destination) == nil ? "Connect folder…" : "Change folder…") { chooseBackupFolder(destination) }
+                            if store.backupFolder(for: destination) != nil {
+                                Button("Back up now") { store.backupNow(to: destination) }
+                                Button("Disconnect folder") { store.disconnectBackup(destination) }
+                            }
+                        } label: { Label(destination.title, systemImage: destination.symbol) }
                     }
                     Divider()
-                    #endif
                     Button("Export library backup…") { exportLibrary() }
-                    Button("Import library backup…") { showImporter = true }
+                    Button("Import library backup…") { backupFolderDestination = nil; showImporter = true }
                     Divider()
                     if store.recoveryAvailable {
                         Button("Recover previous local version…") { showRecovery = true }
                     }
                     Button("About storage & backups") { showSettings = true }
                 } label: {
-                    Label("Backups", systemImage: store.driveFolder == nil ? "externaldrive" : "externaldrive.badge.checkmark")
+                    Label("Automatic backups", systemImage: BackupDestination.allCases.contains(where: { store.backupFolder(for: $0) != nil }) ? "externaldrive.badge.checkmark" : "externaldrive")
                 }
                 .help("Library backups and Google Drive")
             }
@@ -116,13 +118,20 @@ struct ContentView: View {
         .alert("iNotes needs your attention", isPresented: Binding(get: { store.errorMessage != nil }, set: { if !$0 { store.errorMessage = nil } })) {
             Button("OK") { store.errorMessage = nil }
         } message: { Text(store.errorMessage ?? "") }
-        .fileImporter(isPresented: $showImporter, allowedContentTypes: [.iNotesArchive, .json], allowsMultipleSelection: false) { result in
+        .fileImporter(isPresented: $showImporter, allowedContentTypes: backupFolderDestination == nil ? [.iNotesArchive, .json] : [.folder], allowsMultipleSelection: false) { result in
+            defer { backupFolderDestination = nil }
             do {
                 guard let url = try result.get().first else { return }
+                if let destination = backupFolderDestination {
+                    store.rememberBackupFolder(url, for: destination)
+                    return
+                }
                 let access = url.startAccessingSecurityScopedResource()
                 defer { if access { url.stopAccessingSecurityScopedResource() } }
                 store.importArchive(try LibraryArchive.read(from: url))
-            } catch { store.errorMessage = error.localizedDescription }
+            } catch {
+                if (error as NSError).code != NSUserCancelledError { store.errorMessage = error.localizedDescription }
+            }
         }
         .fileExporter(isPresented: $showExporter, document: exportDocument, contentType: .iNotesArchive, defaultFilename: "iNotes Backup") { result in
             if case .failure(let error) = result { store.errorMessage = error.localizedDescription }
@@ -149,7 +158,7 @@ struct ContentView: View {
                         }.buttonStyle(.plain).padding(.vertical, 4)
                     }
                 }
-                Section("WORKBOOKS") {
+                Section("NOTEBOOK HIERARCHY") {
                     ForEach(store.children(nil)) { root in folderRow(root) }
                     Button { nameRequest = NameRequest(kind: .workbook) } label: { Label("New workbook", systemImage: "plus") }
                         .buttonStyle(.plain).foregroundStyle(.secondary).padding(.vertical, 5)
@@ -171,8 +180,16 @@ struct ContentView: View {
             VStack(alignment: .leading, spacing: 5) {
                 Label(store.saveStatus, systemImage: store.dirty ? "circle.dotted" : "checkmark.circle")
                     .font(.caption).foregroundStyle(store.dirty ? Color.orange : Color.secondary)
-                if let last = store.lastBackup {
-                    Text("Drive backup \(last, style: .relative) ago").font(.caption2).foregroundStyle(.secondary)
+                ForEach(BackupDestination.allCases) { destination in
+                    if store.backupFolder(for: destination) != nil {
+                        VStack(alignment: .leading, spacing: 2) {
+                            if let last = store.lastBackup(for: destination) {
+                                Text("\(destination.title): \(last, style: .relative) ago")
+                            } else { Text("\(destination.title): backup pending") }
+                            Text(store.backupStatus(for: destination)).lineLimit(2)
+                        }.font(.caption2).foregroundStyle(.secondary)
+                            .help(store.backupStatus(for: destination))
+                    }
                 }
                 Text("iNotes · local first").font(.caption2).foregroundStyle(.tertiary)
             }.frame(maxWidth: .infinity, alignment: .leading).padding(16)
@@ -203,7 +220,7 @@ struct ContentView: View {
                             Text(sheet.title).font(.headline).lineLimit(2)
                             if sheet.isFavorite { Image(systemName: "star.fill").font(.caption2).foregroundStyle(.orange) }
                         }
-                        Text(sheet.body.isEmpty ? (sheet.strokes.isEmpty && sheet.pencilKitData == nil ? "Empty sheet" : "Handwritten notes") : sheet.body.replacingOccurrences(of: "\n", with: " "))
+                        Text(sheet.plainTextExport.isEmpty ? (sheet.strokes.isEmpty && sheet.pencilKitData == nil ? "Empty sheet" : "Handwritten notes") : sheet.plainTextExport.replacingOccurrences(of: "\n", with: " "))
                             .font(.caption).foregroundStyle(.secondary).lineLimit(2)
                         Text(store.breadcrumb(sheet.parentID)).font(.caption2).foregroundStyle(.tertiary).lineLimit(1)
                     }.padding(.vertical, 8).tag(sheet.id)
@@ -247,6 +264,15 @@ struct ContentView: View {
         do { exportDocument = BackupDocument(data: try store.archiveData()); showExporter = true }
         catch { store.errorMessage = error.localizedDescription }
     }
+
+    private func chooseBackupFolder(_ destination: BackupDestination) {
+        #if os(macOS)
+        MacFileActions.chooseBackupFolder(store, destination: destination)
+        #else
+        backupFolderDestination = destination
+        showImporter = true
+        #endif
+    }
 }
 
 struct FolderTreeRow: View {
@@ -262,22 +288,47 @@ struct FolderTreeRow: View {
                 FolderTreeRow(node: child, choose: choose, request: request)
             }
         } label: {
-            Button { choose(node.id) } label: {
-                Label(node.title, systemImage: node.kind.symbol)
-                    .fontWeight(store.folderID == node.id ? .semibold : .regular)
-                    .foregroundStyle(store.folderID == node.id ? Color.accentColor : Color.primary)
-                    .frame(maxWidth: .infinity, alignment: .leading).contentShape(Rectangle())
-            }.buttonStyle(.plain).padding(.vertical, 4)
-            .contextMenu {
-                Button(node.kind == .workbook ? "New chapter…" : "New topic…") { request(NameRequest(kind: node.kind == .workbook ? .chapter : .topic, parent: node.id)) }
-                if node.kind != .workbook { Button("New sheet…") { request(NameRequest(kind: .sheet, parent: node.id)) } }
-                Divider()
-                Button("Rename…") { request(NameRequest(kind: node.kind, renameID: node.id, title: node.title)) }
-                MoveMenu(node: node)
-                Divider()
-                Button("Move to Trash", role: .destructive) { store.trash(node.id) }
+            HStack(spacing: 4) {
+                Button { choose(node.id) } label: {
+                    HStack(spacing: 8) {
+                        Image(systemName: node.kind.symbol).frame(width: 18)
+                        VStack(alignment: .leading, spacing: 2) {
+                            Text(node.title).lineLimit(1).fontWeight(store.folderID == node.id ? .semibold : .regular)
+                            Text(node.kind.rawValue.capitalized).font(.caption2).foregroundStyle(.secondary)
+                        }
+                        Spacer(minLength: 0)
+                    }.foregroundStyle(store.folderID == node.id ? Color.accentColor : Color.primary)
+                        .frame(maxWidth: .infinity, alignment: .leading).contentShape(Rectangle())
+                }.buttonStyle(.plain).padding(.vertical, 4)
+                    .accessibilityLabel("\(node.kind.rawValue.capitalized): \(node.title)")
+                    .contextMenu {
+                        Button(node.kind == .workbook ? "New chapter…" : "New topic…") { request(NameRequest(kind: childKind, parent: node.id)) }
+                        if node.kind != .workbook { Button("New sheet…") { request(NameRequest(kind: .sheet, parent: node.id)) } }
+                        Divider()
+                        Button("Rename…") { request(NameRequest(kind: node.kind, renameID: node.id, title: node.title)) }
+                        MoveMenu(node: node)
+                        Divider()
+                        Button("Move to Trash", role: .destructive) { store.trash(node.id) }
+                    }
+                Button {
+                    expanded = true
+                    request(NameRequest(kind: childKind, parent: node.id))
+                } label: { Image(systemName: "plus.circle").frame(width: 26, height: 30) }
+                    .buttonStyle(.plain).foregroundStyle(.secondary)
+                    .help("Add \(childKind.rawValue) to \(node.title)")
+                    .accessibilityLabel("Add \(childKind.rawValue) to \(node.title)")
             }
         }
+        .onChange(of: store.folderID) { _, selected in reveal(selected) }
+        .onChange(of: store.sheetID) { _, selected in reveal(selected) }
+        .onChange(of: store.children(node.id).map(\.id)) { previous, current in
+            if current.contains(where: { !previous.contains($0) }) { expanded = true }
+        }
+    }
+
+    private var childKind: NoteKind { node.kind == .workbook ? .chapter : .topic }
+    private func reveal(_ selected: UUID?) {
+        if let selected, store.isDescendant(selected, of: node.id) { expanded = true }
     }
 }
 
@@ -335,16 +386,23 @@ struct StorageInfoView: View {
         VStack(alignment: .leading, spacing: 18) {
             Label("Your notes, close to home", systemImage: "externaldrive.badge.checkmark").font(.title2.weight(.semibold))
             Text("iNotes saves automatically on this device. Local saves keep a previous version for recovery. Export a library backup to keep an independent copy.")
-            Text("Google Drive").font(.headline)
+            ForEach([BackupDestination.iCloudDrive, .googleDrive]) { destination in
+                VStack(alignment: .leading, spacing: 5) {
+                    Label("Auto-save to \(destination.title)", systemImage: destination.symbol).font(.headline)
+                    Text("Connected folder: \(store.backupFolder(for: destination)?.lastPathComponent ?? "None")")
+                    Text(store.backupStatus(for: destination)).foregroundStyle(.secondary)
+                }.font(.callout)
+            }
             #if os(macOS)
-            Text("Install Google Drive for desktop, then connect a folder inside My Drive. iNotes writes a new backup after changes, at most once per minute, and whenever you choose Back up now. Drive handles the upload. Backups are never removed automatically.")
-            Text("Connected folder: \(store.driveFolder?.lastPathComponent ?? "None")").font(.callout).foregroundStyle(.secondary)
+            Text("Use Automatic backups in the toolbar to connect a folder in iCloud Drive or Google Drive for desktop. Automatic backups start after connecting. Google Drive continues independently when iCloud Drive is unavailable.")
             #else
-            Text("Export a library backup and choose Google Drive in Files. Install the Google Drive app and enable its Files location first.")
+            Text("Use Automatic backups in the toolbar, choose a service, then select its folder in Files. Enable iCloud Drive or the Google Drive Files location first. Automatic backups start after connecting; Google Drive continues independently when iCloud Drive is unavailable. Some providers may ask you to reconnect their folder after restarting.")
             #endif
+            Text("After changes, iNotes writes complete, versioned backups at most once per minute and on normal quit. Failed folder writes retry while iNotes is open. The provider handles cloud uploads; a successful folder write does not confirm upload. Existing backups are never removed automatically.").font(.callout)
             Text("To transfer notes between devices, import an .inotes backup. Import adds a separate copy with new identifiers. Backups do not merge concurrent edits automatically.").font(.callout)
             Text("Attachments are embedded in the portable archive. The library limit is 64 MiB; individual attachments are limited to 10 MiB. Text and ink share one page. Rich text, paper style, portable pen paths, and native PencilKit data are preserved; advanced PencilKit tools can look different on Mac.").font(.caption).foregroundStyle(.secondary)
-            Text("iNotes 0.1 · Open source under the MIT license").font(.caption).foregroundStyle(.secondary)
+            Text("iNotes \(Bundle.main.object(forInfoDictionaryKey: "CFBundleShortVersionString") as? String ?? "Development") · Open source under the MIT license")
+                .font(.caption).foregroundStyle(.secondary)
             HStack { Spacer(); Button("Done") { dismiss() }.keyboardShortcut(.defaultAction) }
         }.padding(28).frame(maxWidth: 520)
     }

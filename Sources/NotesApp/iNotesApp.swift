@@ -11,6 +11,7 @@ struct iNotesApp: App {
     @AppStorage("appearance") private var appearance = "system"
     #if os(macOS)
     @StateObject private var updater = AppUpdater()
+    @StateObject private var toolShortcutMonitor = ToolShortcutMonitor()
     @NSApplicationDelegateAdaptor(AppDelegate.self) private var delegate
     #endif
     @Environment(\.scenePhase) private var phase
@@ -31,8 +32,14 @@ struct iNotesApp: App {
                 guard let loaded = try repository.load(), loaded.nodes.count == 3 else { throw CocoaError(.fileReadCorruptFile) }
                 let decoded = try LibraryArchive.decode(LibraryArchive.encode(loaded))
                 guard decoded.nodes.count == 3 else { throw CocoaError(.fileReadCorruptFile) }
-                if CommandLine.arguments.contains("--editor-test") { print(try EditorDiagnostics.run()) }
+                if CommandLine.arguments.contains("--editor-test") {
+                    print(try EditorDiagnostics.run())
+                    print(try EquationDiagnostics.run())
+                    print(try ToolShortcutDiagnostics.run())
+                    print(try RuledTextDiagnostics.run())
+                }
                 print(try StoreDiagnostics.run())
+                print(try BackupDiagnostics.run())
                 print("iNotes self-check passed: hierarchy, atomic save, reload, archive round-trip; \(ProcessInfo.processInfo.operatingSystemVersionString)")
                 exit(0)
             } catch { fputs("iNotes self-check failed: \(error)\n", stderr); exit(1) }
@@ -48,6 +55,7 @@ struct iNotesApp: App {
                 #if os(macOS)
                 .frame(minWidth: 880, minHeight: 580)
                 .onAppear {
+                    _ = toolShortcutMonitor
                     delegate.store = store
                     updater.prepareForInstallation = { [weak store = store] in
                         NSApp.keyWindow?.makeFirstResponder(nil)
@@ -68,7 +76,10 @@ struct iNotesApp: App {
         .windowToolbarStyle(.unified)
         .commands { NotesCommands(store: store, updater: updater) }
         #endif
-        .onChange(of: phase) { _, value in if value != .active { _ = store.flush() } }
+        .onChange(of: phase) { _, value in
+            if value == .background { _ = store.prepareForQuit() }
+            else if value != .active { _ = store.flush() }
+        }
     }
 }
 
@@ -139,6 +150,7 @@ enum StoreDiagnostics {
         try require(store.library.nodes.count == before * 2, "Import adds independent notebooks")
         try require(store.flush(), "Imported notebooks save")
         let drive = directory.appendingPathComponent("Drive", isDirectory: true)
+        try FileManager.default.createDirectory(at: drive, withIntermediateDirectories: true)
         store.driveFolder = drive
         store.backupToDrive()
         try require(store.errorMessage == nil && store.lastBackup != nil, "Versioned backup writes successfully: \(store.errorMessage ?? "")")

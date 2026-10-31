@@ -1,8 +1,11 @@
 # Build and distribution
 
-iNotes uses Apple's native UI frameworks and Swift standard libraries. The one
-third-party native framework is Sparkle 2.10.1 for signed Mac updates, pinned in
-`Package.swift` and `Package.resolved`. macOS is the primary shipping target.
+iNotes uses Apple's native UI frameworks and Swift standard libraries. The pinned
+open-source dependencies are Sparkle 2.10.1 for signed Mac updates and SwiftMath
+1.7.3 for native offline LaTeX math. Both versions are recorded in `Package.swift`
+and `Package.resolved`. [SwiftMath](https://github.com/mgriebling/SwiftMath/tree/1.7.3) is compiled from Swift source; it does not add a
+web view, JavaScript engine, TeX installation, or dynamic rendering framework.
+macOS is the primary shipping target.
 
 ## Mac development
 
@@ -35,9 +38,9 @@ bash scripts/verify-macos.sh
 The build creates:
 
 - `dist/iNotes.app`: native ARM64 app bundle.
-- `dist/iNotes-0.1.0-arm64.dmg`: compressed disk image containing the app, an
+- `dist/iNotes-0.2.0-arm64.dmg`: compressed disk image containing the app, an
   Applications shortcut, and installation instructions.
-- `dist/iNotes-0.1.0-arm64.dmg.sha256`: SHA-256 checksum.
+- `dist/iNotes-0.2.0-arm64.dmg.sha256`: SHA-256 checksum.
 
 Open the disk image and drag iNotes to Applications. The DMG does not install
 background services, kernel extensions, browser runtimes, or privileged helpers.
@@ -45,8 +48,12 @@ The build script validates the property list, architecture, app signature, and D
 before publishing outputs. The verification script mounts it read-only and checks
 the packaged app and Applications shortcut.
 
-Use `VERSION=0.1.1 BUILD_NUMBER=3 bash scripts/build-macos.sh` to change the version.
-Every published update must have a larger build number than its predecessor.
+The defaults are version 0.2.0 and development build 4. To publish an update,
+choose a build number greater than the latest published `CFBundleVersion`.
+For example, `VERSION=0.2.1 BUILD_NUMBER=1005 bash scripts/build-macos.sh` is
+appropriate when the latest published build is 1004. Check the actual release
+before choosing its successor; Sparkle compares build numbers, not just the
+displayed version. The release workflow uses `1000 + GITHUB_RUN_NUMBER`.
 Build products stay under `dist`, module/package caches under `.build`, and the
 temporary native build scratch directory under `/private/tmp`. The scratch
 directory is removed after packaging. The script explicitly selects SwiftPM's
@@ -84,6 +91,59 @@ and app. Unused sandbox XPC services are removed following Sparkle's documented
 procedure. The complete upstream license, including its notices, is bundled as
 `Contents/Resources/Sparkle-LICENSE`. See [update releases](UPDATES.md) for feed
 configuration, the project signing seed, and the version-tag publishing workflow.
+
+## Native equations and font resources
+
+SwiftMath supports common math-mode expressions, including fractions, roots,
+powers, Greek symbols, sums, integrals, and matrices. The equation editor retains
+LaTeX source and uses native views for its live preview and page display. Mac
+combined-page PNG/PDF export includes the rendered equations and positioned text
+alongside handwriting. Full TeX documents, document packages, and arbitrary
+macros are outside this renderer's scope. Source length and nesting/command
+limits bound parsing before the native renderer is called.
+
+The Mac packaging script snapshots the source and manifests into its disposable
+build scratch directory, then resolves the exact dependency versions there. It applies the committed
+`patches/SwiftMath-1.7.3-resource-bundle.patch` there so the native font loader finds
+`Contents/Resources/SwiftMath_SwiftMath.bundle`. This accommodates SwiftPM's CLI
+executable resource accessor while preserving normal signed Mac app structure.
+The original dependency checkout and its version pin stay unchanged.
+
+Only the complete Latin Modern math font and its layout tables are needed by
+iNotes. `scripts/trim-math-fonts.sh` removes unused fonts from the Mac bundle copy,
+reducing the resource payload from approximately 7.1 MiB to 0.8 MiB. It preserves
+every glyph of the selected font and all supplied license notices. The SwiftMath
+MIT license is also copied to `Contents/Resources/SwiftMath-LICENSE`; the font
+bundle retains its GUST/font license files.
+
+The iPad target uses Xcode's normal package-resource integration and includes the
+official approximately 7.1 MiB font bundle. Xcode script-sandbox defaults remain
+enabled. No runtime download is needed for mathematical fonts on either platform.
+
+## Backup folders and archive compatibility
+
+iCloud Drive and Google Drive connect to independently chosen folders. Bookmarks
+retain folder access where supported, and each destination has its own automatic
+backup schedule, last-success time, retry state, and disconnect action. Google
+backups continue when the iCloud folder is unavailable. The app writes complete,
+versioned `.inotes` files and leaves cloud uploading to the selected provider; it
+does not include CloudKit, a cloud SDK, server credentials, or concurrent-edit
+merging. Real provider uploads and physical-device folder permission behavior
+require separate verification.
+
+Archive format 2 preserves positioned rich-text boxes and editable equations.
+The app reads format 1 libraries with empty object arrays and promotes them to
+format 2 when new page objects are added. Old app versions reject format 2 instead
+of saving a copy that discards those objects. Moving or pasting a selected text
+range creates a positioned rich-text box. Rectangular Select and freehand Lasso
+can operate on typed text, handwriting, text boxes, and equations in one atomic
+page transaction and undo snapshot.
+
+Ruled-page alignment uses native text-layout delegates and per-view geometry.
+Body lines and wrapped Unicode follow 28pt ruled rows; larger fonts use whole
+row increments. The helper also aligns empty typing and moved text boxes, then
+restores natural native layout for blank, grid, or dotted paper. It does not
+rewrite stored paragraph attributes or RTF to enforce the display grid.
 
 ## iPad
 

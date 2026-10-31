@@ -1,8 +1,16 @@
 import SwiftUI
 import NotesCore
 
-enum InkTool: String, CaseIterable { case text, pen, line, pencil, marker, highlighter, eraser }
+enum InkTool: String, CaseIterable { case text, select, lasso, pen, line, pencil, marker, highlighter, eraser }
 enum InkPaper: String, CaseIterable { case blank, ruled, dotted, grid }
+
+enum PageSelectionCommand: String, CaseIterable {
+    case copy, cut, paste, delete, duplicate, selectAll, clear, undo, redo
+}
+
+extension Notification.Name {
+    static let pageSelectionCommand = Notification.Name("iNotes.pageSelectionCommand")
+}
 
 enum InkLineGeometry {
     /// Small deviations snap to table axes; Shift can force the closest axis.
@@ -144,6 +152,16 @@ enum InkExport {
 
 @MainActor
 enum InkRenderer {
+    static func bounds(of stroke: InkStroke) -> NSRect? {
+        guard let first = stroke.points.first, stroke.points.allSatisfy({ $0.x.isFinite && $0.y.isFinite }) else { return nil }
+        let width = max(0.5, min(100, stroke.width.isFinite ? stroke.width : 2.5)) * stroke.style.widthMultiplier
+        if stroke.points.count == 1 { return NSRect(x: first.x - width / 2, y: first.y - width / 2, width: width, height: width) }
+        let path = NSBezierPath()
+        path.move(to: NSPoint(x: first.x, y: first.y))
+        for index in 1..<stroke.points.count { appendCurve(to: path, points: stroke.points, at: index) }
+        return path.bounds.insetBy(dx: -width / 2, dy: -width / 2)
+    }
+
     static func draw(strokes: [InkStroke], paper: InkPaper, in requestedRect: NSRect, drawsPaper: Bool = true, theme: PageTheme = .light) {
         // Layer-backed offscreen rendering can request an effectively infinite
         // dirty rectangle. Intersect the real clip before constructing a grid.
@@ -260,16 +278,17 @@ enum InkRenderer {
 @MainActor
 final class InkDocumentView: NSView {
     var strokes: [InkStroke] = []
-    var colorHex = "#314D43"
-    var lineWidth: Double = 2.5
-    var tool: InkTool = .pen
+    var colorHex = "#314D43" { didSet { if colorHex != oldValue { invalidateTipCursor() } } }
+    var lineWidth: Double = 2.5 { didSet { if lineWidth != oldValue { invalidateTipCursor() } } }
+    var tool: InkTool = .pen { didSet { if tool != oldValue { invalidateTipCursor() } } }
     var paper: InkPaper = .dotted
     var theme: PageTheme = .light {
-        didSet { if theme != oldValue { needsDisplay = true } }
+        didSet { if theme != oldValue { needsDisplay = true; invalidateTipCursor() } }
     }
     var drawsPaper = true
     var onChange: (([InkStroke]) -> Void)?
     var onInputChange: ((String) -> Void)?
+    weak var pageSelectionHistory: UndoManager?
     var isInputEnabled = true {
         didSet {
             setAccessibilityEnabled(isInputEnabled)
@@ -290,11 +309,13 @@ final class InkDocumentView: NSView {
     private var tabletEraserInProximity = false
     private var lastInputDescription: String?
     private let localUndoManager = UndoManager()
+    private var magnificationObservation: NSKeyValueObservation?
+    var showsTipCursor = true { didSet { if showsTipCursor != oldValue { invalidateTipCursor() } } }
 
     override var isFlipped: Bool { true }
     override var isOpaque: Bool { drawsPaper }
     override var acceptsFirstResponder: Bool { isInputEnabled }
-    override var undoManager: UndoManager? { localUndoManager }
+    override var undoManager: UndoManager? { pageSelectionHistory ?? localUndoManager }
 
     override init(frame frameRect: NSRect) {
         super.init(frame: frameRect)
@@ -306,14 +327,37 @@ final class InkDocumentView: NSView {
 
     required init?(coder: NSCoder) { fatalError("init(coder:) is unavailable") }
 
-    override func resetCursorRects() { addCursorRect(bounds, cursor: .crosshair) }
+    override func resetCursorRects() { if showsTipCursor { addCursorRect(bounds, cursor: tipCursor()) } }
+
+    override func viewDidMoveToWindow() { super.viewDidMoveToWindow(); observeMagnification() }
+    override func viewDidMoveToSuperview() { super.viewDidMoveToSuperview(); observeMagnification() }
+
+    func tipCursor(magnification: CGFloat? = nil) -> NSCursor {
+        InkTipCursor.cursor(tool: tool, width: lineWidth, colorHex: colorHex, theme: theme,
+                            magnification: magnification ?? enclosingScrollView?.magnification ?? 1)
+    }
+
+    private func observeMagnification() {
+        magnificationObservation = enclosingScrollView?.observe(\.magnification, options: [.new]) { [weak self] _, _ in
+            MainActor.assumeIsolated { self?.invalidateTipCursor() }
+        }
+        invalidateTipCursor()
+    }
+
+    private func invalidateTipCursor() {
+        window?.invalidateCursorRects(for: self)
+        if showsTipCursor, let window, window.isKeyWindow,
+           bounds.contains(convert(window.mouseLocationOutsideOfEventStream, from: nil)) {
+            tipCursor().set()
+        }
+    }
 
     override func draw(_ dirtyRect: NSRect) {
         InkRenderer.draw(strokes: activeStroke.map { strokes + [$0] } ?? strokes, paper: paper, in: dirtyRect.intersection(bounds), drawsPaper: drawsPaper, theme: theme)
     }
 
     override func mouseDown(with event: NSEvent) {
-        guard isInputEnabled else { return }
+        guard isInputEnabled, tool != .select, tool != .lasso else { return }
         reportInput(event)
         window?.makeFirstResponder(self)
         beforeGesture = strokes
@@ -393,18 +437,22 @@ final class InkDocumentView: NSView {
         onInputChange?(description)
     }
 
-    @objc func undo(_ sender: Any?) { localUndoManager.undo() }
-    @objc func redo(_ sender: Any?) { localUndoManager.redo() }
+    @objc func undo(_ sender: Any?) { undoManager?.undo() }
+    @objc func redo(_ sender: Any?) { undoManager?.redo() }
 
     private func registerUndo(previous: [InkStroke], actionName: String = "Drawing") {
-        localUndoManager.registerUndo(withTarget: self) { target in
+        let manager = undoManager ?? localUndoManager
+        let needsGroup = manager.groupingLevel == 0
+        if needsGroup { manager.beginUndoGrouping() }
+        manager.registerUndo(withTarget: self) { target in
             let current = target.strokes
             target.strokes = previous
             target.registerUndo(previous: current, actionName: actionName)
             target.onChange?(previous)
             target.needsDisplay = true
         }
-        localUndoManager.setActionName(actionName)
+        manager.setActionName(actionName)
+        if needsGroup { manager.endUndoGrouping() }
     }
 
     private func updateLineEnd(_ event: NSEvent) {
@@ -445,6 +493,63 @@ final class InkDocumentView: NSView {
             return false
         }
         if strokes.count != previousCount { needsDisplay = true }
+    }
+}
+
+/// Native cursor artwork is measured in screen points. A bounded cache avoids
+/// regenerating bitmaps for every hover while honoring note zoom and nib width.
+@MainActor
+enum InkTipCursor {
+    private struct Entry { let key: String; let cursor: NSCursor; let cost: Int }
+    private static var entries: [Entry] = []
+    private static let budget = 2 * 1_024 * 1_024
+
+    static func cursor(tool: InkTool, width: Double, colorHex: String, theme: PageTheme, magnification: CGFloat) -> NSCursor {
+        switch tool {
+        case .text: return .iBeam
+        case .select: return .arrow
+        case .lasso, .eraser: return .crosshair
+        default: break
+        }
+        let style = InkStyle(rawValue: tool.rawValue) ?? .pen
+        let zoom = magnification.isFinite ? max(0.25, min(4, magnification)) : 1
+        let nib = width.isFinite ? max(0.5, min(30, width)) : 2.5
+        let diameter = max(2, nib * style.widthMultiplier * Double(zoom))
+        let resolved = theme.resolvedInkHex(colorHex)
+        let key = "\(tool.rawValue)|\(resolved)|\(theme.rawValue)|\(diameter)"
+        if let index = entries.firstIndex(where: { $0.key == key }) {
+            let entry = entries.remove(at: index); entries.append(entry); return entry.cursor
+        }
+        let edge: CGFloat = 0.8
+        let extent = CGFloat(ceil(diameter + 6))
+        let center = CGPoint(x: extent / 2, y: extent / 2)
+        let image = NSImage(size: CGSize(width: extent, height: extent), flipped: true) { _ in
+            let path: NSBezierPath
+            if tool == .highlighter {
+                // A slanted chisel nib, rather than a round pen tip.
+                let half = CGFloat(diameter) / (2 * sqrt(2))
+                let thickness = max(1.5, CGFloat(diameter) * 0.08)
+                path = NSBezierPath()
+                path.move(to: CGPoint(x: center.x - half - thickness, y: center.y + half - thickness))
+                path.line(to: CGPoint(x: center.x + half - thickness, y: center.y - half - thickness))
+                path.line(to: CGPoint(x: center.x + half + thickness, y: center.y - half + thickness))
+                path.line(to: CGPoint(x: center.x - half + thickness, y: center.y + half + thickness))
+                path.close()
+            } else {
+                path = NSBezierPath(ovalIn: CGRect(x: center.x - diameter / 2, y: center.y - diameter / 2,
+                                                  width: diameter, height: diameter))
+            }
+            InkRenderer.color(resolved).setFill(); path.fill()
+            (theme == .dark ? NSColor.black : NSColor.white).withAlphaComponent(0.9).setStroke()
+            path.lineWidth = edge; path.lineJoinStyle = .round; path.stroke()
+            return true
+        }
+        let cursor = NSCursor(image: image, hotSpot: center)
+        // Retina RGBA estimate; at most one oversize cursor may exceed budget.
+        let cost = Int(extent * extent * 16)
+        while !entries.isEmpty && (entries.count >= 16 || entries.reduce(cost, { $0 + $1.cost }) > budget) { entries.removeFirst() }
+        entries.append(Entry(key: key, cursor: cursor, cost: cost))
+        return cursor
     }
 }
 #endif

@@ -89,6 +89,36 @@ enum EditorDiagnostics {
         try check(text.hasSuffix("☑ Second line") && editor.string == text, "native text redo updates model and view")
 
         let canvas = InkDocumentView(frame: NSRect(origin: .zero, size: InkExport.paperSize))
+        canvas.tool = .pen; canvas.lineWidth = 6; canvas.colorHex = "#30343B"
+        let penCursor = canvas.tipCursor(magnification: 1)
+        let zoomedCursor = canvas.tipCursor(magnification: 2)
+        guard let penCursorTIFF = penCursor.image.tiffRepresentation, let penCursorBitmap = NSBitmapImageRep(data: penCursorTIFF),
+              let zoomCursorTIFF = zoomedCursor.image.tiffRepresentation, let zoomCursorBitmap = NSBitmapImageRep(data: zoomCursorTIFF) else {
+            throw Failure(description: "Cannot render the native pen-tip cursor")
+        }
+        func cursorAlphaBounds(_ bitmap: NSBitmapImageRep) -> NSRect {
+            var result = NSRect.null
+            for y in 0..<bitmap.pixelsHigh { for x in 0..<bitmap.pixelsWide {
+                if (bitmap.colorAt(x: x, y: y)?.alphaComponent ?? 0) > 0.25 { result = result.union(NSRect(x: x, y: y, width: 1, height: 1)) }
+            } }
+            return result
+        }
+        let tipBounds = cursorAlphaBounds(penCursorBitmap), zoomTipBounds = cursorAlphaBounds(zoomCursorBitmap)
+        try check(!tipBounds.isNull && penCursorBitmap.colorAt(x: penCursorBitmap.pixelsWide / 2, y: penCursorBitmap.pixelsHigh / 2)!.alphaComponent > 0.9
+                  && penCursorBitmap.colorAt(x: 0, y: 0)!.alphaComponent == 0, "pen pointer renders a filled dot with transparent corners rather than crosshairs")
+        try check(zoomTipBounds.width >= tipBounds.width * 1.6 && zoomTipBounds.width <= tipBounds.width * 2.4, "native pen-tip artwork grows with actual page magnification")
+        try check(penCursor.hotSpot == NSPoint(x: penCursor.image.size.width / 2, y: penCursor.image.size.height / 2)
+                  && canvas.tipCursor(magnification: 1) === penCursor, "native pen cursor keeps the ink point centered and reuses cached artwork")
+        canvas.lineWidth = 3; canvas.tool = .highlighter
+        guard let highlighterCursorTIFF = canvas.tipCursor(magnification: 1).image.tiffRepresentation,
+              let highlighterCursorBitmap = NSBitmapImageRep(data: highlighterCursorTIFF) else { throw Failure(description: "Cannot render native chisel-tip cursor") }
+        let cx = highlighterCursorBitmap.pixelsWide / 2, cy = highlighterCursorBitmap.pixelsHigh / 2
+        let offset = max(2, highlighterCursorBitmap.pixelsWide / 6)
+        let diagonalA = highlighterCursorBitmap.colorAt(x: cx + offset, y: cy - offset)?.alphaComponent ?? 0
+        let diagonalB = highlighterCursorBitmap.colorAt(x: cx + offset, y: cy + offset)?.alphaComponent ?? 0
+        try check(max(diagonalA, diagonalB) > 0.5 && min(diagonalA, diagonalB) < 0.25,
+                  "highlighter pointer renders a slanted chisel tip instead of a dot")
+        canvas.tool = .pen; canvas.lineWidth = 2.5
         var committed: [InkStroke] = []
         canvas.onChange = { committed = $0 }
         func event(_ type: NSEvent.EventType, x: CGFloat, y: CGFloat, pressure: Float, modifiers: NSEvent.ModifierFlags = []) throws -> NSEvent {
@@ -192,7 +222,9 @@ enum EditorDiagnostics {
         }
         guard let page = findPage(sharedHost) else { throw Failure(description: "Shared page did not mount") }
         try check(page.textView.string == pageText && page.inkView.strokes == pageStrokes, "text and ink mount on the same paper")
-        try check(!page.textView.drawsBackground && !page.inkView.drawsPaper && page.subviews.last === page.inkView,
+        try check(!page.textView.drawsBackground && !page.inkView.drawsPaper
+                  && page.subviews.firstIndex(of: page.textView)! < page.subviews.firstIndex(of: page.inkView)!
+                  && page.subviews.last === page.selectionView && !page.selectionView.isOpaque,
                   "transparent ink overlays typed text on the same paper")
         let textPoint = page.convert(NSPoint(x: 80, y: 80), to: page.superview)
         try check(page.hitTest(textPoint) === page.textView, "text tool routes mouse input to native rich text")
@@ -232,16 +264,39 @@ enum EditorDiagnostics {
         tabletMouse.setIntegerValueField(.mouseEventSubtype, value: Int64(NSEvent.EventSubtype.tabletPoint.rawValue))
         guard let tabletMouseEvent = NSEvent(cgEvent: tabletMouse) else { throw Failure(description: "Cannot wrap local tablet mouse event") }
         try check(tabletMouseEvent.isPenPointEvent && !tabletMouseEvent.isPenProximityEvent
-                  && page.inputView(at: NSPoint(x: 80, y: 80), event: tabletMouseEvent) === page.inkView,
-                  "tablet mouse subtype still routes pen input over the text tool")
+                  && page.inputView(at: NSPoint(x: 80, y: 80), event: tabletMouseEvent) === page.textView,
+                  "Text tool routes actual tablet mouse subtype to the native caret")
+        try check(page.inputView(at: NSPoint(x: 12, y: 12), event: tabletMouseEvent) === page.textView,
+                  "Text tool keeps blank page margins on the native typing path")
+        page.focus(tool: .text)
+        let textBeforeHover = pageText, inkBeforeHover = pageStrokes
         for nativeType in [CGEventType.tabletPointer, .tabletProximity] {
             guard let native = CGEvent(source: nil) else { throw Failure(description: "Cannot construct local native tablet event") }
             native.type = nativeType
+            if nativeType == .tabletProximity { native.setIntegerValueField(.tabletProximityEventEnterProximity, value: 1) }
             guard let nativeEvent = NSEvent(cgEvent: native) else { throw Failure(description: "Cannot wrap native tablet event") }
             try check(UnifiedMacPageView.inputIsTablet(event: nativeEvent), "native tablet event type \(nativeType.rawValue) short-circuits subtype access")
+            if nativeType == .tabletProximity { page.tabletProximity(with: nativeEvent) }
+            else { page.inkView.tabletPoint(with: nativeEvent) }
         }
+        try check(window.firstResponder === page.textView && pageText == textBeforeHover && pageStrokes == inkBeforeHover,
+                  "tablet hover and proximity preserve Text keyboard focus and saved page content")
+        page.textView.setSelectedRange(NSRange(location: (pageText as NSString).length, length: 0))
+        page.textView.undoManager?.beginUndoGrouping()
+        page.textView.insertText(" vlpbhet VLPBHET हिन्दी 日本語", replacementRange: page.textView.selectedRange())
+        page.textView.undoManager?.endUndoGrouping()
+        try check(pageText == textBeforeHover + " vlpbhet VLPBHET हिन्दी 日本語" && page.textView.string == pageText,
+                  "native Text typing retains every tool letter and Unicode after tablet hover")
+        page.textView.undoManager?.undo()
+        window.makeFirstResponder(page.inkView)
+        // The notification's key-window guard is exercised by live UI QA;
+        // this command-line application has no foreground AppKit lifecycle.
+        page.focus(tool: .text)
+        try check(window.firstResponder === page.textView, "explicitly focusing the already active Text tool restores native typing focus")
         page.activeTool = .pencil
-        try check(page.hitTest(textPoint) === page.inkView, "pencil tool routes the same page coordinates to ink")
+        try check(page.hitTest(textPoint) === page.inkView && window.firstResponder === page.inkView
+                  && page.inputView(at: NSPoint(x: 80, y: 80), event: tabletMouseEvent) === page.inkView,
+                  "pencil tool focuses ink and routes both mouse and tablet points to the same page")
         let combinedPDF = UnifiedPageExport.pdf(text: pageText, rtfData: pageRTF, strokes: pageStrokes, paper: .grid)
         let combinedDocument = PDFDocument(data: combinedPDF)
         try check(combinedDocument?.pageCount == 1 && combinedDocument?.string?.contains(pageText) == true,
@@ -404,7 +459,207 @@ enum EditorDiagnostics {
         try check(themedBody == "Default custom" && themeTextView.string == themedBody, "dark-page text undo keeps the model and view synchronized")
         themeUndo.redo()
         try check(themedBody == "Default custom!" && themeTextView.string == themedBody, "dark-page text redo keeps the model and view synchronized")
-        return "\(checks) native editor integration checks passed (shared text/ink page, straight lines and axis snap, instruments, grid, RTF, Unicode, formatting, undo/redo, pressure, eraser, light/dark paper and ink, unified PNG/PDF and PencilKit interchange)."
+        let selectionPage = UnifiedMacPageView(frame: NSRect(origin: .zero, size: InkExport.paperSize))
+        let selector = MacPageSelectionController()
+        selector.history.groupsByEvent = false // diagnostics drive separate gestures without a run-loop boundary
+        selector.page = selectionPage; selectionPage.selectionController = selector; selectionPage.selectionView.controller = selector
+        selectionPage.textView.pageUndoManager = selector.history
+        selectionPage.inkView.pageSelectionHistory = selector.history
+        selectionPage.activeTool = .lasso
+        let selectionBody = NSAttributedString(string: "Alpha Beta", attributes: [.font: NSFont.systemFont(ofSize: 20), .foregroundColor: ThemeTextAttributes.color("#102040")])
+        let selectionRTF = try selectionBody.data(from: NSRange(location: 0, length: selectionBody.length), documentAttributes: [.documentType: NSAttributedString.DocumentType.rtf])
+        let selectionRich = RichTextEditor.Coordinator(RichTextEditor(text: .constant(selectionBody.string), rtfData: .constant(selectionRTF)))
+        selectionRich.load(text: selectionBody.string, rtf: selectionRTF, into: selectionPage.textView)
+        let alphaRange = NSRange(location: 0, length: 5)
+        guard let alphaRect = selector.bodyRect(range: alphaRange) else { throw Failure(description: "Cannot lay out native selection glyphs") }
+        let selectedInk = InkStroke(points: [InkPoint(x: alphaRect.minX - 10, y: alphaRect.midY), InkPoint(x: alphaRect.maxX + 10, y: alphaRect.midY)], colorHex: "#102040", width: 2)
+        let untouchedInk = InkStroke(points: [InkPoint(x: 600, y: 400), InkPoint(x: 650, y: 440)], colorHex: "#B14D55", width: 3)
+        let originalSelectionContent = PageContent(text: selectionBody.string, rtfData: selectionRTF, strokes: [selectedInk, untouchedInk])
+        selector.load(originalSelectionContent)
+        var selectionWrites = 0
+        selector.onRender = { value in
+            selectionRich.load(text: value.text, rtf: value.rtfData, into: selectionPage.textView)
+            selectionPage.inkView.strokes = value.strokes
+            selectionPage.displayObjects(textBoxes: value.textBoxes, equations: value.equations, editable: false, onTextBoxChange: { _,_,_ in }, onEquationEdit: nil)
+            selectionPage.resizePaperToContent()
+        }
+        selector.onCommit = { _ in selectionWrites += 1 }
+        selector.onRender?(originalSelectionContent)
+        let lassoBounds = alphaRect.insetBy(dx: 0.3, dy: 0.3)
+        selector.select(polygon: PageSelectionGeometry.rectangle(from: InkPoint(x: lassoBounds.minX, y: lassoBounds.minY), to: InkPoint(x: lassoBounds.maxX, y: lassoBounds.maxY)))
+        try check(selector.selection.strokes.contains(selectedInk.id) && selector.selection.textRanges == [alphaRange], "one lasso selects crossing ink and native typed glyphs together")
+        try check(!selector.selection.strokes.contains(untouchedInk.id), "lasso excludes unrelated handwriting")
+        let selectionClipboard = selector.clipboardPayload()
+        try check(selectionClipboard?.textBoxes.first?.text == "Alpha" && selectionClipboard?.strokes.count == 1, "mixed copy includes rich typed text and handwriting")
+        let promoted = selector.promotedContent()
+        let movedSelectionContent = selector.translated(promoted.0, selection: promoted.1, dx: 80, dy: 120)
+        selector.preview(movedSelectionContent)
+        try check(selector.content == originalSelectionContent && selectionWrites == 0, "drag preview never persists partial mixed edits")
+        selector.cancelPreview()
+        try check(selectionPage.textView.string == originalSelectionContent.text && selectionWrites == 0, "cancelled selection drag restores the shared page without a write")
+        selector.selection = promoted.1
+        selector.commit(movedSelectionContent, action: "Move Selection")
+        try check(selectionWrites == 1 && selector.content.text == " Beta" && selector.content.textBoxes.first?.text == "Alpha", "moving mixed selection promotes only its typed range in one atomic write")
+        try check(selector.content.strokes[0].points[0].x == selectedInk.points[0].x + 80 && selector.content.strokes[1] == untouchedInk, "mixed move translates selected ink and leaves unselected ink exact")
+        guard let movedTextRTF = selector.content.textBoxes.first?.rtfData else { throw Failure(description: "Moved typed text lost RTF") }
+        let movedRich = try NSAttributedString(data: movedTextRTF, options: [.documentType: NSAttributedString.DocumentType.rtf], documentAttributes: nil)
+        try check(ThemeTextAttributes.hex(movedRich.attribute(.foregroundColor, at: 0, effectiveRange: nil) as! NSColor) == "#102040", "moving typed text preserves canonical rich-text color")
+        selector.history.undo()
+        try check(selector.content == originalSelectionContent, "one undo restores exact pre-lasso body, RTF and ink")
+        selector.history.redo()
+        try check(selector.content == movedSelectionContent, "one redo restores the complete mixed selection move")
+        selector.perform(.delete)
+        try check(selector.content.textBoxes.isEmpty && selector.content.strokes == [untouchedInk], "Delete removes selected typed objects and ink together")
+        selector.history.undo()
+        try check(selector.content == movedSelectionContent, "mixed delete is fully undoable")
+
+        let equation = NoteEquation(latex: "\\frac{a}{b}", x: 60, y: 500, width: 180, height: 80)
+        selector.load(PageContent(equations: [equation]))
+        selector.selection = MacPageSelection(equations: [equation.id])
+        selector.perform(.duplicate)
+        try check(selector.content.equations.count == 2 && selector.content.textBoxes.isEmpty, "equation-only paste duplicates the equation without an extra LaTeX text box")
+        try check(selector.content.equations[0].id != selector.content.equations[1].id, "duplicated equation receives a distinct object identity")
+        selector.history.undo()
+        try check(selector.content.equations == [equation], "equation duplication has one atomic undo")
+
+        var maskedNative = PortableInkConverter.drawing(from: [selectedInk]).strokes[0]
+        maskedNative.mask = NSBezierPath(rect: NSRect(x: 0, y: 0, width: 800, height: 800))
+        let nativeSelection = PKDrawing(strokes: [maskedNative])
+        let nativeSelectionContent = PageContent(strokes: PortableInkConverter.strokes(from: nativeSelection), pencilKitData: nativeSelection.dataRepresentation())
+        selector.load(nativeSelectionContent)
+        selector.selection = MacPageSelection(strokes: Set(nativeSelectionContent.strokes.map(\.id)), nativeStrokes: [0])
+        selector.perform(.duplicate)
+        guard let nativeDuplicateData = selector.content.pencilKitData else { throw Failure(description: "Native copied ink lost its archive") }
+        let nativeDuplicate = try PKDrawing(data: nativeDuplicateData)
+        try check(nativeDuplicate.strokes.count == 2 && nativeDuplicate.strokes[1].mask != nil && nativeDuplicate.strokes[1].randomSeed == maskedNative.randomSeed, "native ink copy retains mask and texture seed")
+        #if compiler(>=6.4)
+        if #available(macOS 27, *) {
+            try check(nativeDuplicate.strokes[0].id != nativeDuplicate.strokes[1].id, "native ink paste allocates a fresh stroke identity")
+        }
+        #endif
+        selector.history.undo()
+        try check(selector.content.pencilKitData == nativeSelectionContent.pencilKitData, "native duplicate undo restores original archived bytes")
+
+        // Native typing, native ink and spatial page edits must share one
+        // chronology even after switching tools and first responders.
+        selector.history.removeAllActions()
+        selector.load(PageContent(text: "Chronology"))
+        selector.onRender?(selector.content)
+        selectionPage.textView.delegate = selectionRich
+        selectionRich.parent.onChange = { text, rtf in selector.content.text = text; selector.content.rtfData = rtf }
+        selectionPage.inkView.onChange = { strokes in selector.content.strokes = strokes; selector.content.pencilKitData = nil }
+        window.contentView = selectionPage
+        func nativeDot(x: CGFloat, y: CGFloat) throws {
+            let location = selectionPage.inkView.convert(NSPoint(x: x, y: y), to: nil)
+            selectionPage.inkView.mouseDown(with: try event(.leftMouseDown, x: Double(location.x), y: Double(location.y), pressure: 1))
+            selectionPage.inkView.mouseUp(with: try event(.leftMouseUp, x: Double(location.x), y: Double(location.y), pressure: 0))
+        }
+        selectionPage.activeTool = .pen
+        try nativeDot(x: 500, y: 500)
+        let afterNativeInk = selector.content
+        selectionPage.activeTool = .text
+        window.makeFirstResponder(selectionPage.textView)
+        selector.history.beginUndoGrouping()
+        selectionPage.textView.setSelectedRange(NSRange(location: (selectionPage.textView.string as NSString).length, length: 0))
+        selectionPage.textView.insertText("!", replacementRange: selectionPage.textView.selectedRange())
+        selectionPage.textView.breakUndoCoalescing()
+        selector.history.endUndoGrouping()
+        let afterNativeTyping = selector.content
+        selectionPage.activeTool = .lasso
+        selector.perform(.selectAll)
+        let allPromoted = selector.promotedContent()
+        selector.selection = allPromoted.1
+        selector.commit(selector.translated(allPromoted.0, selection: allPromoted.1, dx: 20, dy: 30), action: "Move Selection")
+        let afterChronologicalMove = selector.content
+        selectionPage.activeTool = .pen
+        try nativeDot(x: 700, y: 700)
+        selectionPage.inkView.undo(nil)
+        try check(selector.content == afterChronologicalMove, "pen undo removes the newest stroke while preserving the preceding mixed move")
+        selectionPage.inkView.undo(nil)
+        try check(selector.content == afterNativeTyping, "pen undo reaches the preceding mixed text-and-ink move")
+        selectionPage.textView.undoManager?.undo()
+        try check(selector.content.text == afterNativeInk.text && selector.content.strokes == afterNativeInk.strokes, "native text undo retains the earlier ink across tool switches")
+        selectionPage.inkView.undo(nil)
+        try check(selector.content.strokes.isEmpty && selector.content.text == "Chronology", "old native ink undo follows the same shared chronological history")
+        selectionPage.paperView.paper = .ruled
+        let ruledMoved = selector.translated(promoted.0, selection: promoted.1, dx: 5, dy: 45)
+        try check(ruledMoved.textBoxes[0].y - promoted.0.textBoxes[0].y == 56
+                  && ruledMoved.strokes[0].points[0].y - promoted.0.strokes[0].points[0].y == 56,
+                  "ruled mixed selection snaps the entire text-and-ink group to the same row delta")
+        selectionPage.paperView.paper = .grid
+        let freeMoved = selector.translated(promoted.0, selection: promoted.1, dx: 5, dy: 45)
+        try check(freeMoved.textBoxes[0].y - promoted.0.textBoxes[0].y == 45
+                  && freeMoved.strokes[0].points[0].y - promoted.0.strokes[0].points[0].y == 45,
+                  "grid mixed selection retains free spatial movement")
+        selectionPage.paperView.paper = .ruled
+        let ruledBox = PageTextBox(x: 200, y: 117, width: 300, text: "Movable ruled text\nSecond row")
+        let ruledContent = PageContent(text: "Main ruled text", strokes: [selectedInk], textBoxes: [ruledBox])
+        selector.load(ruledContent); selector.onRender?(ruledContent)
+        selectionPage.resizePaperToContent()
+        func firstBaseline(_ view: NSTextView, pageY: CGFloat) -> CGFloat {
+            guard let manager = view.layoutManager, let container = view.textContainer else { return -1 }
+            manager.ensureLayout(for: container)
+            return pageY + view.textContainerOrigin.y + manager.lineFragmentRect(forGlyphAt: 0, effectiveRange: nil).minY + manager.location(forGlyphAt: 0).y
+        }
+        let mainBaseline = firstBaseline(selectionPage.textView, pageY: selectionPage.textView.frame.minY)
+        guard let ruledBoxView = selectionPage.textBoxViews[ruledBox.id] else { throw Failure(description: "Ruled text box did not render") }
+        let boxBaseline = firstBaseline(ruledBoxView.editor, pageY: ruledBoxView.frame.minY + ruledBoxView.editor.frame.minY)
+        try check(abs((mainBaseline + 1).truncatingRemainder(dividingBy: 28)) < 0.01
+                  && abs((boxBaseline + 1).truncatingRemainder(dividingBy: 28)) < 0.01,
+                  "main text and a moved text box share the page's absolute ruled baselines")
+        selector.selection = MacPageSelection(strokes: [selectedInk.id], textBoxes: [ruledBox.id])
+        selector.perform(.duplicate)
+        try check(selector.content.textBoxes.last!.y - ruledBox.y == 28
+                  && selector.content.strokes.last!.points[0].y - selectedInk.points[0].y == 28,
+                  "ruled text-and-ink paste uses one row offset for both layers")
+        selector.load(PageContent(text: "Top\nBottom")); selector.onRender?(selector.content)
+        selector.selection = MacPageSelection(textRanges: [NSRange(location: 0, length: 3), NSRange(location: 4, length: 6)])
+        try check(selector.clipboardPayload()?.text == "Top\nBottom", "multi-line selected text copies in page reading order")
+        selectionPage.paperView.paper = .grid
+        let edgeBox = PageTextBox(x: 1450, y: 100, width: 150, text: "Right edge")
+        let edgeEquation = NoteEquation(latex: "x", x: 1400, y: 200, width: 80, height: 40)
+        let edgeInk = InkStroke(points: [InkPoint(x: 1420, y: 130), InkPoint(x: 1500, y: 130)], width: 10)
+        let edgeContent = PageContent(strokes: [edgeInk], textBoxes: [edgeBox], equations: [edgeEquation])
+        selector.load(edgeContent); selector.onRender?(edgeContent)
+        let edgeSelection = MacPageSelection(strokes: [edgeInk.id], textBoxes: [edgeBox.id], equations: [edgeEquation.id])
+        let edgeMoved = selector.translated(edgeContent, selection: edgeSelection, dx: 500, dy: 20)
+        try check(edgeMoved.textBoxes[0].x + edgeMoved.textBoxes[0].width <= 1600
+                  && edgeMoved.textBoxes[0].x == edgeBox.x && edgeMoved.equations[0].x == edgeEquation.x
+                  && edgeMoved.strokes[0].points[0].x == edgeInk.points[0].x,
+                  "right-edge mixed move clamps one horizontal delta using complete object widths")
+        selector.selection = edgeSelection
+        selector.perform(.duplicate)
+        try check(selector.content.textBoxes.count == 2 && selector.content.textBoxes.last!.x == edgeBox.x
+                  && selector.content.equations.last!.x == edgeEquation.x
+                  && selector.content.strokes.last!.points[0].x == edgeInk.points[0].x
+                  && selector.content.textBoxes.last!.width == edgeBox.width,
+                  "right-edge mixed paste preserves group spacing and text width instead of clipping or reflowing")
+        let nibEdge = InkStroke(points: [InkPoint(x: 1590, y: 300), InkPoint(x: 1598, y: 310)], width: 12)
+        let nibContent = PageContent(strokes: [nibEdge])
+        selector.load(nibContent)
+        let nibMoved = selector.translated(nibContent, selection: MacPageSelection(strokes: [nibEdge.id]), dx: 20, dy: 0)
+        try check((InkRenderer.bounds(of: nibMoved.strokes[0])?.maxX ?? .infinity) <= 1600.001,
+                  "horizontal ink movement includes the visible nib extent")
+        let oversized = PageContent(textBoxes: [PageTextBox(x: 100, y: 100, width: 2000, text: "Imported wide text")])
+        let writesBeforeOversize = selectionWrites
+        selector.load(oversized); selector.onRender?(oversized)
+        selector.selection = MacPageSelection(textBoxes: [oversized.textBoxes[0].id])
+        selector.perform(.duplicate)
+        try check(selector.content == oversized && selectionWrites == writesBeforeOversize
+                  && selectionPage.textBoxViews[oversized.textBoxes[0].id]?.frame.width == 2000
+                  && !selector.canMoveSelection(),
+                  "oversized new paste is rejected while imported wide text retains its canonical width and position")
+        let invalidClipboard = PageClipboardPayload(textBoxes: [PageTextBox(x: -1, y: 20, width: 400, text: "invalid")])
+        let invalidClipboardData = try JSONEncoder().encode(invalidClipboard)
+        try check((try? PageClipboardPayload.decodeValidated(invalidClipboardData)) == nil, "clipboard validation rejects invalid page coordinates")
+        let sparseLongDrawing = PortableInkConverter.drawing(from: (0..<10).map { index in
+            InkStroke(points: [InkPoint(x: 0, y: Double(index)), InkPoint(x: 100_000, y: Double(index))])
+        })
+        var samplingBudgetRejected = false
+        do { _ = try PortableInkConverter.validatedClipboardDrawing(sparseLongDrawing.dataRepresentation(), fallback: []) }
+        catch let error as LibraryError { samplingBudgetRejected = error == .tooLarge }
+        try check(samplingBudgetRejected, "sparse long native clipboard paths are rejected before portable resampling amplifies their point count")
+        return "\(checks) native editor integration checks passed (shared text/ink page, straight lines, formatting, pressure, dark/light, searchable export, mixed text/ink lasso, atomic move/delete/undo, canonical rich text, native PencilKit masks and clipboard validation)."
     }
 }
 #endif

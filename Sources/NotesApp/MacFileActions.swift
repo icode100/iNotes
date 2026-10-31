@@ -7,15 +7,19 @@ import NotesCore
 @MainActor
 enum MacFileActions {
     static func chooseDriveFolder(_ store: NotesStore) {
+        chooseBackupFolder(store, destination: .googleDrive)
+    }
+
+    static func chooseBackupFolder(_ store: NotesStore, destination: BackupDestination) {
         let panel = NSOpenPanel()
-        panel.title = "Connect a Google Drive backup folder"
-        panel.message = "Choose a folder inside Google Drive in Finder. iNotes writes versioned backups; Drive for desktop handles uploading them."
+        panel.title = "Auto-save to \(destination.title)"
+        panel.message = "Choose a folder inside \(destination.title) in Finder. Automatic versioned backups start after connecting; the provider uploads them. Import a backup to transfer edits to another device."
         panel.canChooseDirectories = true
         panel.canChooseFiles = false
         panel.canCreateDirectories = true
         panel.allowsMultipleSelection = false
         panel.prompt = "Connect Folder"
-        if panel.runModal() == .OK, let url = panel.url { store.rememberDriveFolder(url) }
+        if panel.runModal() == .OK, let url = panel.url { store.rememberBackupFolder(url, for: destination) }
     }
 
     static func save(_ data: Data, title: String, type: UTType, store: NotesStore) {
@@ -46,27 +50,45 @@ enum MacFileActions {
     }
 
     static func exportRichText(_ sheet: NoteNode, store: NotesStore) {
-        if let rtf = sheet.richTextRTF, NSAttributedString(rtf: rtf, documentAttributes: nil)?.string == sheet.body {
-            save(rtf, title: sheet.title + ".rtf", type: .rtf, store: store)
+        do { save(try richTextData(sheet), title: sheet.title + ".rtf", type: .rtf, store: store) }
+        catch { store.errorMessage = error.localizedDescription }
+    }
+
+    static func richTextData(_ sheet: NoteNode) throws -> Data {
+        let result = NSMutableAttributedString(string: "")
+        func append(_ text: String, rtf: Data? = nil, equation: Bool = false) {
+            guard !text.isEmpty else { return }
+            if result.length > 0 { result.append(NSAttributedString(string: "\n\n")) }
+            if let rtf, let attributed = NSAttributedString(rtf: rtf, documentAttributes: nil), attributed.string == text {
+                result.append(attributed)
+            } else {
+                result.append(NSAttributedString(string: text, attributes: [
+                    .font: equation ? NSFont.monospacedSystemFont(ofSize: 13, weight: .regular) : NSFont.systemFont(ofSize: 14)
+                ]))
+            }
         }
-        else {
-            let text = NSAttributedString(string: sheet.body, attributes: [.font: NSFont.systemFont(ofSize: 14)])
-            do {
-                let data = try text.data(from: NSRange(location: 0, length: text.length), documentAttributes: [.documentType: NSAttributedString.DocumentType.rtf])
-                save(data, title: sheet.title + ".rtf", type: .rtf, store: store)
-            } catch { store.errorMessage = error.localizedDescription }
+        append(sheet.body, rtf: sheet.richTextRTF)
+        for box in sheet.textBoxes.sorted(by: { $0.y == $1.y ? $0.x < $1.x : $0.y < $1.y }) { append(box.text, rtf: box.rtfData) }
+        for equation in sheet.equations.sorted(by: { $0.y == $1.y ? $0.x < $1.x : $0.y < $1.y }) {
+            append("$$\n\(equation.latex)\n$$", equation: true)
         }
+        return try result.data(from: NSRange(location: 0, length: result.length), documentAttributes: [.documentType: NSAttributedString.DocumentType.rtf])
     }
 
     static func exportPagePNG(_ sheet: NoteNode, paper: InkPaper, theme: PageTheme = .light, store: NotesStore) {
-        guard let data = UnifiedPageExport.png(text: sheet.body, rtfData: sheet.richTextRTF, strokes: sheet.strokes, paper: paper, theme: theme) else { return }
+        guard let data = UnifiedPageExport.png(text: sheet.body, rtfData: sheet.richTextRTF, strokes: sheet.strokes, paper: paper, theme: theme,
+                                              textBoxes: sheet.textBoxes, equations: sheet.equations) else {
+            store.errorMessage = "This page is too large for PNG export. Export PDF instead."
+            return
+        }
         save(data, title: sheet.title + ".png", type: .png, store: store)
     }
 
     static func exportPDF(_ sheet: NoteNode, theme: PageTheme = .light, store: NotesStore) {
         let data = UnifiedPageExport.pdf(text: sheet.body, rtfData: sheet.richTextRTF,
                                          strokes: sheet.strokes,
-                                         paper: InkPaper(rawValue: sheet.paperStyle.rawValue) ?? .dotted, theme: theme)
+                                         paper: InkPaper(rawValue: sheet.paperStyle.rawValue) ?? .dotted, theme: theme,
+                                         textBoxes: sheet.textBoxes, equations: sheet.equations)
         save(data, title: sheet.title + ".pdf", type: .pdf, store: store)
     }
 
@@ -77,13 +99,20 @@ struct NotesCommands: Commands {
     @ObservedObject var store: NotesStore
     @ObservedObject var updater: AppUpdater
     var body: some Commands {
+        CommandGroup(replacing: .undoRedo) {
+            Button("Undo") { NativeUndoActions.undo() }
+                .keyboardShortcut("z", modifiers: .command)
+                .disabled(NativeUndoActions.manager?.canUndo != true)
+            Button("Redo") { NativeUndoActions.redo() }
+                .keyboardShortcut("z", modifiers: [.command, .shift])
+                .disabled(NativeUndoActions.manager?.canRedo != true)
+        }
         CommandGroup(after: .appInfo) {
             Button("Check for Updates…") { updater.checkForUpdates() }
                 .disabled(updater.isConfigured && !updater.canCheckForUpdates)
         }
         CommandGroup(replacing: .newItem) {
             Button("New Sheet…") { NotificationCenter.default.post(name: .newSheet, object: nil) }.keyboardShortcut("n")
-            Button("New Workbook…") { NotificationCenter.default.post(name: .newWorkbook, object: nil) }.keyboardShortcut("n", modifiers: [.command, .shift])
         }
         CommandGroup(after: .newItem) {
             Divider()
@@ -107,6 +136,23 @@ struct NotesCommands: Commands {
             Button("Bullet List") { RichTextEditor.perform(.bullet) }
             Button("Checklist") { RichTextEditor.perform(.checklist) }
         }
+        CommandMenu("Tools") {
+            ForEach(ToolShortcuts.all) { shortcut in
+                Button(shortcut.title) { ToolShortcuts.activate(shortcut.tool) }
+                    .keyboardShortcut(shortcut.keyEquivalent, modifiers: shortcut.modifiers)
+            }
+        }
     }
+}
+
+/// SwiftUI's default scene manager is separate from the native page's shared
+/// text/ink history. Edit commands must follow the actual first responder.
+@MainActor
+enum NativeUndoActions {
+    static var manager: UndoManager? {
+        NSApp.keyWindow?.firstResponder?.undoManager ?? NSApp.keyWindow?.undoManager
+    }
+    static func undo() { if let manager, manager.canUndo { manager.undo() } }
+    static func redo() { if let manager, manager.canRedo { manager.redo() } }
 }
 #endif

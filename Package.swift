@@ -9,7 +9,8 @@ let package = Package(
         .executable(name: "iNotes", targets: ["NotesApp"])
     ],
     dependencies: [
-        .package(url: "https://github.com/sparkle-project/Sparkle", exact: "2.10.1")
+        .package(url: "https://github.com/sparkle-project/Sparkle", exact: "2.10.1"),
+        .package(url: "https://github.com/mgriebling/SwiftMath", exact: "1.7.3")
     ],
     targets: [
         .target(name: "NotesCore"),
@@ -17,6 +18,7 @@ let package = Package(
             name: "NotesApp",
             dependencies: [
                 "NotesCore",
+                .product(name: "SwiftMath", package: "SwiftMath"),
                 .product(name: "Sparkle", package: "Sparkle", condition: .when(platforms: [.macOS]))
             ],
             linkerSettings: [

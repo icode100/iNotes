@@ -1,0 +1,13 @@
+--- a/Sources/SwiftMath/MathRender/MTFont.swift
++++ b/Sources/SwiftMath/MathRender/MTFont.swift
+@@ -44 +44,9 @@
+-        Bundle(url: Bundle.module.url(forResource: "mathFonts", withExtension: "bundle")!)!
++        // SwiftPM CLI executable accessors search the app root. Native macOS app
++        // bundles must instead keep this resource under Contents/Resources.
++        if let resources = Bundle.main.resourceURL,
++           let module = Bundle(url: resources.appendingPathComponent("SwiftMath_SwiftMath.bundle")),
++           let url = module.url(forResource: "mathFonts", withExtension: "bundle"),
++           let fonts = Bundle(url: url) {
++            return fonts
++        }
++        return Bundle(url: Bundle.module.url(forResource: "mathFonts", withExtension: "bundle")!)!

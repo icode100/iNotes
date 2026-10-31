@@ -17,14 +17,23 @@ final class NotesStore: ObservableObject {
     @Published var saveStatus = "Opening library…"
     @Published var driveFolder: URL?
     @Published var lastBackup: Date?
+    @Published var iCloudFolder: URL?
+    @Published var lastICloudBackup: Date?
+    @Published private(set) var backupStatuses: [BackupDestination: String] = [
+        .googleDrive: "Not connected", .iCloudDrive: "Not connected"
+    ]
     @Published var dirty = false
     @Published var recoveryAvailable = false
     private let repository: LibraryRepository
     private let preferences: UserDefaults
     let libraryURL: URL
     private var saveTask: Task<Void, Never>?
-    private var driveBackupTask: Task<Void, Never>?
-    private var driveNeedsBackup = false
+    private var backupTasks: [BackupDestination: Task<Void, Never>] = [:]
+    private var backupNeedsWrite: Set<BackupDestination> = []
+    private var backupRetryAfter: [BackupDestination: Date] = [:]
+    private var backupAccesses: [BackupDestination: BackupFolderAccess] = [:]
+    private var backupSessionOnly: Set<BackupDestination> = []
+    private var backupPermissionErrors: [BackupDestination: String] = [:]
     private var canSave = true
     private var serializedBytes = 0
 
@@ -59,16 +68,7 @@ final class NotesStore: ObservableObject {
             saveStatus = "Library could not be opened"
             errorMessage = "Your original library has been left untouched. \(error.localizedDescription)\nUse File → Show Library in Finder to preserve or repair it, then restart iNotes."
         }
-        #if os(macOS)
-        if let data = preferences.data(forKey: "driveBookmark") {
-            var stale = false
-            if let url = try? URL(resolvingBookmarkData: data, options: [.withSecurityScope], bookmarkDataIsStale: &stale) {
-                _ = url.startAccessingSecurityScopedResource()
-                driveFolder = url
-                if stale { rememberDriveFolder(url) }
-            }
-        }
-        #endif
+        restoreBackupFolders()
     }
 
     var selectedSheet: NoteNode? { library.nodes.first { $0.id == sheetID } }
@@ -183,7 +183,10 @@ final class NotesStore: ObservableObject {
             if checkSize { serializedBytes = try LibraryArchive.encode(candidate).count }
             library = candidate
             dirty = true
-            driveNeedsBackup = true
+            backupNeedsWrite.formUnion(BackupDestination.allCases)
+            for destination in BackupDestination.allCases where backupFolder(for: destination) != nil && backupRetryAfter[destination] == nil {
+                backupStatuses[destination] = "Automatic backup pending. Your latest edits are saving on this device."
+            }
             saveStatus = "Saving…"
             saveTask?.cancel()
             saveTask = Task { [weak self] in
@@ -203,7 +206,7 @@ final class NotesStore: ObservableObject {
             try repository.save(library)
             dirty = false
             saveStatus = "Saved on this device"
-            scheduleDriveBackup()
+            scheduleBackups()
             return true
         } catch {
             saveStatus = "Not saved — retry with ⌘S"
@@ -241,60 +244,140 @@ final class NotesStore: ObservableObject {
         } catch { errorMessage = "Could not import this backup. \(error.localizedDescription)" }
     }
 
-    func backupToDrive() {
-        driveBackupTask?.cancel()
-        driveBackupTask = nil
-        guard let folder = driveFolder else { return }
-        do {
-            let directory = folder.appendingPathComponent("iNotes Backups", isDirectory: true)
-            try FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)
-            let stamp = ISO8601DateFormatter().string(from: Date()).replacingOccurrences(of: ":", with: "-")
-            let destination = directory.appendingPathComponent("iNotes-\(stamp)-\(UUID().uuidString).inotes")
-            try archiveData().write(to: destination, options: .atomic)
-            lastBackup = Date()
-            driveNeedsBackup = false
-        } catch { errorMessage = "Saved locally, but the Google Drive backup failed. \(error.localizedDescription)" }
+    func backupFolder(for destination: BackupDestination) -> URL? {
+        destination == .googleDrive ? driveFolder : iCloudFolder
     }
 
-    private func scheduleDriveBackup() {
-        guard driveFolder != nil, driveNeedsBackup, driveBackupTask == nil else { return }
-        let delay = max(0, 60 - Date().timeIntervalSince(lastBackup ?? .distantPast))
-        driveBackupTask = Task { [weak self] in
-            if delay > 0 { try? await Task.sleep(for: .seconds(delay)) }
-            guard !Task.isCancelled else { return }
-            self?.backupToDrive()
+    func lastBackup(for destination: BackupDestination) -> Date? {
+        destination == .googleDrive ? lastBackup : lastICloudBackup
+    }
+
+    func backupStatus(for destination: BackupDestination) -> String {
+        backupStatuses[destination] ?? "Not connected"
+    }
+
+    func backupPermissionDiagnostic(for destination: BackupDestination) -> String {
+        backupPermissionErrors[destination] ?? "none"
+    }
+
+    func backupToDrive() { backupNow(to: .googleDrive) }
+
+    func backupNow(to destination: BackupDestination) {
+        backupTasks.removeValue(forKey: destination)?.cancel()
+        performBackup(to: destination, reportFailure: true)
+    }
+
+    private func performBackup(to destination: BackupDestination, reportFailure: Bool) {
+        guard let folder = backupFolder(for: destination) else { return }
+        do {
+            try BackupArchiveWriter.write(archiveData(), to: folder)
+            let now = Date()
+            if destination == .googleDrive { lastBackup = now } else { lastICloudBackup = now }
+            preferences.set(now, forKey: destination.lastBackupKey)
+            backupNeedsWrite.remove(destination)
+            backupRetryAfter.removeValue(forKey: destination)
+            backupStatuses[destination] = "Backup saved to folder. \(destination.title) handles uploading."
+                + (backupSessionOnly.contains(destination) ? " Reconnect after restarting iNotes." : "")
+        } catch {
+            backupNeedsWrite.insert(destination)
+            backupRetryAfter[destination] = Date().addingTimeInterval(BackupSchedule.minimumInterval)
+            backupStatuses[destination] = "Backup failed; retrying in 1 minute. Your notes remain on this device."
+            if reportFailure { errorMessage = "The \(destination.title) folder backup failed. Your notes remain in iNotes. \(error.localizedDescription)" }
+            scheduleBackups()
+        }
+    }
+
+    private func scheduleBackups() {
+        for destination in BackupDestination.allCases {
+            guard backupFolder(for: destination) != nil, backupNeedsWrite.contains(destination), backupTasks[destination] == nil else { continue }
+            let delay = BackupSchedule.delay(now: Date(), lastSuccess: lastBackup(for: destination), retryAfter: backupRetryAfter[destination])
+            backupTasks[destination] = Task { [weak self] in
+                if delay > 0 { try? await Task.sleep(for: .seconds(delay)) }
+                guard !Task.isCancelled else { return }
+                self?.backupTasks.removeValue(forKey: destination)
+                self?.performBackup(to: destination, reportFailure: false)
+            }
         }
     }
 
     func prepareForQuit() -> Bool {
         guard flush() else { return false }
-        if driveNeedsBackup && driveFolder != nil { backupToDrive() }
+        for destination in BackupDestination.allCases where backupNeedsWrite.contains(destination) && backupFolder(for: destination) != nil {
+            backupTasks.removeValue(forKey: destination)?.cancel()
+            performBackup(to: destination, reportFailure: false)
+        }
         return true
     }
 
     func emptyTrash() { mutate { $0.emptyTrash() }; sheetID = nil }
 
-    #if os(macOS)
-    func rememberDriveFolder(_ url: URL) {
-        if let old = driveFolder { old.stopAccessingSecurityScopedResource() }
-        _ = url.startAccessingSecurityScopedResource()
-        driveFolder = url
+    func rememberDriveFolder(_ url: URL) { rememberBackupFolder(url, for: .googleDrive) }
+
+    func rememberBackupFolder(_ url: URL, for destination: BackupDestination) {
+        let access = BackupFolderAccess(url: url)
+        backupTasks.removeValue(forKey: destination)?.cancel()
+        backupAccesses[destination] = access
+        if destination == .googleDrive { driveFolder = url; lastBackup = nil }
+        else { iCloudFolder = url; lastICloudBackup = nil }
+        preferences.removeObject(forKey: destination.lastBackupKey)
+        backupSessionOnly.remove(destination)
+        backupRetryAfter.removeValue(forKey: destination)
         do {
-            let bookmark = try url.bookmarkData(options: [.withSecurityScope], includingResourceValuesForKeys: nil, relativeTo: nil)
-            preferences.set(bookmark, forKey: "driveBookmark")
-            backupToDrive()
-        } catch { errorMessage = "Folder connected for this session, but its permission could not be remembered. \(error.localizedDescription)" }
+            preferences.set(try access.bookmark(), forKey: destination.bookmarkKey)
+            backupPermissionErrors.removeValue(forKey: destination)
+        } catch {
+            preferences.removeObject(forKey: destination.bookmarkKey)
+            backupSessionOnly.insert(destination)
+            backupPermissionErrors[destination] = BackupFolderAccess.diagnostic(error)
+            errorMessage = "The \(destination.title) folder is connected for this session. Reconnect it after restarting iNotes. \(error.localizedDescription)"
+        }
+        backupNow(to: destination)
     }
 
-    func disconnectDrive() {
-        driveBackupTask?.cancel()
-        driveBackupTask = nil
-        driveFolder?.stopAccessingSecurityScopedResource()
-        driveFolder = nil
-        lastBackup = nil
-        preferences.removeObject(forKey: "driveBookmark")
+    func disconnectDrive() { disconnectBackup(.googleDrive) }
+
+    func disconnectBackup(_ destination: BackupDestination) {
+        backupTasks.removeValue(forKey: destination)?.cancel()
+        backupNeedsWrite.remove(destination)
+        backupRetryAfter.removeValue(forKey: destination)
+        backupSessionOnly.remove(destination)
+        backupPermissionErrors.removeValue(forKey: destination)
+        backupAccesses.removeValue(forKey: destination)
+        if destination == .googleDrive { driveFolder = nil; lastBackup = nil }
+        else { iCloudFolder = nil; lastICloudBackup = nil }
+        backupStatuses[destination] = "Not connected"
+        preferences.removeObject(forKey: destination.bookmarkKey)
+        preferences.removeObject(forKey: destination.lastBackupKey)
     }
-    #endif
+
+    private func restoreBackupFolders() {
+        for destination in BackupDestination.allCases {
+            guard let bookmark = preferences.data(forKey: destination.bookmarkKey) else { continue }
+            do {
+                let restored = try BackupFolderAccess.restore(bookmark)
+                backupAccesses[destination] = restored.access
+                let last = preferences.object(forKey: destination.lastBackupKey) as? Date
+                if destination == .googleDrive { driveFolder = restored.access.url; lastBackup = last }
+                else { iCloudFolder = restored.access.url; lastICloudBackup = last }
+                backupStatuses[destination] = "Folder connected. Cloud upload is managed by \(destination.title)."
+                if restored.stale {
+                    do { preferences.set(try restored.access.bookmark(), forKey: destination.bookmarkKey) }
+                    catch {
+                        backupSessionOnly.insert(destination)
+                        backupPermissionErrors[destination] = BackupFolderAccess.diagnostic(error)
+                    }
+                }
+                if last.map({ library.modifiedAt > $0 }) ?? true {
+                    backupNeedsWrite.insert(destination)
+                    backupStatuses[destination] = "Automatic backup pending. The provider handles cloud uploading."
+                }
+            } catch {
+                backupPermissionErrors[destination] = BackupFolderAccess.diagnostic(error)
+                backupStatuses[destination] = "Folder permission needs attention. Reconnect the folder."
+            }
+        }
+        if canSave { scheduleBackups() }
+    }
 
     private func makeWelcome() throws {
         let workbook = try library.create(kind: .workbook, title: "My Notebook", parentID: nil)
@@ -307,3 +390,59 @@ final class NotesStore: ObservableObject {
         }
     }
 }
+
+#if os(macOS)
+@MainActor
+enum BackupDiagnostics {
+    static func run() throws -> String {
+        let root = FileManager.default.temporaryDirectory.appendingPathComponent("iNotes-backup-check-\(UUID())")
+        let suite = "io.inotes.backup-diagnostics.\(UUID())"
+        let preferences = UserDefaults(suiteName: suite)!
+        defer {
+            preferences.removePersistentDomain(forName: suite)
+            try? FileManager.default.removeItem(at: root)
+        }
+        func require(_ value: @autoclosure () throws -> Bool, _ reason: String) throws {
+            if try !value() { throw NSError(domain: "iNotes.BackupDiagnostics", code: 1, userInfo: [NSLocalizedDescriptionKey: reason]) }
+        }
+        let google = root.appendingPathComponent("Google", isDirectory: true)
+        let cloud = root.appendingPathComponent("iCloud", isDirectory: true)
+        for folder in [google, cloud] { try FileManager.default.createDirectory(at: folder, withIntermediateDirectories: true) }
+        let store = NotesStore(directory: root.appendingPathComponent("Library"), preferences: preferences)
+        store.rememberBackupFolder(google, for: .googleDrive)
+        store.rememberBackupFolder(cloud, for: .iCloudDrive)
+        try require(store.lastBackup != nil && store.lastICloudBackup != nil, "Both destinations back up immediately after connection")
+        try require(preferences.data(forKey: BackupDestination.googleDrive.bookmarkKey) != nil && preferences.data(forKey: BackupDestination.iCloudDrive.bookmarkKey) != nil, "Both folder permissions persist independently: Google \(store.backupPermissionDiagnostic(for: .googleDrive)); iCloud \(store.backupPermissionDiagnostic(for: .iCloudDrive)); \(store.errorMessage ?? "no bookmark error")")
+        if BackupFolderAccess.isKnownNonSandboxed {
+            let fallback = try BackupFolderAccess(url: google).bookmark(scopedCreator: { _ in throw CocoaError(.fileReadNoPermission) })
+            try require(BackupFolderAccess.isOrdinaryBookmark(fallback), "A forced scoped failure uses an explicit ordinary bookmark only outside the sandbox")
+            let restoredFallback = try BackupFolderAccess.restore(fallback)
+            let proof = restoredFallback.access.url.appendingPathComponent("ordinary-bookmark-proof.txt")
+            try Data("fallback access proof".utf8).write(to: proof, options: .atomic)
+            try require(try String(contentsOf: proof, encoding: .utf8) == "fallback access proof", "The forced ordinary fallback restores real writable folder access")
+        }
+        let restored = NotesStore(directory: root.appendingPathComponent("Library"), preferences: preferences)
+        try require(restored.driveFolder?.resolvingSymlinksInPath() == google.resolvingSymlinksInPath() && restored.iCloudFolder?.resolvingSymlinksInPath() == cloud.resolvingSymlinksInPath(), "Both folder bookmarks reopen after restarting")
+        guard let sheet = store.selectedSheet else { throw LibraryError.nodeNotFound }
+        store.iCloudFolder = root.appendingPathComponent("Unavailable")
+        store.update(sheet.id) { $0.body += "\nAutomatic Google backup survives an unavailable iCloud folder." }
+        try require(store.prepareForQuit(), "An unavailable backup destination does not prevent a successful local quit save")
+        let googleFiles = try FileManager.default.contentsOfDirectory(at: google.appendingPathComponent("iNotes Backups"), includingPropertiesForKeys: nil)
+        let cloudFiles = try FileManager.default.contentsOfDirectory(at: cloud.appendingPathComponent("iNotes Backups"), includingPropertiesForKeys: nil)
+        try require(googleFiles.count == 2 && cloudFiles.count == 1, "Google receives the changed backup independently of iCloud failure")
+        try require(store.backupStatus(for: .iCloudDrive).contains("retrying"), "A failed target advertises its automatic retry")
+        // Filenames may share a timestamp; find the completed archive by content.
+        let contents = try googleFiles.map { try LibraryArchive.decode(LibraryArchive.read(from: $0)) }
+        try require(contents.contains(where: { $0.node(id: sheet.id)?.body == store.library.node(id: sheet.id)?.body }), "The automatic Google archive includes the latest edits")
+        store.iCloudFolder = cloud
+        store.backupNow(to: .iCloudDrive)
+        try require(store.backupStatus(for: .iCloudDrive).contains("saved to folder"), "A repaired destination can retry without discarding notes")
+        store.disconnectDrive()
+        try require(store.driveFolder == nil && store.iCloudFolder == cloud && preferences.data(forKey: BackupDestination.iCloudDrive.bookmarkKey) != nil, "Disconnecting Google preserves iCloud connection and permission")
+        store.disconnectBackup(.iCloudDrive)
+        restored.disconnectDrive()
+        restored.disconnectBackup(.iCloudDrive)
+        return "Backup integration checks passed: independent destinations, bookmarks/relaunch, auto-backup on quit, Google fallback, failed-target retry, complete latest archive, independent disconnect"
+    }
+}
+#endif

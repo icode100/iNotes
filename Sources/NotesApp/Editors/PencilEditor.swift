@@ -13,6 +13,41 @@ private typealias InkPlatformColor = UIColor
 /// remains in the sheet so iPad retains textures, transparency and advanced tools.
 @MainActor
 enum PortableInkConverter {
+    /// Custom clipboard data is untrusted even when its JSON envelope is small.
+    static func validatedClipboardDrawing(_ data: Data?, fallback: [InkStroke]) throws -> PKDrawing {
+        let value = try data.map { try PKDrawing(data: $0) } ?? drawing(from: fallback)
+        guard value.strokes.count <= 10_000,
+              value.strokes.reduce(0, { $0 + $1.path.count }) <= 1_000_000 else { throw LibraryError.tooLarge }
+        var estimatedSamples = 0.0
+        for stroke in value.strokes {
+            let transform = stroke.transform
+            guard [transform.a, transform.b, transform.c, transform.d, transform.tx, transform.ty]
+                .allSatisfy({ $0.isFinite && abs($0) <= 100_000 }) else {
+                throw LibraryError.invalidData("Clipboard ink contains an invalid transform.")
+            }
+            var previous: CGPoint?
+            var length = 0.0
+            for point in stroke.path {
+                guard [point.location.x, point.location.y].allSatisfy({ $0.isFinite && abs($0) <= 100_000 }),
+                      [point.size.width, point.size.height].allSatisfy({ $0.isFinite && (0...1_000).contains($0) }),
+                      point.force.isFinite else { throw LibraryError.invalidData("Clipboard ink contains invalid geometry.") }
+                let position = point.location.applying(transform)
+                if let previous { length += hypot(position.x - previous.x, position.y - previous.y) }
+                previous = position
+            }
+            // Native paths have few control points, but distance-based portable
+            // sampling can otherwise amplify a tiny clipboard into huge arrays.
+            estimatedSamples += max(Double(stroke.path.count), Double(length) * 2 / 1.5 + 2)
+            guard estimatedSamples.isFinite, estimatedSamples <= 1_000_000 else { throw LibraryError.tooLarge }
+            let bounds = stroke.renderBounds
+            guard bounds.isNull || (!bounds.isInfinite && [bounds.minX, bounds.maxX, bounds.minY, bounds.maxY]
+                .allSatisfy({ $0.isFinite && abs($0) <= 110_000 })) else {
+                throw LibraryError.invalidData("Clipboard ink lies outside the supported page area.")
+            }
+        }
+        return value
+    }
+
     static func drawing(from strokes: [InkStroke]) -> PKDrawing {
         PKDrawing(strokes: strokes.compactMap { stroke -> PKStroke? in
             let points = stroke.points.enumerated().compactMap { index, point -> PKStrokePoint? in

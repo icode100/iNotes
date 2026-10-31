@@ -58,6 +58,41 @@ those behaviors.
 Local host: Apple silicon ARM64, macOS 27.2 (26B123), Apple Swift 6.4.2, full
 Xcode 27.2 (27B52). Hosted runs below used the `macos-26` runner and Xcode 26.6.
 
+### 0.2.0 local feature validation
+
+| Check | Result |
+| --- | --- |
+| Shared model and persistence XCTest | Passed: 50 tests, 0 failures, 0.699 seconds. Coverage includes legacy archives and format 2 page objects, Unicode/equation search, mixed-selection geometry, validated clipboard payloads, independent folder backups, versioning, recovery, and size limits |
+| iPad native editor integration | Passed: 98 checks in a fresh source-snapshot build on the iPad Pro 11-inch (M5), iPadOS 27.2 ARM64 simulator, using native `PKCanvasView`, `UITextView`, glyph layout, first responders, and undo managers. Coverage includes mixed text/ink/equation selection, rectangle/lasso geometry, body-text promotion, group movement and atomic undo/redo, native masks/colors/identities, clipboard bounds and sample budgets, fixed-width page reach, ruled baselines, and light/dark preservation |
+| iPad input routing and shortcuts | Passed within the 98 native checks: Text routes finger/pointer and Pencil-typed input to native text, including blank margins and movable text boxes; it retains keyboard focus and hides the ink picker. Pen routes Pencil-typed input to the canvas. Re-selecting Text recovers focus, ordinary letters remain text in Text mode, and modified tool shortcuts remain available. The route tests supply the public helper's input-type parameter; they do not generate physical Pencil touches |
+| iPad native typing undo/redo | Passed in light and dark modes: a real first-responder `UITextView` received Unicode through `insertText` and the persistence delegate; native undo/redo preserved typing history and restored exact canonical RTF. Isolated typing fixtures left the original page text/RTF unchanged |
+| Independent automatic backups | Passed disposable-folder integration: both destinations write complete archives, restore folder bookmarks, back up on normal quit, retry a repaired target, and disconnect independently. Google Drive backup continues while the iCloud target is unavailable. Four shared backup tests also preserve handwriting, movable text, and equations |
+| Bookmark fallback and relaunch | Passed using the production access helper in an isolated signed app: forced scoped-bookmark failure selects a marked ordinary bookmark only for a verified non-sandboxed Mac process; a separate fresh process restores it and writes the fixture folder. Legacy raw scoped bookmarks also restore. Sandboxed/error-unknown processes retain the strict scoped path |
+| Live Mac Text/Pen routing | Passed with a Deco640 tablet connected: all alphabetic letters entered native text in Text mode, Command-Option-P selected Pen, and mouse input produced ink. Physical stylus pressure/tilt was not exercised by this check |
+| Live ruled-paper appearance | Passed visual checks of text baselines against 28-point rules in light and dark appearances, alongside handwriting and rendered equations. Native iPad checks also verify wrapped Unicode, heading metrics, movable-box origins, empty typing, and unchanged canonical RTF |
+| Native Mac app suites | Passed in the app bundle: 128 editor checks, 31 equation checks, 8 shortcut checks, 12 ruled-layout checks, store/backup checks, and 16 signed-update configuration checks |
+| Live Mac typing undo/redo | Passed actual keyboard input: typing `z`, Command-Z, and Command-Shift-Z restored the expected text and exact canonical RTF/page-content fields. This covers real menu/key dispatch in addition to direct native-manager operations |
+| Final Mac candidate UI | Passed in the proper candidate app: Search followed by re-selecting Text restored keyboard entry; `vlpbhet` typed literally with the Deco640 connected. Command-Option-P selected Pen and the plain `H` shortcut selected Highlighter. Light/dark ruled pages were visually checked, and a dark-page highlighter stroke retained canonical gold ink with the existing body intact. Actual `z` → Command-Z → Command-Shift-Z preserved exact page content/RTF |
+| Final 0.2.0 installer and signatures | Passed ARM64 packaging, strict app/framework/helper signatures, read-only mounted DMG, Applications link, and mounted-app smoke checks. All five signature probes passed: valid signed feed/archive accepted; changed feed, unsigned feed, changed archive, and wrong public key rejected |
+
+Current evidence is recorded in `/private/tmp/inotes-features-xctest.log`,
+`/private/tmp/inotes-features-ipad-build.log`,
+`/private/tmp/inotes-features-ipad-diagnostics.json`, and
+`/private/tmp/inotes-bookmark-fallback-proof.log`. Final Mac package evidence is
+in `/private/tmp/inotes-features-release-final-native.log`,
+`/private/tmp/inotes-features-release-final-verify.log`, and
+`/private/tmp/inotes-features-release-final-signatures.log`.
+
+The verified **local 0.2.0 build 4** app contains 9,347,377 bytes of files
+(8.91 MiB). Its DMG is 5,367,174 bytes (5.12 MiB), with SHA-256
+`af227bdf6c94cf5b8e8ef205036fd39a10704b9b7675186e63df8ed6211d1986`.
+These are local candidate measurements. Hosted 0.2.0 CI/public-release checks
+are still pending. Folder writes were tested locally; actual iCloud Drive and
+Google Drive upload completion has not been verified. Artifact sizes do not
+measure RAM.
+
+### 0.1.x release validation history
+
 | Check | Result |
 | --- | --- |
 | Shared model and persistence XCTest | Passed through `scripts/test.sh`: 34 tests, 0 failures, including legacy archives, instrument/paper persistence, size limits, recovery, conflict checks, theme contrast, palette conversion, custom-color handling, and unchanged archived ink |
@@ -119,11 +154,12 @@ Debug build with `SIMCTL_CHILD_INOTES_IOS_EDITOR_DIAGNOSTICS=1`; the app writes
 `Library/Caches/iNotesEditorDiagnostics.json` in its data container, then restores
 the original drawing. The diagnostic is absent from release builds.
 
-The same page keeps text, handwriting, and its paper background together; the
-Text tool changes input routing without hiding the ink. On iPad, a shared zoomed
-document contains transparent native text and PencilKit layers. Pencil input goes
-to PencilKit while finger/pointer input can edit text. Physical pen pressure,
-palm rejection, and Apple Pencil hardware have not been validated on this host.
+The same page keeps text, handwriting, movable text boxes, equations, and its
+paper background together. In 0.2.0, Text routes pointer/finger/stylus input to
+native text and caret entry, including native Scribble where enabled by iPadOS;
+the drawing tools route stylus input to ink. The layers stay visible on one
+zoomed document. Physical pen pressure, palm rejection, and Apple Pencil/Scribble
+hardware have not been validated on this host.
 
 ## Required manual checks before public release
 
@@ -155,12 +191,16 @@ Record device model, OS version, app commit, result, and any issue for every run
 Build and device results are recorded in the root README or the change report.
 Deployment targets declare intended minimums; they do not establish compatibility
 with every intermediate OS version. Unless explicitly recorded as passed, assume
-physical tablet, physical iPad, Apple Pencil, cloud upload, Gatekeeper on a second Mac, and
-older macOS checks remain unverified. Hosted CI and v0.1.1/v0.1.2 publication passed as
+physical stylus pressure/tilt, palm rejection, physical iPad/Apple Pencil, cloud
+upload completion, Gatekeeper on a second Mac, and older macOS checks remain
+unverified. Deco640 connection and keyboard/mouse routing were checked as
+recorded above. Hosted CI and v0.1.1/v0.1.2 publication passed as
 recorded above. The native public-feed check stopped at the available-update
 dialog. Update download, installation, and relaunch from an older installed app
 remain unverified.
 
 Use temporary test libraries for destructive recovery tests. Keep independent
-exports of real notes. Google Drive folder backup relies on the user's installed
-Drive client or Files provider; it is not a real-time multi-writer sync protocol.
+exports of real notes. The separate iCloud Drive and Google Drive targets write
+versioned archives through the selected Finder/Files folder. Their providers
+handle uploading; importing an archive transfers its notes. Folder backups do
+not merge concurrent edits between devices.

@@ -133,6 +133,7 @@ struct RichTextEditor: NSViewRepresentable {
                 editor.insertText(command == .bullet ? "• " : "☐ ", replacementRange: NSRange(location: lineRange.location, length: 0))
             }
         }
+        RuledTextLayout.refresh(editor)
     }
 
     @MainActor
@@ -190,6 +191,7 @@ struct RichTextEditor: NSViewRepresentable {
             lastText = text
             lastRTF = rtf
             lastTheme = parent.theme
+            RuledTextLayout.refresh(editor)
         }
 
         func textDidChange(_ notification: Notification) {
@@ -213,7 +215,7 @@ struct RichTextEditor: NSViewRepresentable {
                 let undo = editor.undoManager
                 let registering = undo?.isUndoRegistrationEnabled == true
                 if registering { undo?.disableUndoRegistration() }
-                editor.textStorage?.setAttributedString(display)
+                if let storage = editor.textStorage { ThemeTextAttributes.applyDisplayAttributes(display, to: storage) }
                 editor.setSelectedRange(ThemeTextAttributes.clipped(selected, length: display.length))
                 if registering { undo?.enableUndoRegistration() }
                 isLoading = false
@@ -232,7 +234,17 @@ struct RichTextEditor: NSViewRepresentable {
 
 @MainActor
 final class NotesTextView: NSTextView {
+    var usesRuledPaper = false
+    override var textContainerOrigin: NSPoint {
+        var origin = super.textContainerOrigin
+        // Vertically resizable text views otherwise subtract the first used
+        // fragment's padding, cancelling its page-aligned baseline phase.
+        if usesRuledPaper { origin.y = textContainerInset.height }
+        return origin
+    }
     static weak var activeEditor: NotesTextView?
+    var pageUndoManager: UndoManager?
+    override var undoManager: UndoManager? { pageUndoManager ?? super.undoManager }
     var onTabletProximity: ((NSEvent) -> Void)?
     override func becomeFirstResponder() -> Bool {
         let accepted = super.becomeFirstResponder()
@@ -331,6 +343,7 @@ struct RichTextEditor: UIViewRepresentable {
             lastText = text
             lastRTF = rtf
             lastTheme = parent.theme
+            RuledTextLayout.refresh(editor)
         }
 
         func textViewDidChange(_ editor: UITextView) {
@@ -349,7 +362,7 @@ struct RichTextEditor: UIViewRepresentable {
                 let undo = editor.undoManager
                 let registering = undo?.isUndoRegistrationEnabled == true
                 if registering { undo?.disableUndoRegistration() }
-                editor.attributedText = display
+                ThemeTextAttributes.applyDisplayAttributes(display, to: editor.textStorage)
                 editor.selectedRange = ThemeTextAttributes.clipped(selected, length: display.length)
                 if registering { undo?.enableUndoRegistration() }
                 isLoading = false
@@ -379,6 +392,18 @@ typealias NoteTextColor = UIColor
 @MainActor
 enum ThemeTextAttributes {
     static let canonicalColorKey = NSAttributedString.Key("io.inotes.canonicalForeground")
+
+    /// Color projection must not replace characters: native typing undo tracks
+    /// those edits, even when a replacement string happens to be identical.
+    static func applyDisplayAttributes(_ display: NSAttributedString, to storage: NSMutableAttributedString) {
+        guard display.string == storage.string else { return }
+        storage.beginEditing()
+        display.enumerateAttributes(in: NSRange(location: 0, length: display.length)) { attributes, range, _ in
+            if let color = attributes[.foregroundColor] { storage.addAttribute(.foregroundColor, value: color, range: range) }
+            if let canonical = attributes[canonicalColorKey] { storage.addAttribute(canonicalColorKey, value: canonical, range: range) }
+        }
+        storage.endEditing()
+    }
 
     static func clipped(_ range: NSRange, length: Int) -> NSRange {
         let location = min(range.location, length)

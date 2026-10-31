@@ -4,8 +4,8 @@ set -euo pipefail
 # Direct distribution for Apple silicon, with a native signed Sparkle updater.
 ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 cd "$ROOT"
-VERSION="${VERSION:-0.1.0}"
-BUILD_NUMBER="${BUILD_NUMBER:-2}"
+VERSION="${VERSION:-0.2.0}"
+BUILD_NUMBER="${BUILD_NUMBER:-4}"
 SIGNING_IDENTITY="${SIGNING_IDENTITY:--}"
 export UPDATE_FEED_URL="${UPDATE_FEED_URL-https://github.com/icode100/iNotes/releases/latest/download/appcast.xml}"
 if [[ ! ${UPDATE_PUBLIC_ED_KEY+x} && -f Resources/UpdatePublicEDKey.txt ]]; then
@@ -41,13 +41,27 @@ cleanup() {
   rm -rf "$SCRATCH"
 }
 trap cleanup EXIT
-BUILD_OPTIONS=(--build-system native --disable-sandbox --cache-path "$ROOT/.build/cache" --scratch-path "$SCRATCH" -c release --arch arm64)
+# Snapshot source inputs: concurrent edits to an iPad-only file must not invalidate
+# an otherwise unchanged Mac compilation halfway through packaging.
+mkdir -p "$SCRATCH/source"
+ditto Sources "$SCRATCH/source/Sources"
+ditto Tests "$SCRATCH/source/Tests"
+cp Package.swift Package.resolved "$SCRATCH/source/"
+BUILD_OPTIONS=(--package-path "$SCRATCH/source" --build-system native --disable-sandbox --cache-path "$ROOT/.build/cache" --scratch-path "$SCRATCH" -c release --arch arm64)
+swift package --package-path "$SCRATCH/source" --disable-sandbox --cache-path "$ROOT/.build/cache" --scratch-path "$SCRATCH" resolve
+# Adapt only the pinned dependency's native resource lookup, inside disposable scratch.
+MATH_SOURCE="$SCRATCH/checkouts/SwiftMath/Sources/SwiftMath/MathRender/MTFont.swift"
+chmod u+w "$MATH_SOURCE"
+patch -p1 -d "$SCRATCH/checkouts/SwiftMath" < patches/SwiftMath-1.7.3-resource-bundle.patch
 swift build "${BUILD_OPTIONS[@]}" --product iNotes
 BIN_DIR="$(swift build "${BUILD_OPTIONS[@]}" --show-bin-path)"
 APP="$STAGE/iNotes.app"
 mkdir -p "$APP/Contents/MacOS" "$APP/Contents/Resources"
 cp "$BIN_DIR/iNotes" "$APP/Contents/MacOS/iNotes"
 cp LICENSE "$APP/Contents/Resources/LICENSE"
+ditto "$BIN_DIR/SwiftMath_SwiftMath.bundle" "$APP/Contents/Resources/SwiftMath_SwiftMath.bundle"
+bash scripts/trim-math-fonts.sh "$APP/Contents/Resources/SwiftMath_SwiftMath.bundle"
+cp "$SCRATCH/checkouts/SwiftMath/LICENSE" "$APP/Contents/Resources/SwiftMath-LICENSE"
 SPARKLE_DIST="$SCRATCH/artifacts/sparkle/Sparkle"
 SPARKLE_SOURCE="$SPARKLE_DIST/Sparkle.xcframework/macos-arm64_x86_64/Sparkle.framework"
 test -d "$SPARKLE_SOURCE"

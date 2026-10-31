@@ -42,16 +42,19 @@ does not publish a release.
 ## Build and sign a local update
 
 ```sh
-VERSION=0.1.1 BUILD_NUMBER=3 bash scripts/build-macos.sh
-VERSION=0.1.1 bash scripts/verify-macos.sh
-VERSION=0.1.1 bash scripts/generate-appcast.sh
-VERSION=0.1.1 bash scripts/test-update-signatures.sh
+VERSION=0.2.1 BUILD_NUMBER=1005 bash scripts/build-macos.sh
+VERSION=0.2.1 bash scripts/verify-macos.sh
+VERSION=0.2.1 bash scripts/generate-appcast.sh
+VERSION=0.2.1 bash scripts/test-update-signatures.sh
 ```
 
 The appcast command prepares `dist/update/appcast.xml`. It uses Sparkle's official
 `generate_appcast` and `sign_update`, then independently verifies both signatures
 using Apple CryptoKit and the committed public key. It does not upload anything.
-The feed points to the matching `v0.1.1` release's DMG. Never edit a signed appcast
+This example assumes the latest published build is 1004; check the actual
+published `CFBundleVersion` and use a larger number. Development defaults
+(`0.2.0`, build 4) are separate from the release workflow's `1000 + GITHUB_RUN_NUMBER`.
+The feed points to the matching `v0.2.1` release's DMG. Never edit a signed appcast
 after generation. Re-run the script if its contents change. The last command
 checks valid signatures and rejects changed feeds, unsigned feeds, changed
 archives, and a different public key.
@@ -71,7 +74,7 @@ HTTPS feed; malformed configured channels are rejected before packaging.
 ## Publish a version
 
 After reviewing the source and configuring the secret, push a tag such as
-`v0.1.1`. `.github/workflows/release.yml` runs unit/integration tests, builds the
+`v0.2.1`. `.github/workflows/release.yml` runs unit/integration tests, builds the
 ARM64 DMG, verifies the mounted bundle, signs and independently verifies the
 appcast, then publishes the DMG, SHA-256 checksum, and `appcast.xml` as GitHub
 Release assets. Its token has repository-contents write permission only in the

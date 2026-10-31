@@ -20,6 +20,15 @@
 		A1000000000000000000000D /* UnifiedPageEditor+iOS.swift in Sources */ = {isa = PBXBuildFile; fileRef = A2000000000000000000000D /* UnifiedPageEditor+iOS.swift */; };
 		A1000000000000000000000E /* UnifiedPageEditor.swift in Sources */ = {isa = PBXBuildFile; fileRef = A2000000000000000000000E /* UnifiedPageEditor.swift */; };
 		A1000000000000000000000F /* AppIcon.icon in Resources */ = {isa = PBXBuildFile; fileRef = A2000000000000000000000F /* AppIcon.icon */; };
+		C10000000000000000000001 /* BackupFolderAccess.swift in Sources */ = {isa = PBXBuildFile; fileRef = C20000000000000000000001; };
+		C10000000000000000000002 /* EquationDisplayView.swift in Sources */ = {isa = PBXBuildFile; fileRef = C20000000000000000000002; };
+		C10000000000000000000003 /* EquationEditor.swift in Sources */ = {isa = PBXBuildFile; fileRef = C20000000000000000000003; };
+		C10000000000000000000004 /* MacPageSelection.swift in Sources */ = {isa = PBXBuildFile; fileRef = C20000000000000000000004; };
+		C10000000000000000000005 /* MacPageObjects.swift in Sources */ = {isa = PBXBuildFile; fileRef = C20000000000000000000005; };
+		C10000000000000000000006 /* IOSPageSelection.swift in Sources */ = {isa = PBXBuildFile; fileRef = C20000000000000000000006; };
+		C10000000000000000000010 /* SwiftMath in Frameworks */ = {isa = PBXBuildFile; productRef = C90000000000000000000002; };
+		C10000000000000000000007 /* ToolShortcuts.swift in Sources */ = {isa = PBXBuildFile; fileRef = C20000000000000000000007; };
+		C10000000000000000000008 /* RuledTextLayout.swift in Sources */ = {isa = PBXBuildFile; fileRef = C20000000000000000000008; };
 /* End PBXBuildFile section */
 
 /* Begin PBXFileReference section */
@@ -38,13 +47,21 @@
 		A2000000000000000000000D /* UnifiedPageEditor+iOS.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = "UnifiedPageEditor+iOS.swift"; sourceTree = "<group>"; };
 		A2000000000000000000000E /* UnifiedPageEditor.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = UnifiedPageEditor.swift; sourceTree = "<group>"; };
 		A2000000000000000000000F /* AppIcon.icon */ = {isa = PBXFileReference; lastKnownFileType = folder.iconcomposer.icon; path = Resources/AppIcon.icon; sourceTree = SOURCE_ROOT; };
+		C20000000000000000000001 /* BackupFolderAccess.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = "Sources/NotesApp/BackupFolderAccess.swift"; sourceTree = SOURCE_ROOT; };
+		C20000000000000000000002 /* EquationDisplayView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = "Sources/NotesApp/EquationDisplayView.swift"; sourceTree = SOURCE_ROOT; };
+		C20000000000000000000003 /* EquationEditor.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = "Sources/NotesApp/EquationEditor.swift"; sourceTree = SOURCE_ROOT; };
+		C20000000000000000000004 /* MacPageSelection.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = "Sources/NotesApp/Editors/MacPageSelection.swift"; sourceTree = SOURCE_ROOT; };
+		C20000000000000000000005 /* MacPageObjects.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = "Sources/NotesApp/Editors/MacPageObjects.swift"; sourceTree = SOURCE_ROOT; };
+		C20000000000000000000006 /* IOSPageSelection.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = "Sources/NotesApp/Editors/IOSPageSelection.swift"; sourceTree = SOURCE_ROOT; };
+		C20000000000000000000007 /* ToolShortcuts.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = "Sources/NotesApp/ToolShortcuts.swift"; sourceTree = SOURCE_ROOT; };
+		C20000000000000000000008 /* RuledTextLayout.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = "Sources/NotesApp/Editors/RuledTextLayout.swift"; sourceTree = SOURCE_ROOT; };
 /* End PBXFileReference section */
 
 /* Begin PBXFrameworksBuildPhase section */
 		A30000000000000000000001 /* Frameworks */ = {
 			isa = PBXFrameworksBuildPhase;
 			buildActionMask = 2147483647;
-			files = (A10000000000000000000007 /* NotesCore in Frameworks */);
+			files = (A10000000000000000000007 /* NotesCore in Frameworks */, C10000000000000000000010 /* SwiftMath in Frameworks */);
 			runOnlyForDeploymentPostprocessing = 0;
 		};
 /* End PBXFrameworksBuildPhase section */
@@ -57,7 +74,7 @@
 		};
 		A40000000000000000000002 /* NotesApp */ = {
 			isa = PBXGroup;
-			children = (A20000000000000000000001 /* iNotesApp.swift */, A20000000000000000000002 /* NotesStore.swift */, A20000000000000000000003 /* ContentView.swift */, A20000000000000000000009 /* SheetDetail.swift */, A2000000000000000000000A /* MacFileActions.swift */, A2000000000000000000000C /* InputDeviceMonitor.swift */, A40000000000000000000003 /* Editors */);
+			children = (C20000000000000000000007 /* ToolShortcuts.swift */, C20000000000000000000008 /* RuledTextLayout.swift */, C20000000000000000000001 /* BackupFolderAccess.swift */, C20000000000000000000002 /* EquationDisplayView.swift */, C20000000000000000000003 /* EquationEditor.swift */, C20000000000000000000004 /* MacPageSelection.swift */, C20000000000000000000005 /* MacPageObjects.swift */, C20000000000000000000006 /* IOSPageSelection.swift */, A20000000000000000000001 /* iNotesApp.swift */, A20000000000000000000002 /* NotesStore.swift */, A20000000000000000000003 /* ContentView.swift */, A20000000000000000000009 /* SheetDetail.swift */, A2000000000000000000000A /* MacFileActions.swift */, A2000000000000000000000C /* InputDeviceMonitor.swift */, A40000000000000000000003 /* Editors */);
 			path = Sources/NotesApp;
 			sourceTree = "<group>";
 		};
@@ -83,7 +100,7 @@
 			buildRules = ();
 			dependencies = ();
 			name = "iNotes-iPad";
-			packageProductDependencies = (A90000000000000000000001 /* NotesCore */);
+			packageProductDependencies = (A90000000000000000000001 /* NotesCore */, C90000000000000000000002 /* SwiftMath */);
 			productName = iNotes;
 			productReference = A20000000000000000000007 /* iNotes.app */;
 			productType = "com.apple.product-type.application";
@@ -100,7 +117,7 @@
 			hasScannedForEncodings = 0;
 			knownRegions = (en, Base);
 			mainGroup = A40000000000000000000001;
-			packageReferences = (A90000000000000000000002 /* XCLocalSwiftPackageReference "." */);
+			packageReferences = (A90000000000000000000002 /* XCLocalSwiftPackageReference "." */, C90000000000000000000001 /* SwiftMath */);
 			productRefGroup = A40000000000000000000004 /* Products */;
 			projectDirPath = "";
 			projectRoot = "";
@@ -116,7 +133,7 @@
 		A60000000000000000000001 /* Sources */ = {
 			isa = PBXSourcesBuildPhase;
 			buildActionMask = 2147483647;
-			files = (A10000000000000000000001 /* iNotesApp.swift in Sources */, A10000000000000000000002 /* NotesStore.swift in Sources */, A10000000000000000000003 /* ContentView.swift in Sources */, A10000000000000000000009 /* SheetDetail.swift in Sources */, A1000000000000000000000A /* MacFileActions.swift in Sources */, A1000000000000000000000C /* InputDeviceMonitor.swift in Sources */, A10000000000000000000004 /* RichTextEditor.swift in Sources */, A10000000000000000000005 /* InkEditor.swift in Sources */, A10000000000000000000006 /* PencilEditor.swift in Sources */, A1000000000000000000000B /* EditorDiagnostics.swift in Sources */, A1000000000000000000000D /* UnifiedPageEditor+iOS.swift in Sources */, A1000000000000000000000E /* UnifiedPageEditor.swift in Sources */);
+			files = (C10000000000000000000007 /* ToolShortcuts.swift in Sources */, C10000000000000000000008 /* RuledTextLayout.swift in Sources */, C10000000000000000000001 /* BackupFolderAccess.swift in Sources */, C10000000000000000000002 /* EquationDisplayView.swift in Sources */, C10000000000000000000003 /* EquationEditor.swift in Sources */, C10000000000000000000004 /* MacPageSelection.swift in Sources */, C10000000000000000000005 /* MacPageObjects.swift in Sources */, C10000000000000000000006 /* IOSPageSelection.swift in Sources */, A10000000000000000000001 /* iNotesApp.swift in Sources */, A10000000000000000000002 /* NotesStore.swift in Sources */, A10000000000000000000003 /* ContentView.swift in Sources */, A10000000000000000000009 /* SheetDetail.swift in Sources */, A1000000000000000000000A /* MacFileActions.swift in Sources */, A1000000000000000000000C /* InputDeviceMonitor.swift in Sources */, A10000000000000000000004 /* RichTextEditor.swift in Sources */, A10000000000000000000005 /* InkEditor.swift in Sources */, A10000000000000000000006 /* PencilEditor.swift in Sources */, A1000000000000000000000B /* EditorDiagnostics.swift in Sources */, A1000000000000000000000D /* UnifiedPageEditor+iOS.swift in Sources */, A1000000000000000000000E /* UnifiedPageEditor.swift in Sources */);
 			runOnlyForDeploymentPostprocessing = 0;
 		};
 /* End PBXSourcesBuildPhase section */
@@ -134,12 +151,12 @@
 		};
 		A70000000000000000000003 /* Debug */ = {
 			isa = XCBuildConfiguration;
-			buildSettings = {ASSETCATALOG_COMPILER_APPICON_NAME = AppIcon; ARCHS = "$(ARCHS_STANDARD)"; CODE_SIGN_STYLE = Automatic; CURRENT_PROJECT_VERSION = 1; GENERATE_INFOPLIST_FILE = YES; INFOPLIST_FILE = "Resources/iPad-Info.plist"; INFOPLIST_KEY_CFBundleDisplayName = iNotes; INFOPLIST_KEY_UIApplicationSceneManifest_Generation = YES; INFOPLIST_KEY_UILaunchScreen_Generation = YES; INFOPLIST_KEY_UISupportedInterfaceOrientations_iPad = "UIInterfaceOrientationPortrait UIInterfaceOrientationPortraitUpsideDown UIInterfaceOrientationLandscapeLeft UIInterfaceOrientationLandscapeRight"; LD_RUNPATH_SEARCH_PATHS = ("$(inherited)", "@executable_path/Frameworks"); MARKETING_VERSION = 0.1.0; PRODUCT_BUNDLE_IDENTIFIER = io.inotes.app; PRODUCT_NAME = iNotes; SUPPORTED_PLATFORMS = "iphoneos iphonesimulator"; SUPPORTS_MACCATALYST = NO; SUPPORTS_MAC_DESIGNED_FOR_IPHONE_IPAD = NO; TARGETED_DEVICE_FAMILY = 2; };
+			buildSettings = {ASSETCATALOG_COMPILER_APPICON_NAME = AppIcon; ARCHS = "$(ARCHS_STANDARD)"; CODE_SIGN_STYLE = Automatic; CURRENT_PROJECT_VERSION = 4; GENERATE_INFOPLIST_FILE = YES; INFOPLIST_FILE = "Resources/iPad-Info.plist"; INFOPLIST_KEY_CFBundleDisplayName = iNotes; INFOPLIST_KEY_UIApplicationSceneManifest_Generation = YES; INFOPLIST_KEY_UILaunchScreen_Generation = YES; INFOPLIST_KEY_UISupportedInterfaceOrientations_iPad = "UIInterfaceOrientationPortrait UIInterfaceOrientationPortraitUpsideDown UIInterfaceOrientationLandscapeLeft UIInterfaceOrientationLandscapeRight"; LD_RUNPATH_SEARCH_PATHS = ("$(inherited)", "@executable_path/Frameworks"); MARKETING_VERSION = 0.2.0; PRODUCT_BUNDLE_IDENTIFIER = io.inotes.app; PRODUCT_NAME = iNotes; SUPPORTED_PLATFORMS = "iphoneos iphonesimulator"; SUPPORTS_MACCATALYST = NO; SUPPORTS_MAC_DESIGNED_FOR_IPHONE_IPAD = NO; TARGETED_DEVICE_FAMILY = 2; };
 			name = Debug;
 		};
 		A70000000000000000000004 /* Release */ = {
 			isa = XCBuildConfiguration;
-			buildSettings = {ASSETCATALOG_COMPILER_APPICON_NAME = AppIcon; ARCHS = "$(ARCHS_STANDARD)"; CODE_SIGN_STYLE = Automatic; CURRENT_PROJECT_VERSION = 1; GENERATE_INFOPLIST_FILE = YES; INFOPLIST_FILE = "Resources/iPad-Info.plist"; INFOPLIST_KEY_CFBundleDisplayName = iNotes; INFOPLIST_KEY_UIApplicationSceneManifest_Generation = YES; INFOPLIST_KEY_UILaunchScreen_Generation = YES; INFOPLIST_KEY_UISupportedInterfaceOrientations_iPad = "UIInterfaceOrientationPortrait UIInterfaceOrientationPortraitUpsideDown UIInterfaceOrientationLandscapeLeft UIInterfaceOrientationLandscapeRight"; LD_RUNPATH_SEARCH_PATHS = ("$(inherited)", "@executable_path/Frameworks"); MARKETING_VERSION = 0.1.0; PRODUCT_BUNDLE_IDENTIFIER = io.inotes.app; PRODUCT_NAME = iNotes; SUPPORTED_PLATFORMS = "iphoneos iphonesimulator"; SUPPORTS_MACCATALYST = NO; SUPPORTS_MAC_DESIGNED_FOR_IPHONE_IPAD = NO; TARGETED_DEVICE_FAMILY = 2; };
+			buildSettings = {ASSETCATALOG_COMPILER_APPICON_NAME = AppIcon; ARCHS = "$(ARCHS_STANDARD)"; CODE_SIGN_STYLE = Automatic; CURRENT_PROJECT_VERSION = 4; GENERATE_INFOPLIST_FILE = YES; INFOPLIST_FILE = "Resources/iPad-Info.plist"; INFOPLIST_KEY_CFBundleDisplayName = iNotes; INFOPLIST_KEY_UIApplicationSceneManifest_Generation = YES; INFOPLIST_KEY_UILaunchScreen_Generation = YES; INFOPLIST_KEY_UISupportedInterfaceOrientations_iPad = "UIInterfaceOrientationPortrait UIInterfaceOrientationPortraitUpsideDown UIInterfaceOrientationLandscapeLeft UIInterfaceOrientationLandscapeRight"; LD_RUNPATH_SEARCH_PATHS = ("$(inherited)", "@executable_path/Frameworks"); MARKETING_VERSION = 0.2.0; PRODUCT_BUNDLE_IDENTIFIER = io.inotes.app; PRODUCT_NAME = iNotes; SUPPORTED_PLATFORMS = "iphoneos iphonesimulator"; SUPPORTS_MACCATALYST = NO; SUPPORTS_MAC_DESIGNED_FOR_IPHONE_IPAD = NO; TARGETED_DEVICE_FAMILY = 2; };
 			name = Release;
 		};
 /* End XCBuildConfiguration section */
@@ -155,7 +172,11 @@
 
 /* Begin XCSwiftPackageProductDependency section */
 		A90000000000000000000001 /* NotesCore */ = {isa = XCSwiftPackageProductDependency; package = A90000000000000000000002 /* XCLocalSwiftPackageReference "." */; productName = NotesCore; };
+		C90000000000000000000002 /* SwiftMath */ = {isa = XCSwiftPackageProductDependency; package = C90000000000000000000001; productName = SwiftMath; };
 /* End XCSwiftPackageProductDependency section */
+/* Begin XCRemoteSwiftPackageReference section */
+		C90000000000000000000001 /* SwiftMath */ = {isa = XCRemoteSwiftPackageReference; repositoryURL = "https://github.com/mgriebling/SwiftMath"; requirement = {kind = exactVersion; version = 1.7.3; }; };
+/* End XCRemoteSwiftPackageReference section */
 	};
 	rootObject = A50000000000000000000002 /* Project object */;
 }
