@@ -234,8 +234,7 @@ struct RichTextEditor: NSViewRepresentable {
 
 @MainActor
 final class NotesTextView: NSTextView {
-    // Native text tracking still receives cursor updates underneath the ink
-    // layer. Follow the page's active tool without disabling native editing.
+    // Late native cursor updates must follow the tool that owns the page.
     var pageCursorProvider: (() -> NSCursor?)?
     var allowsPageTextUndo: (() -> Bool)?
     var onPageUndoComplete: (() -> Void)?

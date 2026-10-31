@@ -89,8 +89,8 @@ passed strict signatures, ARM64 architecture, and resource verification. The
 production source and app contain no temporary diagnostic probes.
 
 A clean QA app used the same compiled production code in an isolated app copy
-with a separate bundle ID and test-library configuration. Actual keyboard input typed `z` in
-Text, selected Pen, then used Command-Z to remove `z`, Command-Shift-Z to
+with a separate bundle ID and test-library configuration. Actual keyboard input
+typed `z` in Text, selected Pen, then used Command-Z to remove `z`, Command-Shift-Z to
 restore it, and Command-Z to remove it again. A user-approved native pointer
 warp over this app, followed by actual keyboard undo, retained the 9×9 system
 Pen cursor; its captured dot was visually verified in
@@ -106,8 +106,26 @@ RTF after the first edit.
 Final local evidence: `/private/tmp/inotes-cursor-release/build.log`,
 `/private/tmp/inotes-cursor-release/tests.log`,
 `/private/tmp/inotes-cursor-release/native.log`, and
-`/private/tmp/inotes-cursor-release/verify.log`. Hosted CI and public-release
-verification for 0.2.2 are pending.
+`/private/tmp/inotes-cursor-release/verify.log`.
+
+### 0.2.2 hosted release verification
+
+| Check | Result |
+| --- | --- |
+| Hosted Native checks | Passed [run 41223696128](https://github.com/icode100/iNotes/actions/runs/41223696128) at source revision [`2b3a354`](https://github.com/icode100/iNotes/commit/2b3a3543b15c072b67efd6eaf9a2d001ed91c80b), including iPad simulator compilation |
+| Signed release workflow | Passed [run 41223698546](https://github.com/icode100/iNotes/actions/runs/41223698546) for [v0.2.2](https://github.com/icode100/iNotes/releases/tag/v0.2.2) |
+| Public feed and archive | Independently downloaded v0.2.2 build 1006; CryptoKit verified both Ed25519 signatures against the committed public key, and the DMG SHA-256 matched the published checksum. At verification time, the latest-release appcast was byte-identical to the versioned feed and identified 0.2.2 / 1006 |
+| Public installer | Passed strict app/framework signatures, ARM64 architecture, resources, read-only DMG mounting, and store/backup checks using `verify-macos.sh` |
+| Published native app | Passed `--smoke-test --editor-test` from the mounted public app: 194 native editor checks, 31 equation checks, 8 shortcut checks, 12 ruled-layout checks, 16 updater-configuration checks, and store/backup integration checks. The published SDK 26 build runs 194 editor checks; the local SDK 27 build runs 195 because one existing check is SDK-conditional |
+
+The public **0.2.2 build 1006** DMG is **5,073,284 bytes** (about 4.84 MiB),
+with SHA-256
+`712d918248a922265b86b7cf24a9f8ac719454cf44cc6ed6066b77454b7d4716`.
+These are public artifact measurements, separate from local build 6.
+Evidence: `/private/tmp/inotes-published-022/signature.log`,
+`/private/tmp/inotes-published-022/verify.log`, and
+`/private/tmp/inotes-published-022/native.log`. Physical tablet pressure/tilt
+and physical stylus hover remain unverified.
 
 ### 0.2.1 cursor regression validation
 
@@ -302,8 +320,9 @@ with every intermediate OS version. Unless explicitly recorded as passed, assume
 physical stylus pressure/tilt, palm rejection, physical iPad/Apple Pencil, cloud
 upload completion, Gatekeeper on a second Mac, and older macOS checks remain
 unverified. Deco640 connection and keyboard/mouse routing were checked as
-recorded above. Hosted CI and v0.1.1/v0.1.2/v0.2.0 publication passed as recorded
-above. The native public-feed check stopped at the available-update
+recorded above. Hosted CI and release verification are recorded by version
+above, including the independently verified public v0.2.2 artifacts. The native
+public-feed check stopped at the available-update
 dialog. Update download, installation, and relaunch from an older installed app
 remain unverified.
 
