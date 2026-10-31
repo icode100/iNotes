@@ -56,7 +56,8 @@ those behaviors.
 ## Recorded results — 31 October 2026
 
 Local host: Apple silicon ARM64, macOS 27.2 (26B123), Apple Swift 6.4.2, full
-Xcode 27.2 (27B52). Hosted runs below used the `macos-26` runner and Xcode 26.6.
+Xcode 27.2 (27B52). Hosted workflows use the `macos-26` runner; the recorded
+0.1.x hosted runs used Xcode 26.6.
 
 ### 0.2.0 local feature validation
 
@@ -86,10 +87,27 @@ in `/private/tmp/inotes-features-release-final-native.log`,
 The verified **local 0.2.0 build 4** app contains 9,347,377 bytes of files
 (8.91 MiB). Its DMG is 5,367,174 bytes (5.12 MiB), with SHA-256
 `af227bdf6c94cf5b8e8ef205036fd39a10704b9b7675186e63df8ed6211d1986`.
-These are local candidate measurements. Hosted 0.2.0 CI/public-release checks
-are still pending. Folder writes were tested locally; actual iCloud Drive and
-Google Drive upload completion has not been verified. Artifact sizes do not
-measure RAM.
+These are local candidate measurements. Folder writes were tested locally;
+actual iCloud Drive and Google Drive upload completion has not been verified.
+Artifact sizes do not measure RAM.
+
+### 0.2.0 hosted release verification
+
+| Check | Result |
+| --- | --- |
+| Signed macOS release workflow | Passed [run 41198905582](https://github.com/icode100/iNotes/actions/runs/41198905582) at source revision [`608ebb7`](https://github.com/icode100/iNotes/commit/608ebb732f518a7a1b2d962492863754055958dc), publishing [v0.2.0](https://github.com/icode100/iNotes/releases/tag/v0.2.0) |
+| Hosted Native checks | Passed [run 41198904250](https://github.com/icode100/iNotes/actions/runs/41198904250) at source revision `608ebb7`: shared tests, ARM64 packaging, mounted-DMG verification, and iPad simulator compilation |
+| Public release assets | Passed independent download of [v0.2.0 assets](https://github.com/icode100/iNotes/releases/tag/v0.2.0): CryptoKit verified the build 1004 appcast and DMG Ed25519 signatures against the committed public key; the DMG matched its published SHA-256 checksum. The default `/releases/latest/download/appcast.xml` was byte-identical to the verified v0.2.0 feed |
+| Mounted public installer | Passed independent public-DMG mount, checksum, strict app/framework/helper signatures, ARM64 verification, native icon/font resources, and store/backup smoke checks |
+| Published Mac app runtime | Passed the published SDK 26 app on macOS 27.2: 127 editor checks, 31 equation checks, 8 shortcut checks, 12 ruled-layout checks, 16 updater configuration checks, and store/backup integration. The local SDK 27 app passed 128 editor checks; SDK-specific coverage accounts for the count difference |
+
+The independently downloaded **published 0.2.0 build 1004** DMG is 5,048,113 bytes
+(4.81 MiB), with SHA-256
+`43143c6321eb5ae3dd54588ac36ccf18d0c35adc9e84f18d9c9d3bb112c03e65`.
+The verified public appcast SHA-256 is
+`44d1386b5b4b0a1863870a65e3a881099cc2d402099fd5f0a7784ee5568da927`.
+The published app's native runtime log is
+`/private/tmp/inotes-published-020/native-editor.log`.
 
 ### 0.1.x release validation history
 
@@ -114,7 +132,7 @@ measure RAM.
 | Local header alignment | Passed in local 0.1.2 build 3 in light and dark appearances: star and More icons share a centerline, the redundant menu chevron is hidden, and spacing is comfortable. Favorite toggling updates the filled star and list marker; the complete More menu remains functional |
 | Hosted GitHub CI | Passed final [Native checks run 41189630063](https://github.com/icode100/iNotes/actions/runs/41189630063) at source revision `924508c`: unit/integration tests, ARM64 packaging, mounted-DMG verification, and iPad simulator compilation. Earlier [run 41189297677](https://github.com/icode100/iNotes/actions/runs/41189297677) at `559eeea` also passed |
 | Hosted signed release | Passed final [release run 41189632342](https://github.com/icode100/iNotes/actions/runs/41189632342) at source revision `924508c`, publishing [v0.1.2 build 1003](https://github.com/icode100/iNotes/releases/tag/v0.1.2) after package and signature checks. Earlier [v0.1.1 release run 41189300121](https://github.com/icode100/iNotes/actions/runs/41189300121) at `559eeea` also passed |
-| Public release download verification | Passed after independently downloading [v0.1.1](https://github.com/icode100/iNotes/releases/tag/v0.1.1) and [v0.1.2 assets](https://github.com/icode100/iNotes/releases/tag/v0.1.2): CryptoKit validated both public appcast/DMG signature pairs against the committed public key, and both DMGs matched their published SHA-256 checksums. The default `/releases/latest/download/appcast.xml` feed was byte-identical to the verified v0.1.2 feed |
+| Public release download verification | Passed after independently downloading [v0.1.1](https://github.com/icode100/iNotes/releases/tag/v0.1.1) and [v0.1.2 assets](https://github.com/icode100/iNotes/releases/tag/v0.1.2): CryptoKit validated both public appcast/DMG signature pairs against the committed public key, and both DMGs matched their published SHA-256 checksums. At that verification time, the default `/releases/latest/download/appcast.xml` feed was byte-identical to the verified v0.1.2 feed |
 | Native public-feed update check | Passed using an isolated, unchanged local 0.1.0 build 2: Sparkle contacted the public GitHub feed and displayed that iNotes 0.1.1 was available for the installed 0.1.0. The dialog was closed through Close/Dismiss; no update was downloaded or installed |
 
 The historical **local 0.1.0 build 2** app contains 6,675,198 bytes of files
@@ -194,8 +212,8 @@ with every intermediate OS version. Unless explicitly recorded as passed, assume
 physical stylus pressure/tilt, palm rejection, physical iPad/Apple Pencil, cloud
 upload completion, Gatekeeper on a second Mac, and older macOS checks remain
 unverified. Deco640 connection and keyboard/mouse routing were checked as
-recorded above. Hosted CI and v0.1.1/v0.1.2 publication passed as
-recorded above. The native public-feed check stopped at the available-update
+recorded above. Hosted CI and v0.1.1/v0.1.2/v0.2.0 publication passed as recorded
+above. The native public-feed check stopped at the available-update
 dialog. Update download, installation, and relaunch from an older installed app
 remain unverified.
 
