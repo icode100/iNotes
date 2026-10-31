@@ -77,9 +77,10 @@ Xcode 27.2 (27B52). Hosted runs below used the `macos-26` runner and Xcode 26.6.
 | Tracking/menu/export live regression | Passed in the corrected release: More menu opened and tracked safely, plain-text export opened the native save panel, UTF-8 bullets/keyboard symbols saved to the correct `.txt` file, and the app remained running with no new crash report |
 | Straight-line live Mac check | Passed: horizontal and vertical lines persisted as exact two-endpoint strokes alongside unchanged typed text and grid paper |
 | Local header alignment | Passed in local 0.1.2 build 3 in light and dark appearances: star and More icons share a centerline, the redundant menu chevron is hidden, and spacing is comfortable. Favorite toggling updates the filled star and list marker; the complete More menu remains functional |
-| Hosted GitHub CI | Passed [Native checks run 41189297677](https://github.com/icode100/iNotes/actions/runs/41189297677) at source revision `559eeea`: unit/integration tests, ARM64 packaging, mounted-DMG verification, and iPad simulator compilation |
-| Hosted signed release | Passed [release run 41189300121](https://github.com/icode100/iNotes/actions/runs/41189300121) at source revision `559eeea`, publishing [v0.1.1](https://github.com/icode100/iNotes/releases/tag/v0.1.1) with its DMG, checksum, and signed appcast after package and signature checks |
-| Public release download verification | Passed after independently downloading [v0.1.1 assets](https://github.com/icode100/iNotes/releases/tag/v0.1.1): CryptoKit validated the public appcast and DMG signatures against the committed public key, and the DMG matched its published SHA-256 checksum |
+| Hosted GitHub CI | Passed final [Native checks run 41189630063](https://github.com/icode100/iNotes/actions/runs/41189630063) at source revision `924508c`: unit/integration tests, ARM64 packaging, mounted-DMG verification, and iPad simulator compilation. Earlier [run 41189297677](https://github.com/icode100/iNotes/actions/runs/41189297677) at `559eeea` also passed |
+| Hosted signed release | Passed final [release run 41189632342](https://github.com/icode100/iNotes/actions/runs/41189632342) at source revision `924508c`, publishing [v0.1.2 build 1003](https://github.com/icode100/iNotes/releases/tag/v0.1.2) after package and signature checks. Earlier [v0.1.1 release run 41189300121](https://github.com/icode100/iNotes/actions/runs/41189300121) at `559eeea` also passed |
+| Public release download verification | Passed after independently downloading [v0.1.1](https://github.com/icode100/iNotes/releases/tag/v0.1.1) and [v0.1.2 assets](https://github.com/icode100/iNotes/releases/tag/v0.1.2): CryptoKit validated both public appcast/DMG signature pairs against the committed public key, and both DMGs matched their published SHA-256 checksums. The default `/releases/latest/download/appcast.xml` feed was byte-identical to the verified v0.1.2 feed |
+| Native public-feed update check | Passed using an isolated, unchanged local 0.1.0 build 2: Sparkle contacted the public GitHub feed and displayed that iNotes 0.1.1 was available for the installed 0.1.0. The dialog was closed through Close/Dismiss; no update was downloaded or installed |
 
 The historical **local 0.1.0 build 2** app contains 6,675,198 bytes of files
 (6.37 MiB), including
@@ -92,6 +93,10 @@ its compressed DMG is 4,235,934 bytes (4.04 MiB), with SHA-256
 `bafcc7bf5bbdf823c09eccbd7c993368f5adbdbf8f7f6468494612ee55b3871b`.
 These measurements identify local artifacts; use the checksum asset attached to
 each published release for that download. Artifact sizes do not measure RAM.
+
+The independently downloaded **published 0.1.2 build 1003** DMG is 4,054,708 bytes
+(3.87 MiB), with SHA-256
+`f31bd94e2eac5389f01cf8aa09bfc83cb2ab99290f470378c403212887e44f40`.
 
 The backup smoke test used a temporary local folder to validate archive creation
 and contents. It did not upload through a Google account. iPadOS compilation,
@@ -151,9 +156,10 @@ Build and device results are recorded in the root README or the change report.
 Deployment targets declare intended minimums; they do not establish compatibility
 with every intermediate OS version. Unless explicitly recorded as passed, assume
 physical tablet, physical iPad, Apple Pencil, cloud upload, Gatekeeper on a second Mac, and
-older macOS checks remain unverified. Hosted CI and v0.1.1 publication passed as
-recorded above. An end-to-end update from an installed older version through the
-public GitHub feed has not been exercised by the signature/configuration probes.
+older macOS checks remain unverified. Hosted CI and v0.1.1/v0.1.2 publication passed as
+recorded above. The native public-feed check stopped at the available-update
+dialog. Update download, installation, and relaunch from an older installed app
+remain unverified.
 
 Use temporary test libraries for destructive recovery tests. Keep independent
 exports of real notes. Google Drive folder backup relies on the user's installed
