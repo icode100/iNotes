@@ -27,12 +27,12 @@ test -x "$APP/Contents/MacOS/iNotes"
 test "$(readlink "$MOUNT/Applications")" = "/Applications"
 plutil -lint "$APP/Contents/Info.plist"
 codesign --verify --deep --strict --verbose=2 "$APP"
-lipo -verify_arch arm64 "$APP/Contents/MacOS/iNotes"
+lipo "$APP/Contents/MacOS/iNotes" -verify_arch arm64
 FRAMEWORK="$APP/Contents/Frameworks/Sparkle.framework"
 test -f "$APP/Contents/Resources/Sparkle-LICENSE"
 for BINARY in "$FRAMEWORK/Versions/B/Sparkle" "$FRAMEWORK/Versions/B/Autoupdate" \
   "$FRAMEWORK/Versions/B/Updater.app/Contents/MacOS/Updater"; do
-  test "$(lipo -archs "$BINARY")" = "arm64"
+  test "$(lipo "$BINARY" -archs)" = "arm64"
   codesign --verify --strict "$BINARY"
 done
 test ! -e "$FRAMEWORK/XPCServices"

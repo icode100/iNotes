@@ -125,7 +125,7 @@ else
   codesign --force --options runtime --timestamp --sign "$SIGNING_IDENTITY" "$APP"
 fi
 codesign --verify --deep --strict "$APP"
-lipo -verify_arch arm64 "$APP/Contents/MacOS/iNotes"
+lipo "$APP/Contents/MacOS/iNotes" -verify_arch arm64
 "$APP/Contents/MacOS/iNotes" --smoke-test
 
 DMG_ROOT="$STAGE/dmg"
