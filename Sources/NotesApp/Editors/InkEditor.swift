@@ -225,7 +225,13 @@ enum InkRenderer {
                 }
             }
         }
-        for stroke in strokes { draw(stroke, theme: theme) }
+        var patternBudget = InkGeometryLimits.maximumPatternSegments
+        for stroke in strokes {
+            // Validate work before constructing the native path, including
+            // transient/direct renderer input that has not reached storage.
+            guard InkGeometryLimits.consumePatternBudget(for: stroke, remaining: &patternBudget) else { break }
+            draw(stroke, theme: theme)
+        }
     }
 
     private static func draw(_ stroke: InkStroke, theme: PageTheme) {

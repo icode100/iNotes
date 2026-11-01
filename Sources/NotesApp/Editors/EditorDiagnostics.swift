@@ -503,6 +503,13 @@ enum EditorDiagnostics {
             guard let a = a?.usingColorSpace(.sRGB), let b = b?.usingColorSpace(.sRGB) else { return 0 }
             return abs(a.redComponent - b.redComponent) + abs(a.greenComponent - b.greenComponent) + abs(a.blueComponent - b.blueComponent)
         }
+        let excessivePattern = InkStroke(points: (0..<1_000).map {
+            InkPoint(x: $0.isMultiple(of: 2) ? 100 : 1500, y: 100)
+        }, width: 0.5, linePattern: .dotted)
+        guard let rejectedPattern = renderAppearanceSample(strokes: [excessivePattern]),
+              let emptyPattern = renderAppearanceSample() else { throw Failure(description: "Pattern budget sample did not render") }
+        try check(rejectedPattern.representation(using: .png, properties: [:]) == emptyPattern.representation(using: .png, properties: [:]),
+                  "renderer rejects excessive patterned work before constructing or stroking its native path")
         var lineCoverage: [LinePattern: Int] = [:]
         for pattern in LinePattern.allCases {
             let stroke = InkStroke(points: [InkPoint(x: 20, y: 120), InkPoint(x: 300, y: 120)],

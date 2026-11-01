@@ -55,7 +55,7 @@ Requires an Apple silicon Mac and macOS 14+. Building the installer requires ful
 open dist/iNotes.app
 ```
 
-The default local installer is `dist/iNotes-0.2.2-arm64.dmg` (version 0.2.2, development build 6). Downloaded public builds are also ad hoc signed: **they are not Apple notarized**, so macOS may report that Apple could not verify iNotes is free of malware.
+The default local installer is `dist/iNotes-1.0.0-arm64.dmg` (version 1.0.0, build 1007). Downloaded public builds are also ad hoc signed: **they are not Apple notarized**, so macOS may report that Apple could not verify iNotes is free of malware.
 
 If you trust the download from the [official releases](https://github.com/icode100/iNotes/releases), follow Apple's [per-app first-open procedure](https://support.apple.com/en-us/102445):
 
@@ -82,7 +82,7 @@ Backups are retained until you remove them. A successful folder write confirms a
 
 The local library is `~/Library/Application Support/iNotes/Library.json`; the previous saved version is `Library.previous.json`. Use **File → Show Library in Finder**. A malformed primary library is kept intact and saves pause. If a valid previous version exists, **Backups → Recover previous local version…** preserves the damaged file before restoring it. Always keep independent exported backups.
 
-The portable library format is versioned JSON with embedded rich text, pen data, positioned text boxes, editable LaTeX source, and attachments. Format 2 reads legacy format 1 libraries; adding positioned content upgrades a legacy library to format 2. Older apps reject the new format, protecting new page content from being silently discarded. Individual attachments are limited to 10 MiB and the entire archive to 64 MiB. This intentionally bounded release targets personal notebooks, not multi-gigabyte OneNote libraries. Text and attachment contents are saved locally in readable form; device storage protection is provided by macOS/iPadOS.
+The portable library format is versioned JSON with embedded rich text, pen data, positioned text boxes, editable LaTeX source, and attachments. Format 2 reads legacy format 1 libraries; adding positioned content upgrades a legacy library to format 2. Older apps reject the new format, protecting new page content from being silently discarded. The attachment picker accepts individual files up to 10 MiB. Archive imports use a 64 MiB aggregate limit, including embedded attachments, rather than a separate per-attachment limit. This intentionally bounded release targets personal notebooks, not multi-gigabyte OneNote libraries. Text and attachment contents are saved locally in readable form; device storage protection is provided by macOS/iPadOS.
 
 ## Scope and compatibility
 

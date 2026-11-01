@@ -2,8 +2,8 @@
 
 ## Version 1.0.0 validation
 
-The local ARM64 release candidate passed 60 XCTest unit/integration tests and
-259 packaged native editor checks, 31 equation checks, 12 ruled-text checks,
+The local ARM64 release candidate passed 63 XCTest unit/integration tests and
+260 packaged native editor checks, 31 equation checks, 12 ruled-text checks,
 8 tool-shortcut checks, and 46 full-workspace checks. The workspace suite mounts
 the actual three-column UI and verifies full-page/toolbar restoration, native
 editor identity, typing undo/redo, caret and zoom preservation, pen cursor
@@ -21,6 +21,24 @@ Live Mac UI checks exercised full-page hiding of both navigation panes, centered
 center-divider templates, and literal typing of `pbh` in Text mode. Native
 diagnostics use temporary libraries; live QA uses separate app identities and
 temporary note folders. No production notes are used as test fixtures.
+
+Actual system-cursor captures from the user-authorized native hover probe showed
+Pen (9×9), Pencil (8×8), and Marker (14×14) dot tips and a Highlighter (24×24)
+slanted tip. Text mode showed the I-beam and accepted literal `pbh` typing.
+Pen retained its dot after full-page and toolbar hide/restore, including at 25%
+zoom. These sizes are logical image dimensions; Retina images have larger pixel
+dimensions. Evidence is in `/private/tmp/inotes-v1-hover/request-202` through
+`request-210` JSON/PNG captures (206 was superseded, not counted). The probe is
+temporary QA code and is not included in the production application.
+
+The Codex Security standard scan reviewed all 78 tracked files at `965306f` and
+reported one low-severity patterned-ink rendering exhaustion issue. The release
+fix adds a shared aggregate rendering budget and a defensive Mac renderer check.
+Regression cases reject compact malicious dotted paths through archive,
+clipboard, and atomic model updates while accepting ordinary patterned tables.
+The final 63-test suite and native bitmap rejection check passed after this fix.
+This is static source review plus regression testing, not a dependency CVE scan
+or proof that all possible vulnerabilities are absent.
 
 Local build and check logs are under `/private/tmp/inotes-v1-validation/`.
 

@@ -65,6 +65,64 @@ final class InkValidationTests: XCTestCase {
         XCTAssertEqual(try PageClipboardPayload.decodeValidated(JSONEncoder().encode(clipboard)), clipboard)
     }
 
+    func testPatternAmplificationRejectedByArchiveClipboardAndAtomicUpdate() throws {
+        // Fewer than 40 KiB of valid coordinates can request nearly a million
+        // tiny dots; the old point-count and coordinate limits alone allowed it.
+        let points = (0..<1_000).map { InkPoint(x: $0.isMultiple(of: 2) ? 100 : 1500, y: 100) }
+        let stroke = InkStroke(points: points, width: 0.5, linePattern: .dotted)
+        let archive = try unvalidatedArchive(strokes: [stroke])
+        let clipboard = try JSONEncoder().encode(PageClipboardPayload(strokes: [stroke]))
+        XCTAssertLessThan(archive.count, 40 * 1024)
+        XCTAssertLessThan(clipboard.count, PageClipboardPayload.maximumBytes)
+        XCTAssertThrowsError(try LibraryArchive.decode(archive))
+        XCTAssertThrowsError(try PageClipboardPayload.decodeValidated(clipboard))
+        var library = NoteLibrary.sample()
+        var sheet = library.nodes.first { $0.kind == .sheet }!
+        let previous = library
+        sheet.strokes = [stroke]
+        XCTAssertThrowsError(try library.update(sheet))
+        XCTAssertEqual(library, previous)
+        // A longer adversarial path must stop during estimation, before a
+        // renderer creates its 300,000-segment native path or dash expansion.
+        let manyPoints = (0..<300_000).map { InkPoint(x: $0.isMultiple(of: 2) ? 100 : 1500, y: 100) }
+        var remaining = InkGeometryLimits.maximumPatternSegments
+        XCTAssertFalse(InkGeometryLimits.consumePatternBudget(for: InkStroke(points: manyPoints, width: 0.5, linePattern: .dotted), remaining: &remaining))
+        XCTAssertTrue(remaining >= 0)
+    }
+
+    func testPatternBudgetCountsCurveOvershootAndTheWholePage() throws {
+        // Equal endpoints in the middle segment still trace a cubic loop:
+        // its neighboring control points extend beyond x=100. A chord-only
+        // estimate would admit this path with a budget of 140.
+        let loop = InkStroke(points: [InkPoint(x: 0, y: 100), InkPoint(x: 100, y: 100),
+                                      InkPoint(x: 100, y: 100), InkPoint(x: 0, y: 100)], width: 0.5, linePattern: .dotted)
+        var smallBudget = 140
+        XCTAssertFalse(InkGeometryLimits.consumePatternBudget(for: loop, remaining: &smallBudget))
+        let safeStroke = InkStroke(points: [InkPoint(x: 10, y: 30), InkPoint(x: 1010, y: 30)], width: 0.5, linePattern: .dotted)
+        try InkGeometryLimits.validate([safeStroke])
+        let excessivePage = Array(repeating: safeStroke, count: 200)
+        XCTAssertThrowsError(try InkGeometryLimits.validate(excessivePage))
+        XCTAssertThrowsError(try LibraryArchive.decode(unvalidatedArchive(strokes: excessivePage)))
+        XCTAssertThrowsError(try PageClipboardPayload.decodeValidated(JSONEncoder().encode(PageClipboardPayload(strokes: excessivePage))))
+    }
+
+    func testOrdinaryPatternedTablesRemainAccepted() throws {
+        var table: [InkStroke] = []
+        for row in 0..<200 {
+            table.append(InkStroke(points: [InkPoint(x: 80, y: Double(row * 28)), InkPoint(x: 1080, y: Double(row * 28))],
+                                   width: 2.5, linePattern: row.isMultiple(of: 2) ? .dashed : .dotted))
+        }
+        table.append(InkStroke(points: [InkPoint(x: 80, y: 0), InkPoint(x: 80, y: 5600)], width: 2.5, linePattern: .solid))
+        table.append(InkStroke(points: [InkPoint(x: 1080, y: 0), InkPoint(x: 1080, y: 5600)], width: 2.5, linePattern: .solid))
+        let decoded = try LibraryArchive.decode(unvalidatedArchive(strokes: table))
+        XCTAssertEqual(decoded.nodes.first { $0.kind == .sheet }?.strokes, table)
+        let clipboard = PageClipboardPayload(strokes: table)
+        XCTAssertEqual(try PageClipboardPayload.decodeValidated(JSONEncoder().encode(clipboard)), clipboard)
+        var budget = InkGeometryLimits.maximumPatternSegments
+        for stroke in table { XCTAssertTrue(InkGeometryLimits.consumePatternBudget(for: stroke, remaining: &budget)) }
+        XCTAssertTrue(budget > 0)
+    }
+
     /// Deliberately bypass the encoder's validator to model an external archive.
     private func unvalidatedArchive(strokes: [InkStroke]) throws -> Data {
         let nodes = NoteLibrary.sample().nodes.map { node -> NoteNode in
