@@ -39,6 +39,39 @@ Evidence is under `/private/tmp/inotes-102-validation/` and
 The security scan described under v1.0.0 remains the historical scan record;
 these v1.0.2 tests are not a new repository security scan or dependency CVE audit.
 
+### 1.0.2 published release verification
+
+Published [v1.0.2](https://github.com/icode100/iNotes/releases/tag/v1.0.2) is build
+1009 from source commit `0522a3f2f2e34c809f405ad862fdfeda09cd1d28`. Both
+[Native checks](https://github.com/icode100/iNotes/actions/runs/41291512021) and
+[Signed macOS release](https://github.com/icode100/iNotes/actions/runs/41291897346)
+passed, including hosted iPad compilation and release signing-key cleanup.
+
+The independently downloaded public DMG matched its published SHA-256 checksum.
+CryptoKit verified the feed and archive Ed25519 signatures against the committed
+public key. At verification, the latest-release feed was byte-identical to the
+versioned feed and identified version 1.0.2/build 1009 with the correct DMG URL.
+Read-only mounted verification passed strict nested app signatures, ARM64
+architecture, all six original scenery image hashes, adaptive icons, math
+fonts/licenses, updater configuration, and persistence smoke checks.
+
+The published app passed 259 editor, 187 workspace, 31 equation, 8 shortcut,
+and 12 ruled-text checks on macOS 27.2 (26B123), plus storage/backup integration
+and 16 signed-update configuration checks. These are the public binary's actual
+counts; the local SDK build above ran 260 editor checks. The 187 workspace checks
+include editor/cursor retention and pointer pass-through at the sheet-number badge.
+This does not add physical stylus or system-cursor-capture coverage beyond the
+limitations recorded above. The app remains ad hoc signed and is not Apple notarized.
+
+The public DMG is 24,301,018 bytes (23.18 MiB), with SHA-256
+`1c6c966ff35660bc35e162eafb89ae77dfca9a3e8c8540a5c89b44aeb9788bad`.
+Its app contains 29,129,477 regular-file bytes (27.78 MiB). Evidence is under
+`/private/tmp/inotes-102-release/`, including `public-native-checks.log`,
+`public-runtime-verification.log`, `public-signatures.log`, and
+`public-bundle-metadata.json`. Both read-only mounts were cleanly removed;
+verification used isolated temporary libraries and left the installed app and
+production notes unchanged. Temporary evidence files are not release assets.
+
 ## Version 1.0.1 photographic themes validation
 
 The local ARM64 build 1008 passed all 63 XCTest unit/integration tests, 260 native
