@@ -8,6 +8,20 @@ public struct NoteLibrary: Codable, Equatable, Sendable {
 
     public init(nodes: [NoteNode] = [], modifiedAt: Date = Date(), formatVersion: Int = currentFormatVersion) {
         self.formatVersion = formatVersion; self.nodes = nodes; self.modifiedAt = modifiedAt
+        // Invalid programmatically constructed libraries remain available to validate(), which
+        // reports their error. Never discard nodes if their numbering cannot be migrated.
+        var migrated = self
+        if (try? migrated.migrateLegacySheetNumbers()) != nil { self = migrated }
+    }
+
+    private enum CodingKeys: String, CodingKey { case formatVersion, nodes, modifiedAt }
+
+    public init(from decoder: Decoder) throws {
+        let values = try decoder.container(keyedBy: CodingKeys.self)
+        formatVersion = try values.decode(Int.self, forKey: .formatVersion)
+        nodes = try values.decode([NoteNode].self, forKey: .nodes)
+        modifiedAt = try values.decode(Date.self, forKey: .modifiedAt)
+        try migrateLegacySheetNumbers()
     }
 
     public func node(id: UUID) -> NoteNode? { nodes.first { $0.id == id } }
@@ -40,20 +54,22 @@ public struct NoteLibrary: Codable, Equatable, Sendable {
     }
 
     @discardableResult
-    public mutating func create(kind: NoteKind, title: String, parentID: UUID? = nil) throws -> UUID {
-        let clean = try Self.cleanTitle(title)
+    public mutating func create(kind: NoteKind, title: String = "", parentID: UUID? = nil) throws -> UUID {
+        let clean = try Self.cleanTitle(title, kind: kind)
         try validateParent(kind: kind, parentID: parentID)
         guard nodes.count < 50_000 else { throw LibraryError.invalidData("Too many items.") }
         if let parentID, path(to: parentID).count >= 128 {
             throw LibraryError.invalidData("Topics are nested more than 128 levels deep.")
         }
         let nextOrder = try nextOrder(in: parentID)
-        let node = NoteNode(parentID: parentID, kind: kind, title: clean, order: nextOrder)
+        let number = kind == .sheet ? try reserveSheetNumber(in: parentID) : nil
+        let node = NoteNode(parentID: parentID, kind: kind, title: clean, order: nextOrder, sheetNumber: number)
         nodes.append(node); touch(); return node.id
     }
 
     public mutating func rename(id: UUID, title: String) throws {
-        let title = try Self.cleanTitle(title)
+        guard let node = node(id: id) else { throw LibraryError.nodeNotFound }
+        let title = try Self.cleanTitle(title, kind: node.kind)
         try mutate(id) { $0.title = title }
     }
 
@@ -61,9 +77,19 @@ public struct NoteLibrary: Codable, Equatable, Sendable {
         guard let index = nodes.firstIndex(where: { $0.id == node.id }) else { throw LibraryError.nodeNotFound }
         guard (1...Self.currentFormatVersion).contains(formatVersion) else { throw LibraryError.unsupportedVersion(formatVersion) }
         let previous = nodes[index]
+        guard node.createdAt == previous.createdAt,
+              node.sheetNumber == previous.sheetNumber,
+              node.lastSheetNumber == previous.lastSheetNumber,
+              node.kind == previous.kind else {
+            throw LibraryError.invalidData("Creation dates and sheet numbering cannot be changed by a content edit.")
+        }
         var candidate = self
         var replacement = node
-        replacement.title = try Self.cleanTitle(replacement.title)
+        replacement.title = try Self.cleanTitle(replacement.title, kind: replacement.kind)
+        if replacement.kind == .sheet, replacement.parentID != previous.parentID {
+            try candidate.validateParent(kind: .sheet, parentID: replacement.parentID)
+            replacement.sheetNumber = try candidate.reserveSheetNumber(in: replacement.parentID)
+        }
         replacement.updatedAt = Date()
         candidate.nodes[index] = replacement
         if !replacement.textBoxes.isEmpty || !replacement.equations.isEmpty { candidate.formatVersion = Self.currentFormatVersion }
@@ -87,6 +113,11 @@ public struct NoteLibrary: Codable, Equatable, Sendable {
         sorted.insert(id, at: destination)
         var candidate = self
         try candidate.mutate(id) { $0.parentID = parentID }
+        if node.kind == .sheet, node.parentID != parentID,
+           let index = candidate.nodes.firstIndex(where: { $0.id == id }) {
+            let number = try candidate.reserveSheetNumber(in: parentID)
+            candidate.nodes[index].sheetNumber = number
+        }
         for (position, siblingID) in sorted.enumerated() {
             if let index = candidate.nodes.firstIndex(where: { $0.id == siblingID }) { candidate.nodes[index].order = position }
         }
@@ -108,8 +139,9 @@ public struct NoteLibrary: Codable, Equatable, Sendable {
             item.parentID = item.parentID.flatMap { mapping[$0] ?? $0 }
             item.createdAt = now; item.updatedAt = now
             if oldID == id {
-                item.title = String(item.title.prefix(249)) + " (copy)"
+                if !item.title.isEmpty { item.title = String(item.title.prefix(249)) + " (copy)" }
                 item.order = copyOrder
+                if item.kind == .sheet { item.sheetNumber = try candidate.reserveSheetNumber(in: item.parentID) }
             }
             // Attachment/stroke IDs are local to a sheet, so their bytes need no rewriting.
             candidate.nodes.append(item)
@@ -195,6 +227,7 @@ public struct NoteLibrary: Codable, Equatable, Sendable {
         guard Set(nodes.map(\.id)).count == nodes.count else { throw LibraryError.duplicateID }
         let lookup = Dictionary(uniqueKeysWithValues: nodes.map { ($0.id, $0) })
         var ancestorDepths: [UUID: Int] = [:]
+        var usedSheetNumbers: [UUID: Set<Int>] = [:]
         for node in nodes {
             try Self.validatePayload(node)
             if node.kind == .workbook {
@@ -205,6 +238,13 @@ public struct NoteLibrary: Codable, Equatable, Sendable {
                 case .workbook: break
                 case .chapter: guard parent.kind == .workbook else { throw LibraryError.invalidParent }
                 case .topic, .sheet: guard parent.kind == .chapter || parent.kind == .topic else { throw LibraryError.invalidParent }
+                }
+                if node.kind == .sheet {
+                    guard let number = node.sheetNumber,
+                          number <= parent.lastSheetNumber,
+                          usedSheetNumbers[parentID, default: []].insert(number).inserted else {
+                        throw LibraryError.invalidData("A chapter or topic has missing or duplicate sheet numbers.")
+                    }
                 }
             }
             if !node.isTrashed, let parentID = node.parentID, lookup[parentID]?.isTrashed == true {
@@ -237,14 +277,19 @@ public struct NoteLibrary: Codable, Equatable, Sendable {
         return library
     }
 
-    private static func cleanTitle(_ title: String) throws -> String {
+    private static func cleanTitle(_ title: String, kind: NoteKind) throws -> String {
         let clean = title.trimmingCharacters(in: .whitespacesAndNewlines)
-        guard !clean.isEmpty, clean.count <= 256 else { throw LibraryError.invalidTitle }
+        guard (kind == .sheet || !clean.isEmpty), clean.count <= 256 else { throw LibraryError.invalidTitle }
         return clean
     }
 
     private static func validatePayload(_ node: NoteNode, previous: NoteNode? = nil) throws {
-        _ = try cleanTitle(node.title)
+        _ = try cleanTitle(node.title, kind: node.kind)
+        guard node.lastSheetNumber >= 0,
+              (node.kind == .chapter || node.kind == .topic || node.lastSheetNumber == 0),
+              (node.kind == .sheet ? node.sheetNumber.map { $0 > 0 } == true : node.sheetNumber == nil) else {
+            throw LibraryError.invalidData("Invalid sheet numbering.")
+        }
         if previous?.textBoxes != node.textBoxes {
             guard node.textBoxes.count <= 10_000,
                   Set(node.textBoxes.map(\.id)).count == node.textBoxes.count else { throw LibraryError.duplicateID }
@@ -298,6 +343,53 @@ public struct NoteLibrary: Codable, Equatable, Sendable {
     }
 
     private mutating func touch() { modifiedAt = Date() }
+
+    private mutating func reserveSheetNumber(in parentID: UUID?) throws -> Int {
+        guard let parentID, let index = nodes.firstIndex(where: { $0.id == parentID }),
+              nodes[index].kind == .chapter || nodes[index].kind == .topic else { throw LibraryError.invalidParent }
+        let (number, overflow) = nodes[index].lastSheetNumber.addingReportingOverflow(1)
+        guard !overflow, number > 0 else { throw LibraryError.invalidData("This chapter or topic has reached its sheet number limit.") }
+        nodes[index].lastSheetNumber = number
+        return number
+    }
+
+    /// Older archives have neither field. Allocate in creation order, not array, edit, or
+    /// display order; retained Trash entries participate so restoring never creates a collision.
+    private mutating func migrateLegacySheetNumbers() throws {
+        guard nodes.count <= 50_000 else { throw LibraryError.invalidData("Too many items.") }
+        guard Set(nodes.map(\.id)).count == nodes.count else { throw LibraryError.duplicateID }
+        guard nodes.allSatisfy({ $0.createdAt.timeIntervalSince1970.isFinite }) else {
+            throw LibraryError.invalidData("Invalid note date.")
+        }
+        let indices = Dictionary(uniqueKeysWithValues: nodes.indices.map { (nodes[$0].id, $0) })
+        var counters: [UUID: Int] = [:]
+        for node in nodes where node.kind == .chapter || node.kind == .topic {
+            guard node.lastSheetNumber >= 0 else { throw LibraryError.invalidData("Invalid sheet numbering.") }
+            counters[node.id] = node.lastSheetNumber
+        }
+        for node in nodes where node.kind == .sheet {
+            if let number = node.sheetNumber {
+                guard number > 0 else { throw LibraryError.invalidData("Invalid sheet numbering.") }
+                if let parent = node.parentID, let counter = counters[parent] { counters[parent] = max(counter, number) }
+            }
+        }
+        let missing = nodes.indices.filter { nodes[$0].kind == .sheet && nodes[$0].sheetNumber == nil }
+            .sorted {
+                let first = nodes[$0], second = nodes[$1]
+                if first.createdAt != second.createdAt {
+                    return first.createdAt < second.createdAt
+                }
+                return first.id.uuidString < second.id.uuidString
+            }
+        for index in missing {
+            guard let parent = nodes[index].parentID, let previous = counters[parent] else { continue }
+            let (number, overflow) = previous.addingReportingOverflow(1)
+            guard !overflow else { throw LibraryError.invalidData("This chapter or topic has reached its sheet number limit.") }
+            nodes[index].sheetNumber = number
+            counters[parent] = number
+        }
+        for (id, counter) in counters { if let index = indices[id] { nodes[index].lastSheetNumber = counter } }
+    }
 
     private func nextOrder(in parentID: UUID?) throws -> Int {
         let (next, overflow) = (children(of: parentID, includingTrash: true).map(\.order).max() ?? -1).addingReportingOverflow(1)

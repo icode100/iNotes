@@ -115,6 +115,10 @@ public struct NoteNode: Identifiable, Codable, Equatable, Sendable {
     public var isTrashed: Bool
     public var createdAt: Date
     public var updatedAt: Date
+    /// Allocated once within the sheet's chapter/topic; moving to another container allocates a new number.
+    public var sheetNumber: Int?
+    /// Highest number allocated by a chapter/topic, including sheets that have since been deleted.
+    public var lastSheetNumber: Int
     public var order: Int
     public var paperStyle: PaperStyle
     public var pageTemplate: PageTemplate
@@ -128,20 +132,27 @@ public struct NoteNode: Identifiable, Codable, Equatable, Sendable {
                 isFavorite: Bool = false, isTrashed: Bool = false,
                 createdAt: Date = Date(), updatedAt: Date = Date(), order: Int = 0, paperStyle: PaperStyle = .dotted,
                 textBoxes: [PageTextBox] = [], equations: [NoteEquation] = [],
-                pageTemplate: PageTemplate = .none, templateLinePattern: LinePattern = .solid) {
+                pageTemplate: PageTemplate = .none, templateLinePattern: LinePattern = .solid,
+                sheetNumber: Int? = nil, lastSheetNumber: Int = 0) {
         self.id = id; self.parentID = parentID; self.kind = kind; self.title = title
         self.body = body; self.richTextRTF = richTextRTF; self.strokes = strokes
         self.pencilKitData = pencilKitData; self.attachments = attachments; self.tags = tags
         self.isFavorite = isFavorite; self.isTrashed = isTrashed
         self.createdAt = createdAt; self.updatedAt = updatedAt; self.order = order; self.paperStyle = paperStyle
+        self.sheetNumber = sheetNumber; self.lastSheetNumber = lastSheetNumber
         self.textBoxes = textBoxes; self.equations = equations
         self.pageTemplate = pageTemplate; self.templateLinePattern = templateLinePattern
+    }
+
+    public var displayTitle: String {
+        if !title.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty { return title }
+        return sheetNumber.map { "Sheet \($0)" } ?? "Untitled sheet"
     }
 
     private enum CodingKeys: String, CodingKey {
         case id, parentID, kind, title, body, richTextRTF, strokes, pencilKitData, attachments
         case tags, isFavorite, isTrashed, createdAt, updatedAt, order, paperStyle
-        case textBoxes, equations, pageTemplate, templateLinePattern
+        case textBoxes, equations, pageTemplate, templateLinePattern, sheetNumber, lastSheetNumber
     }
 
     public init(from decoder: Decoder) throws {
@@ -160,6 +171,8 @@ public struct NoteNode: Identifiable, Codable, Equatable, Sendable {
         isTrashed = try values.decode(Bool.self, forKey: .isTrashed)
         createdAt = try values.decode(Date.self, forKey: .createdAt)
         updatedAt = try values.decode(Date.self, forKey: .updatedAt)
+        sheetNumber = try values.decodeIfPresent(Int.self, forKey: .sheetNumber)
+        lastSheetNumber = try values.decodeIfPresent(Int.self, forKey: .lastSheetNumber) ?? 0
         order = try values.decode(Int.self, forKey: .order)
         paperStyle = try values.decodeIfPresent(PaperStyle.self, forKey: .paperStyle) ?? .dotted
         textBoxes = try values.decodeIfPresent([PageTextBox].self, forKey: .textBoxes) ?? []
@@ -182,7 +195,7 @@ public enum LibraryError: Error, LocalizedError, Equatable {
     public var errorDescription: String? {
         switch self {
         case .nodeNotFound: "The note no longer exists."
-        case .invalidTitle: "Use a title between 1 and 256 characters."
+        case .invalidTitle: "Use up to 256 characters for a sheet title. Workbooks, chapters, and topics need a name."
         case .invalidParent: "Workbooks belong at the top level, chapters in workbooks, and topics or sheets in chapters or topics."
         case .cycle: "A topic cannot be moved inside itself or one of its descendants."
         case .duplicateID: "The library contains duplicate identifiers."

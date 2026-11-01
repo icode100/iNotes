@@ -72,6 +72,12 @@ final class NotesStore: ObservableObject {
     }
 
     var selectedSheet: NoteNode? { library.nodes.first { $0.id == sheetID } }
+    func sheetNumber(_ id: UUID) -> Int? { library.node(id: id)?.sheetNumber }
+    func sheetHeading(_ id: UUID) -> String {
+        guard let sheet = library.node(id: id), sheet.kind == .sheet,
+              let parentID = sheet.parentID, let parent = library.node(id: parentID) else { return "Sheets" }
+        return parent.title
+    }
     var folders: [NoteNode] { library.nodes.filter { $0.kind != .sheet && !$0.isTrashed } }
     var visibleSheets: [NoteNode] {
         let hits: Set<UUID>? = search.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
@@ -122,7 +128,7 @@ final class NotesStore: ObservableObject {
         sheetID = visibleSheets.first?.id
     }
 
-    func create(_ kind: NoteKind, title: String, parent: UUID?) {
+    func create(_ kind: NoteKind, title: String = "", parent: UUID?) {
         var createdID: UUID?
         if mutate({ createdID = try $0.create(kind: kind, title: title, parentID: parent) }), let id = createdID {
             filter = .all; search = ""
@@ -143,7 +149,8 @@ final class NotesStore: ObservableObject {
             let delta = try LibraryArchive.encodedNodeSize(committedNode) - LibraryArchive.encodedNodeSize(library.nodes[index])
             let predicted = serializedBytes + delta
             // The small reserve covers envelope timestamp changes. Check the entire archive near the limit.
-            let needsFullCheck = predicted > LibraryArchive.maximumBytes - 1024
+            let needsFullCheck = committedNode.parentID != library.nodes[index].parentID
+                || predicted > LibraryArchive.maximumBytes - 1024
             if mutate({ $0 = updatedLibrary }, checkSize: needsFullCheck) {
                 if !needsFullCheck { serializedBytes = predicted }
             }

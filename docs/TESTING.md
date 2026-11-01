@@ -1,5 +1,44 @@
 # Validation
 
+## Version 1.0.2 sheet navigation validation
+
+The local ARM64 build 1009 passed all 68 core tests with both XCTest and the
+standalone runner. The final packaged app passed 260 editor, 187 workspace,
+31 equation, 12 ruled-text, and 8 shortcut checks, plus storage/backup and
+16 signed-update configuration checks on macOS 27.2. The iPad ARM64 simulator
+target compiled with the final shared UI and passed 164 native checks using
+fresh isolated notes. These counts describe executed tests, not physical stylus coverage.
+
+New core cases cover optional sheet titles, stable numbering per chapter/topic,
+legacy migration, invalid dates, Trash/deletion, cross-parent moves, duplication,
+imports, overflow, and rejection of numbering/creation-date tampering. Workspace
+checks cover independent heading/sheets controls, native collapse observation,
+retained editor identity/caret/undo/zoom/cursor, and restored pane widths. Live QA
+found a macOS underlay bug when the middle pane closed; the regression test now
+checks the actual editor viewport stays beside the visible sidebar. Four badge
+checks hit-test the real view hierarchy and confirm ink receives pointer events
+through the sheet-number badge with tools shown or hidden.
+
+Live isolated Mac checks created an untitled Sheet 3, typed literal `Typing check pbh`,
+switched back to Pen, hid the heading/sheets independently, and inspected the
+final full-page badge. Alpine dark and Forest light/dark cards and themed tool
+selection were visually inspected. Native fixtures also retained a 170-point
+pane across sheet selection and three hide/show cycles. CUA drag attempts did
+not yield a reliable resize result; divider sizing/collapse was verified through
+native APIs, accessibility width adjustment, and toolbar buttons. This pass did
+not repeat physical tablet/Pencil pressure, tilt, hover, or a system-cursor capture;
+the existing cursor behavior and native cursor regression checks are retained.
+
+The mounted DMG passed strict nested signatures, ARM64/resource/icon checks,
+and persistence smoke tests. Local feed/archive Ed25519 verification and all
+five update-signature cases passed. The app contains 29,404,773 regular-file
+bytes (28.04 MiB); the DMG is 24,607,259 bytes (23.47 MiB).
+Evidence is under `/private/tmp/inotes-102-validation/` and
+`/private/tmp/inotes-102-geometry/`; core logs are
+`/private/tmp/inotes-v102-core-tests.log` and `/private/tmp/inotes-v102-standalone.log`.
+The security scan described under v1.0.0 remains the historical scan record;
+these v1.0.2 tests are not a new repository security scan or dependency CVE audit.
+
 ## Version 1.0.1 photographic themes validation
 
 The local ARM64 build 1008 passed all 63 XCTest unit/integration tests, 260 native

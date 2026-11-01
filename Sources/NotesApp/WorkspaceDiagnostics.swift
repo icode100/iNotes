@@ -13,8 +13,12 @@ enum WorkspaceDiagnostics {
 
     static func run() throws -> String {
         var checks = 0
+        var geometryHistory: [String] = []
         func check(_ condition: @autoclosure () -> Bool, _ message: String) throws {
-            guard condition() else { throw Failure(description: "Workspace diagnostic failed: \(message)") }
+            guard condition() else {
+                geometryHistory.forEach { print($0) }
+                throw Failure(description: "Workspace diagnostic failed: \(message)")
+            }
             checks += 1
         }
 
@@ -76,11 +80,12 @@ enum WorkspaceDiagnostics {
             .environmentObject(inputDevice)
             .defaultAppStorage(preferences)
             .preferredColorScheme(.light))
-        let window = NSWindow(contentRect: NSRect(x: -6000, y: -6000, width: 1280, height: 900),
+        let window = NSWindow(contentRect: NSRect(x: -6000, y: -6000, width: 1226, height: 800),
                               styleMask: [.titled, .resizable], backing: .buffered, defer: false)
         window.isReleasedWhenClosed = false
         window.contentViewController = host
         window.makeKeyAndOrderFront(nil)
+        window.setFrame(NSRect(x: -6000, y: -6000, width: 1226, height: 800), display: false)
         defer { window.orderOut(nil); window.close() }
 
         // NavigationSplitView mounts its detail asynchronously. Give AppKit and
@@ -124,7 +129,6 @@ enum WorkspaceDiagnostics {
         scroll.contentView.scroll(to: NSPoint(x: 100, y: 180))
         scroll.reflectScrolledClipView(scroll.contentView)
         settle()
-        let normalWidth = scroll.bounds.width
 
         func checkEditorSurvives(_ transition: String) throws {
             try check(findPage(host.view) === page && scroll.documentView === page && page.textView === editor,
@@ -136,6 +140,177 @@ enum WorkspaceDiagnostics {
             try check(abs(scroll.magnification - 1.25) < 0.001 && scroll.documentCursor === NSCursor.iBeam,
                       "\(transition) retains zoom and native text cursor ownership")
         }
+
+        func navigationController() -> NSSplitViewController? {
+            var ancestor: NSView? = page
+            while let view = ancestor {
+                if let split = view as? NSSplitView, split.isVertical,
+                   let controller = split.delegate as? NSSplitViewController,
+                   controller.splitViewItems.count >= 3,
+                   let detail = controller.splitViewItems.last,
+                   page.isDescendant(of: detail.viewController.view) { return controller }
+                ancestor = view.superview
+            }
+            return nil
+        }
+        guard let navigation = navigationController(),
+              let sidebarItem = navigation.splitViewItems.first else {
+            throw Failure(description: "Workspace has no native three-column navigation controller")
+        }
+        let sheetsItem = navigation.splitViewItems[navigation.splitViewItems.count - 2]
+        let sidebarWasCollapsed = sidebarItem.isCollapsed
+        // Match the resized-pane geometry that exposed left-side clipping in
+        // live QA. This uses native divider APIs in a fresh isolated window,
+        // never accessibility frame overrides or user-app interaction.
+        let split = navigation.splitView
+        window.setFrame(NSRect(x: -6000, y: -6000, width: 1226, height: 800), display: false)
+        settle()
+        split.setPosition(189.5, ofDividerAt: 0)
+        split.setPosition(sidebarItem.viewController.view.frame.maxX + split.dividerThickness + 451.5, ofDividerAt: 1)
+        split.adjustSubviews()
+        settle()
+        geometryHistory.append("Workspace requested visible sheets width451.5; native hosting width=\(sheetsItem.viewController.view.bounds.width)")
+        for (index, item) in navigation.splitViewItems.enumerated() {
+            geometryHistory.append("Workspace native item\(index): frame=\(NSStringFromRect(item.viewController.view.frame)) minimum=\(item.minimumThickness) maximum=\(item.maximumThickness) preferred=\(item.preferredThicknessFraction) fitting=\(item.viewController.view.fittingSize)")
+        }
+        for (index, view) in split.subviews.enumerated() {
+            geometryHistory.append("Workspace split child\(index) \(type(of: view)) frame=\(NSStringFromRect(view.frame)) bounds=\(NSStringFromRect(view.bounds)) hidden=\(view.isHidden)")
+        }
+        let normalWidth = scroll.bounds.width
+        let normalHeight = scroll.bounds.height
+        let detailView = navigation.splitViewItems[navigation.splitViewItems.count - 1].viewController.view
+        let initialDetailRect = detailView.convert(detailView.bounds, to: host.view)
+        let initialViewportRect = scroll.convert(scroll.bounds, to: host.view)
+        let initialNavigationRight = navigation.splitViewItems.dropLast().filter { !$0.isCollapsed }
+            .map { $0.viewController.view.convert($0.viewController.view.bounds, to: host.view).maxX }.max()
+            ?? initialDetailRect.minX
+        let expectedLeadingInset = initialViewportRect.minX - max(initialDetailRect.minX, initialNavigationRight)
+        let expectedTrailingInset = initialDetailRect.maxX - initialViewportRect.maxX
+
+        func checkDetailGeometry(_ transition: String) throws {
+            let detailRect = detailView.convert(detailView.bounds, to: host.view)
+            let viewportRect = scroll.convert(scroll.bounds, to: host.view)
+            let visibleViewport = scroll.convert(scroll.visibleRect, to: host.view)
+            let splitRect = split.convert(split.bounds, to: host.view)
+            let visibleNavigationRight = navigation.splitViewItems.dropLast().filter { !$0.isCollapsed }
+                .map { $0.viewController.view.convert($0.viewController.view.bounds, to: host.view).maxX }
+                .max() ?? splitRect.minX
+            let tolerance: CGFloat = 2
+            let contained = viewportRect.minX >= detailRect.minX - tolerance
+                && viewportRect.maxX <= detailRect.maxX + tolerance
+            let unclipped = visibleViewport.minX <= viewportRect.minX + tolerance
+                && visibleViewport.maxX >= viewportRect.maxX - tolerance
+            let stableInsets = abs(viewportRect.minX - max(detailRect.minX, visibleNavigationRight) - expectedLeadingInset) < tolerance
+                && abs(detailRect.maxX - viewportRect.maxX - expectedTrailingInset) < tolerance
+            let besideNavigation = viewportRect.minX >= visibleNavigationRight - tolerance
+                && viewportRect.maxX <= splitRect.maxX + tolerance
+            var automaticSafeArea = "unavailable"
+            if #available(macOS 26.0, *) {
+                automaticSafeArea = String(navigation.splitViewItems.last!.automaticallyAdjustsSafeAreaInsets)
+            }
+            geometryHistory.append("Workspace geometry [\(transition)] window=\(NSStringFromRect(window.frame)) host=\(NSStringFromRect(host.view.bounds)) split=\(NSStringFromRect(splitRect)) sidebar=\(NSStringFromRect(sidebarItem.viewController.view.convert(sidebarItem.viewController.view.bounds, to: host.view))) sheets=\(NSStringFromRect(sheetsItem.viewController.view.convert(sheetsItem.viewController.view.bounds, to: host.view))) detail=\(NSStringFromRect(detailRect)) viewport=\(NSStringFromRect(viewportRect)) visible=\(NSStringFromRect(visibleViewport)) safeArea=\(detailView.safeAreaInsets) autoSafeArea=\(automaticSafeArea)")
+            if !besideNavigation || !contained || !unclipped || !stableInsets {
+                var ancestor: NSView? = scroll
+                var depth = 0
+                while let view = ancestor, depth < 16 {
+                    geometryHistory.append("Workspace geometry ancestor\(depth) \(type(of: view)) frame=\(NSStringFromRect(view.frame)) bounds=\(NSStringFromRect(view.bounds)) inHost=\(NSStringFromRect(view.convert(view.bounds, to: host.view))) attached=\(view.window === window)")
+                    if view === detailView { break }
+                    ancestor = view.superview
+                    depth += 1
+                }
+            }
+            try check(besideNavigation,
+                      "\(transition) keeps actual editor content beside visible navigation, not underneath it")
+            try check(contained, "\(transition) keeps the editor viewport inside the native detail frame")
+            try check(unclipped, "\(transition) keeps both editor viewport edges visible without parent clipping")
+            try check(stableInsets, "\(transition) aligns editor content with the measured unobscured detail edges")
+        }
+        try checkDetailGeometry("expanded451-point sheets")
+        try check(presentation.headingVisible && presentation.sheetsVisible && !sheetsItem.isCollapsed,
+                  "heading and native sheets pane begin independently visible")
+
+        presentation.toggleHeading()
+        settle()
+        try checkEditorSurvives("hiding the heading independently")
+        try check(!presentation.headingVisible && presentation.sheetsVisible && !sheetsItem.isCollapsed
+                  && sidebarItem.isCollapsed == sidebarWasCollapsed,
+                  "hiding the heading does not collapse either navigation pane")
+        try check(scroll.bounds.height > normalHeight + 50,
+                  "hiding the heading gives its vertical space to the same native editor")
+        presentation.toggleHeading()
+        settle()
+        try checkEditorSurvives("restoring the heading independently")
+        try check(abs(scroll.bounds.height - normalHeight) < 5,
+                  "restoring the heading restores its previous layout height")
+
+        presentation.toggleSheets()
+        settle()
+        try checkEditorSurvives("hiding only the sheets pane")
+        try check(!presentation.sheetsVisible && sheetsItem.isCollapsed && presentation.headingVisible
+                  && sidebarItem.isCollapsed == sidebarWasCollapsed,
+                  "the sheets toggle collapses only the native middle pane")
+        try checkDetailGeometry("hiding resized sheets")
+        try check(scroll.bounds.width > normalWidth + 100,
+                  "collapsing sheets gives their horizontal space to the same editor")
+        presentation.toggleSheets()
+        settle()
+        try checkEditorSurvives("restoring only the sheets pane")
+        try checkDetailGeometry("restoring resized sheets")
+        geometryHistory.append("Workspace restored viewport width=\(scroll.bounds.width) expected=\(normalWidth)")
+        try check(presentation.sheetsVisible && !sheetsItem.isCollapsed
+                  && abs(scroll.bounds.width - normalWidth) < 5,
+                  "restoring sheets restores their native pane and previous width")
+
+        // A user collapsing the native divider must update the model, otherwise
+        // the next SwiftUI update would immediately reopen the pane.
+        sheetsItem.isCollapsed = true
+        settle()
+        try checkEditorSurvives("native sheets-divider collapse")
+        try check(!presentation.sheetsVisible && sheetsItem.isCollapsed && presentation.headingVisible,
+                  "native collapse observation updates sheets visibility without hiding the heading")
+        try checkDetailGeometry("native sheets collapse")
+        sheetsItem.isCollapsed = false
+        settle()
+        try checkEditorSurvives("native sheets-divider expansion")
+        try check(presentation.sheetsVisible && !sheetsItem.isCollapsed,
+                  "native expansion observation updates sheets visibility")
+        try checkDetailGeometry("native sheets expansion")
+        try check(abs(scroll.bounds.width - normalWidth) < 5,
+                  "native sheets expansion restores the previous user-resized width")
+
+        presentation.headingVisible = false
+        presentation.sheetsVisible = false
+        settle()
+        presentation.fullPage = true
+        settle()
+        try checkEditorSurvives("full page with independently hidden heading and sheets")
+        try check(navigation.splitViewItems.dropLast().allSatisfy(\.isCollapsed),
+                  "full page still collapses every native navigation pane")
+        presentation.fullPage = false
+        settle()
+        try checkEditorSurvives("leaving full page with independently hidden chrome")
+        try check(!presentation.headingVisible && !presentation.sheetsVisible && sheetsItem.isCollapsed
+                  && sidebarItem.isCollapsed == sidebarWasCollapsed,
+                  "full-page exit preserves the separately hidden heading and sheets")
+        presentation.fullPage = true
+        settle()
+        presentation.toggleHeading()
+        settle()
+        try checkEditorSurvives("restoring only heading from full page")
+        try check(!presentation.fullPage && presentation.headingVisible
+                  && !presentation.sheetsVisible && sheetsItem.isCollapsed,
+                  "heading restore exits full page without reopening hidden sheets")
+        presentation.headingVisible = false
+        presentation.fullPage = true
+        settle()
+        presentation.toggleSheets()
+        settle()
+        try checkEditorSurvives("restoring only sheets from full page")
+        try check(!presentation.fullPage && presentation.sheetsVisible && !sheetsItem.isCollapsed
+                  && !presentation.headingVisible,
+                  "sheets restore exits full page without reopening the hidden heading")
+        presentation.headingVisible = true
+        settle()
 
         presentation.fullPage = true
         settle()
@@ -203,6 +378,26 @@ enum WorkspaceDiagnostics {
             }
         }
 
+        func checkSheetBadgePassesThrough(_ transition: String, topOffset: CGFloat) throws {
+            let local = NSPoint(x: scroll.bounds.maxX - 40,
+                                y: scroll.isFlipped ? scroll.bounds.minY + topOffset : scroll.bounds.maxY - topOffset)
+            // NSView.hitTest receives a point in its superview coordinates.
+            // Exercise the complete SwiftUI overlay hierarchy, rather than
+            // directly asking the native page which input view it would use.
+            let point = scroll.convert(local, to: host.view.superview)
+            let hit = host.view.hitTest(point)
+            let reachesInk = hit === page.inkView || (hit?.isDescendant(of: page.inkView) ?? false)
+            try check(reachesInk, "\(transition) sheet badge passes pen hit testing through to native ink (hit=\(String(describing: hit.map { String(describing: type(of: $0)) })))")
+            try check(findPage(host.view) === page && scroll.documentCursor === page.inkView.tipCursor(),
+                      "\(transition) sheet badge retains the native page and pen cursor")
+        }
+        try checkSheetBadgePassesThrough("visible-toolbar", topOffset: 15)
+        presentation.toolsVisible = false
+        settle()
+        try checkSheetBadgePassesThrough("hidden-toolbar below floating controls", topOffset: 82)
+        presentation.toolsVisible = true
+        settle()
+
         // An offscreen NSHostingView need not publish SwiftUI's virtual AX
         // children until an external accessibility client engages the app.
         // Dispatch each button's real key equivalent through this window
@@ -213,7 +408,7 @@ enum WorkspaceDiagnostics {
             guard let event = NSEvent.keyEvent(with: .keyDown, location: .zero,
                                               modifierFlags: [.command, .shift], timestamp: 0,
                                               windowNumber: window.windowNumber, context: nil,
-                                              characters: key.uppercased(), charactersIgnoringModifiers: key,
+                                              characters: key == "2" ? "@" : key.uppercased(), charactersIgnoringModifiers: key,
                                               isARepeat: false, keyCode: keyCode) else {
                 throw Failure(description: "Cannot create the local '\(label)' key equivalent")
             }
@@ -221,6 +416,32 @@ enum WorkspaceDiagnostics {
             settle()
             try check(expected(), "\(label) changes the workspace presentation")
         }
+
+        let wideSize = window.contentLayoutRect.size
+        let narrowCaret = editor.selectedRange()
+        let narrowCursor = scroll.documentCursor
+        window.setContentSize(NSSize(width: 880, height: 720))
+        settle()
+        try check(findPage(host.view) === page && page.textView === editor && editor.undoManager === undo
+                  && undo.canUndo && editor.selectedRange() == narrowCaret,
+                  "narrow-window layout preserves the editor, caret, and undo history")
+        try press("Hide heading at narrow width", key: "h", keyCode: 4, expecting: { !presentation.headingVisible })
+        try press("Restore heading at narrow width", key: "h", keyCode: 4, expecting: { presentation.headingVisible })
+        try press("Hide sheets at narrow width", key: "2", keyCode: 19, expecting: { !presentation.sheetsVisible })
+        try press("Restore sheets at narrow width", key: "2", keyCode: 19, expecting: { presentation.sheetsVisible })
+        presentation.toolsVisible = false
+        settle()
+        try press("Floating hide-heading control", key: "h", keyCode: 4, expecting: { !presentation.headingVisible })
+        try press("Floating hide-sheets control", key: "2", keyCode: 19, expecting: { !presentation.sheetsVisible })
+        try press("Floating restore-heading control", key: "h", keyCode: 4, expecting: { presentation.headingVisible })
+        try press("Floating restore-sheets control", key: "2", keyCode: 19, expecting: { presentation.sheetsVisible })
+        try check(findPage(host.view) === page && editor.selectedRange() == narrowCaret
+                  && editor.undoManager === undo && undo.canUndo && scroll.documentCursor === narrowCursor
+                  && abs(scroll.magnification - 1.25) < 0.001,
+                  "narrow floating restores retain editor identity, caret, undo, zoom, and pen cursor")
+        presentation.toolsVisible = true
+        window.setContentSize(wideSize)
+        settle()
 
         presentation.toolsVisible = false
         store.trash(sheetID)
@@ -230,6 +451,19 @@ enum WorkspaceDiagnostics {
         settle()
         try check(store.selectedSheet?.isTrashed == true && findPage(host.view) != nil,
                   "trashed sheet mounts as a real read-only detail")
+        let trashedContent = store.selectedSheet?.pageContent
+        try press("Hide heading in Trash with tools hidden", key: "h", keyCode: 4, expecting: { !presentation.headingVisible })
+        try press("Hide sheets in Trash with tools hidden", key: "2", keyCode: 19, expecting: { !presentation.sheetsVisible })
+        try press("Full page with hidden Trash chrome", key: "f", keyCode: 3, expecting: { presentation.fullPage })
+        try press("Restore heading from full-page Trash", key: "h", keyCode: 4,
+                  expecting: { !presentation.fullPage && presentation.headingVisible && !presentation.sheetsVisible })
+        try press("Hide heading again in Trash", key: "h", keyCode: 4, expecting: { !presentation.headingVisible })
+        try press("Full page before restoring Trash sheets", key: "f", keyCode: 3, expecting: { presentation.fullPage })
+        try press("Restore sheets from full-page Trash", key: "2", keyCode: 19,
+                  expecting: { !presentation.fullPage && presentation.sheetsVisible && !presentation.headingVisible })
+        try press("Restore heading in Trash", key: "h", keyCode: 4, expecting: { presentation.headingVisible })
+        try check(store.selectedSheet?.pageContent == trashedContent && findPage(host.view) === page,
+                  "all independent Trash chrome controls remain enabled without editing read-only note content")
         try press("Full page", key: "f", keyCode: 3, expecting: { presentation.fullPage })
         try press("Show drawing toolbar", key: "t", keyCode: 17, expecting: { presentation.toolsVisible })
         try press("Exit full page", key: "f", keyCode: 3, expecting: { !presentation.fullPage })
@@ -242,7 +476,7 @@ enum WorkspaceDiagnostics {
         try check(store.selectedSheet == nil && !presentation.fullPage,
                   "losing sheet selection exits full page instead of stranding the empty workspace")
         try check(findPage(host.view) == nil, "empty selection removes the old sheet detail")
-        return "\(checks) workspace integration checks passed (photographic resources, light/dark scenery, full-page navigation, toolbar restoration, native editor identity, typing undo/redo, caret, zoom, pen cursor, Trash, and empty selection)."
+        return "\(checks) workspace integration checks passed (photographic resources, light/dark scenery, independent heading and sheets pane, native collapse observation, narrow-window and floating restores, full-page navigation, toolbar restoration, native editor identity, typing undo/redo, caret, zoom, pen cursor, Trash, and empty selection)."
     }
 }
 #endif

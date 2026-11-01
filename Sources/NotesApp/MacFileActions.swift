@@ -50,7 +50,7 @@ enum MacFileActions {
     }
 
     static func exportRichText(_ sheet: NoteNode, store: NotesStore) {
-        do { save(try richTextData(sheet), title: sheet.title + ".rtf", type: .rtf, store: store) }
+        do { save(try richTextData(sheet), title: sheet.displayTitle + ".rtf", type: .rtf, store: store) }
         catch { store.errorMessage = error.localizedDescription }
     }
 
@@ -81,7 +81,7 @@ enum MacFileActions {
             store.errorMessage = "This page is too large for PNG export. Export PDF instead."
             return
         }
-        save(data, title: sheet.title + ".png", type: .png, store: store)
+        save(data, title: sheet.displayTitle + ".png", type: .png, store: store)
     }
 
     static func exportPDF(_ sheet: NoteNode, theme: PageTheme = .light, store: NotesStore) {
@@ -89,7 +89,7 @@ enum MacFileActions {
                                          strokes: sheet.strokes,
                                          paper: InkPaper(rawValue: sheet.paperStyle.rawValue) ?? .dotted, theme: theme,
                                          pageTemplate: sheet.pageTemplate, templateLinePattern: sheet.templateLinePattern, textBoxes: sheet.textBoxes, equations: sheet.equations)
-        save(data, title: sheet.title + ".pdf", type: .pdf, store: store)
+        save(data, title: sheet.displayTitle + ".pdf", type: .pdf, store: store)
     }
 
 }

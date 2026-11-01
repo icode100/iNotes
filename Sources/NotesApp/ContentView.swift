@@ -50,6 +50,8 @@ struct ContentView: View {
     @ViewState private var showEmptyTrash = false
     @ViewState private var columnVisibility: NavigationSplitViewVisibility = .all
     @ViewState private var previousColumns: NavigationSplitViewVisibility = .all
+    @ViewState private var previousSheetsColumns: NavigationSplitViewVisibility = .all
+    @ViewState private var navigationLeadingInset: CGFloat = 0
     @FocusState private var searchFocused: Bool
 
     @MainActor
@@ -61,7 +63,7 @@ struct ContentView: View {
         NavigationSplitView(columnVisibility: $columnVisibility) {
             sidebar.navigationSplitViewColumnWidth(min: 190, ideal: 220, max: 310)
         } content: {
-            sheetList.navigationSplitViewColumnWidth(min: 210, ideal: 260, max: 360)
+            sheetList.navigationSplitViewColumnWidth(min: 120, ideal: 260, max: 480)
         } detail: {
             Group {
                 if let sheet = store.selectedSheet {
@@ -77,7 +79,12 @@ struct ContentView: View {
                 }
             }
             #if os(macOS)
-            .background { WorkspaceNavigationChrome(fullPage: presentation.fullPage) }
+            .padding(.leading, navigationLeadingInset)
+            .background {
+                WorkspaceNavigationChrome(fullPage: presentation.fullPage, sheetsVisible: presentation.sheetsVisible,
+                    onSheetsVisibilityChange: { presentation.sheetsVisible = $0 },
+                    onLeadingInsetChange: { navigationLeadingInset = $0 })
+            }
             #endif
         }
         .environmentObject(presentation)
@@ -85,11 +92,16 @@ struct ContentView: View {
         #if !os(macOS)
         .onChange(of: presentation.fullPage) { _, fullPage in
             if fullPage { previousColumns = columnVisibility; columnVisibility = .detailOnly }
-            else { columnVisibility = previousColumns }
+            else { columnVisibility = presentation.sheetsVisible ? previousColumns : .detailOnly }
+        }
+        .onChange(of: presentation.sheetsVisible) { _, visible in
+            guard !presentation.fullPage else { return }
+            if visible { columnVisibility = previousSheetsColumns == .detailOnly ? .all : previousSheetsColumns }
+            else { previousSheetsColumns = columnVisibility; columnVisibility = .detailOnly }
         }
         #endif
         .onChange(of: store.selectedSheet?.id) { _, selectedID in
-            if selectedID == nil { presentation.fullPage = false }
+            if selectedID == nil { presentation.fullPage = false; presentation.sheetsVisible = true }
         }
         #if os(macOS)
         .toolbar(presentation.fullPage ? .hidden : .visible, for: .windowToolbar)
@@ -98,6 +110,9 @@ struct ContentView: View {
         #endif
         .toolbar {
             ToolbarItemGroup(placement: .primaryAction) {
+                Button { presentation.toggleSheets() } label: {
+                    Label(presentation.sheetsVisible ? "Hide sheets pane" : "Show sheets pane", systemImage: "rectangle.split.3x1")
+                }.help(presentation.sheetsVisible ? "Hide sheets pane" : "Show sheets pane")
                 AppearanceMenu()
                 Menu {
                     Button("New sheet", systemImage: "doc.badge.plus", action: newSheet)
@@ -168,7 +183,11 @@ struct ContentView: View {
         }
         .onReceive(NotificationCenter.default.publisher(for: .newSheet)) { _ in newSheet() }
         .onReceive(NotificationCenter.default.publisher(for: .newWorkbook)) { _ in nameRequest = NameRequest(kind: .workbook) }
-        .onReceive(NotificationCenter.default.publisher(for: .focusSearch)) { _ in searchFocused = true }
+        .onReceive(NotificationCenter.default.publisher(for: .focusSearch)) { _ in
+            presentation.fullPage = false
+            presentation.sheetsVisible = true
+            searchFocused = true
+        }
     }
 
     private var sidebar: some View {
@@ -247,13 +266,39 @@ struct ContentView: View {
                 ForEach(store.visibleSheets) { sheet in
                     VStack(alignment: .leading, spacing: 7) {
                         HStack(spacing: 6) {
-                            Text(sheet.title).font(.headline).lineLimit(2)
+                            Text(sheet.displayTitle).font(.headline).lineLimit(2)
                             if sheet.isFavorite { Image(systemName: "star.fill").font(.caption2).foregroundStyle(.orange) }
                         }
+                        ViewThatFits(in: .horizontal) {
+                            HStack(spacing: 4) {
+                                if !sheet.title.isEmpty {
+                                    Text("Sheet \(store.sheetNumber(sheet.id) ?? 1)")
+                                    Text("·")
+                                }
+                                Text(sheet.createdAt, format: .dateTime.day().month(.abbreviated).year())
+                            }
+                            VStack(alignment: .leading, spacing: 2) {
+                                if !sheet.title.isEmpty { Text("Sheet \(store.sheetNumber(sheet.id) ?? 1)") }
+                                Text(sheet.createdAt, format: .dateTime.day().month(.abbreviated).year())
+                            }
+                        }.font(.caption2).foregroundStyle(.secondary)
+                            .accessibilityElement(children: .ignore)
+                            .accessibilityLabel((sheet.title.isEmpty ? "" : "Sheet \(store.sheetNumber(sheet.id) ?? 1), ") + "Created \(sheet.createdAt.formatted(date: .abbreviated, time: .omitted))")
                         Text(sheet.plainTextExport.isEmpty ? (sheet.strokes.isEmpty && sheet.pencilKitData == nil ? "Empty sheet" : "Handwritten notes") : sheet.plainTextExport.replacingOccurrences(of: "\n", with: " "))
                             .font(.caption).foregroundStyle(.secondary).lineLimit(2)
-                        Text(store.breadcrumb(sheet.parentID)).font(.caption2).foregroundStyle(.tertiary).lineLimit(1)
-                    }.padding(.vertical, 8).tag(sheet.id)
+                        Text(store.breadcrumb(sheet.parentID)).font(.caption2).foregroundStyle(.secondary).lineLimit(1)
+                    }
+                    .frame(maxWidth: .infinity, alignment: .leading)
+                    .padding(8)
+                    .background {
+                        if workspaceTheme != "classic", store.sheetID != sheet.id {
+                            RoundedRectangle(cornerRadius: 10)
+                                .fill((WorkspaceTheme(rawValue: workspaceTheme) ?? .classic)
+                                    .surface(isDark: colorScheme == .dark).opacity(0.92))
+                        }
+                    }
+                    .contentShape(Rectangle())
+                    .tag(sheet.id)
                     .contextMenu {
                         if sheet.isTrashed { Button("Restore sheet") { store.restore(sheet.id) } }
                         else {
@@ -393,19 +438,24 @@ struct NameDialog: View {
         VStack(alignment: .leading, spacing: 20) {
             Label(request.renameID == nil ? "New \(request.kind.rawValue)" : "Rename \(request.kind.rawValue)", systemImage: request.kind.symbol)
                 .font(.title2.weight(.semibold))
-            TextField("Name", text: $request.title).textFieldStyle(.roundedBorder).focused($focused)
+            TextField(request.kind == .sheet ? "Title (optional)" : "Name", text: $request.title).textFieldStyle(.roundedBorder).focused($focused)
                 .onSubmit { submit() }
+            if request.kind == .sheet {
+                Text("Leave the title blank to identify this sheet by its number.")
+                    .font(.caption).foregroundStyle(.secondary)
+            }
             HStack {
                 Spacer()
                 Button("Cancel") { dismiss() }.keyboardShortcut(.cancelAction)
                 Button(request.renameID == nil ? "Create" : "Rename", action: submit)
-                    .keyboardShortcut(.defaultAction).disabled(request.title.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty || request.title.count > 256)
+                    .keyboardShortcut(.defaultAction)
+                    .disabled((request.kind != .sheet && request.title.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty) || request.title.count > 256)
             }
         }.padding(28).frame(minWidth: 340).onAppear { focused = true }
     }
     private func submit() {
         let title = request.title.trimmingCharacters(in: .whitespacesAndNewlines)
-        guard !title.isEmpty, title.count <= 256 else { return }
+        guard (request.kind == .sheet || !title.isEmpty), title.count <= 256 else { return }
         completion(title); dismiss()
     }
 }

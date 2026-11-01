@@ -11,6 +11,18 @@ import UIKit
 final class EditorPresentation: ObservableObject {
     @Published var fullPage = false
     @Published var toolsVisible = true
+    @Published var sheetsVisible = true
+    @Published var headingVisible = true
+
+    func toggleSheets() {
+        if fullPage { fullPage = false; sheetsVisible = true }
+        else { sheetsVisible.toggle() }
+    }
+
+    func toggleHeading() {
+        if fullPage { fullPage = false; headingVisible = true }
+        else { headingVisible.toggle() }
+    }
 }
 
 #if os(macOS)
@@ -19,16 +31,25 @@ final class EditorPresentation: ObservableObject {
 /// detail controller, reparenting the editor, or taking over the split delegate.
 struct WorkspaceNavigationChrome: NSViewRepresentable {
     var fullPage: Bool
+    var sheetsVisible: Bool
+    var onSheetsVisibilityChange: (Bool) -> Void
+    var onLeadingInsetChange: (CGFloat) -> Void
 
     func makeNSView(context: Context) -> WorkspaceNavigationProbe {
         let view = WorkspaceNavigationProbe()
         view.setAccessibilityElement(false)
         view.fullPage = fullPage
+        view.sheetsVisible = sheetsVisible
+        view.onSheetsVisibilityChange = onSheetsVisibilityChange
+        view.onLeadingInsetChange = onLeadingInsetChange
         return view
     }
 
     func updateNSView(_ view: WorkspaceNavigationProbe, context: Context) {
         view.fullPage = fullPage
+        view.sheetsVisible = sheetsVisible
+        view.onSheetsVisibilityChange = onSheetsVisibilityChange
+        view.onLeadingInsetChange = onLeadingInsetChange
         view.scheduleSynchronization()
     }
 
@@ -40,6 +61,16 @@ struct WorkspaceNavigationChrome: NSViewRepresentable {
 @MainActor
 final class WorkspaceNavigationProbe: NSView {
     var fullPage = false
+    var sheetsVisible = true
+    var onSheetsVisibilityChange: ((Bool) -> Void)?
+    var onLeadingInsetChange: ((CGFloat) -> Void)?
+    private var leadingInset: CGFloat?
+    private var expandedSheetsWidth: CGFloat?
+    private var restoreExpandedSheetsWidth = false
+    private var applying = false
+    private var wasFullPage = false
+    private var previousCollapsed: [Bool] = []
+    private var collapseObservation: NSKeyValueObservation?
     private var scheduled = false
     private var dismantled = false
     private weak var savedController: NSSplitViewController?
@@ -70,7 +101,7 @@ final class WorkspaceNavigationProbe: NSView {
             automaticMaximumThickness = item.automaticMaximumThickness
         }
 
-        func restore() {
+        func restorePolicy() {
             item.minimumThickness = minimumThickness
             item.maximumThickness = maximumThickness
             item.preferredThicknessFraction = preferredThicknessFraction
@@ -80,6 +111,10 @@ final class WorkspaceNavigationProbe: NSView {
             item.canCollapseFromWindowResize = collapseFromResize
             item.isSpringLoaded = springLoaded
             item.collapseBehavior = collapseBehavior
+        }
+
+        func restore() {
+            restorePolicy()
             item.isCollapsed = collapsed
         }
     }
@@ -121,24 +156,104 @@ final class WorkspaceNavigationProbe: NSView {
     }
 
     private func synchronizeNavigation() {
-        guard fullPage, window != nil else { restoreNavigation(); return }
+        guard window != nil else { restoreNavigation(); return }
         guard let controller = enclosingNavigationController() else { return }
         let navigationItems = Array(controller.splitViewItems.dropLast())
+        guard navigationItems.count >= 2 else { return }
         if savedController !== controller || savedItems.map({ ObjectIdentifier($0.item) }) != navigationItems.map(ObjectIdentifier.init) {
             restoreNavigation()
             savedController = controller
             savedItems = navigationItems.map(ItemState.init)
-        }
-        for state in savedItems {
-            let item = state.item
-            if !item.canCollapse { item.canCollapse = true }
-            if item.canCollapseFromWindowResize { item.canCollapseFromWindowResize = false }
-            if item.isSpringLoaded { item.isSpringLoaded = false }
-            if item.collapseBehavior != .preferResizingSiblingsWithFixedSplitView {
-                item.collapseBehavior = .preferResizingSiblingsWithFixedSplitView
+            // Observe native divider collapses as well as toolbar toggles. The
+            // model must follow a drag, otherwise the next SwiftUI update would
+            // reopen the pane. AppKit split-item changes occur on the main thread.
+            collapseObservation = navigationItems.last?.observe(\.isCollapsed, options: [.new]) { [weak self] item, _ in
+                MainActor.assumeIsolated {
+                    guard let self, !self.applying, !self.fullPage, !self.dismantled else { return }
+                    let visible = !item.isCollapsed
+                    self.sheetsVisible = visible
+                    if visible { self.restoreExpandedSheetsWidth = true }
+                    DispatchQueue.main.async { [weak self] in
+                        guard let self, !self.dismantled, !self.fullPage,
+                              self.sheetsVisible == visible else { return }
+                        self.onSheetsVisibilityChange?(visible)
+                    }
+                }
             }
-            if !item.isCollapsed { item.isCollapsed = true }
         }
+        applying = true
+        defer { applying = false }
+        guard let sheets = navigationItems.last else { return }
+        sheets.canCollapse = true
+        sheets.canCollapseFromWindowResize = false
+        sheets.minimumThickness = 120
+        sheets.maximumThickness = 480
+        sheets.collapseBehavior = .preferResizingSiblingsWithFixedSplitView
+        // Hosting bounds can include the sidebar underlay on newer macOS.
+        // Remember the visible list width, not that larger backing-view width.
+        if !sheets.isCollapsed && !wasFullPage && !restoreExpandedSheetsWidth {
+            let rect = sheets.viewController.view.convert(sheets.viewController.view.bounds, to: controller.splitView)
+            expandedSheetsWidth = max(120, min(480, rect.maxX - sheetsLeadingEdge(in: controller)))
+        }
+        if fullPage {
+            if !wasFullPage { previousCollapsed = navigationItems.map(\.isCollapsed) }
+            for item in navigationItems {
+                item.canCollapse = true
+                item.canCollapseFromWindowResize = false
+                item.isSpringLoaded = false
+                item.collapseBehavior = .preferResizingSiblingsWithFixedSplitView
+                if !item.isCollapsed { item.isCollapsed = true }
+            }
+        } else {
+            if wasFullPage {
+                // Restore the independently hidden sidebar, while the sheets
+                // pane follows its own state (including a restore button).
+                for (index, state) in savedItems.dropLast().enumerated() {
+                    state.restorePolicy()
+                    if previousCollapsed.indices.contains(index) {
+                        state.item.isCollapsed = previousCollapsed[index]
+                    }
+                }
+            }
+            if sheets.isCollapsed == sheetsVisible {
+                sheets.isCollapsed = !sheetsVisible
+                if sheetsVisible { restoreExpandedSheetsWidth = true }
+            }
+            if sheetsVisible && restoreExpandedSheetsWidth, let expandedSheetsWidth {
+                controller.splitView.layoutSubtreeIfNeeded()
+                controller.splitView.setPosition(sheetsLeadingEdge(in: controller) + expandedSheetsWidth,
+                                                 ofDividerAt: controller.splitViewItems.count - 2)
+                restoreExpandedSheetsWidth = false
+            }
+        }
+        wasFullPage = fullPage
+        updateLeadingInset(in: controller)
+    }
+
+    private func sheetsLeadingEdge(in controller: NSSplitViewController) -> CGFloat {
+        let split = controller.splitView
+        return controller.splitViewItems.dropLast(2).filter { !$0.isCollapsed }
+            .map { $0.viewController.view.convert($0.viewController.view.bounds, to: split).maxX + split.dividerThickness }
+            .max() ?? split.bounds.minX
+    }
+
+    private func updateLeadingInset(in controller: NSSplitViewController) {
+        guard let detail = controller.splitViewItems.last else { return }
+        let split = controller.splitView
+        let detailView = detail.viewController.view
+        let detailRect = detailView.convert(detailView.bounds, to: split)
+        let navigationRight = controller.splitViewItems.dropLast()
+            .filter { !$0.isCollapsed }
+            .map { $0.viewController.view.convert($0.viewController.view.bounds, to: split).maxX }
+            .max() ?? detailRect.minX
+        // Newer macOS can extend a column underneath the sidebar. When the
+        // middle column is collapsed its successor receives no leading safe
+        // area. Supply only the measured overlap; never move/recreate the editor.
+        let overlap = max(0, min(detailRect.width, navigationRight - detailRect.minX)
+                          - detailView.safeAreaInsets.left)
+        if let leadingInset, abs(overlap - leadingInset) <= 0.5 { return }
+        leadingInset = overlap
+        onLeadingInsetChange?(overlap)
     }
 
     private func enclosingNavigationController() -> NSSplitViewController? {
@@ -157,6 +272,11 @@ final class WorkspaceNavigationProbe: NSView {
     }
 
     private func restoreNavigation() {
+        collapseObservation = nil
+        wasFullPage = false
+        previousCollapsed = []
+        expandedSheetsWidth = nil
+        restoreExpandedSheetsWidth = false
         guard !savedItems.isEmpty else { return }
         let snapshots = savedItems
         savedItems = []

@@ -10,6 +10,7 @@ struct SheetDetail: View {
     @EnvironmentObject private var inputDevice: InputDeviceMonitor
     @EnvironmentObject private var presentation: EditorPresentation
     @Environment(\.colorScheme) private var colorScheme
+    @AppStorage("workspaceTheme") private var workspaceTheme = "classic"
     @AppStorage("pageColorScheme") private var pageColorScheme = "system"
     @AppStorage("linePattern") private var linePattern = "solid"
     let sheetID: UUID
@@ -22,11 +23,15 @@ struct SheetDetail: View {
     @ViewState private var exportType: UTType = .plainText
     @ViewState private var exportName = "Note"
     @ViewState private var equationDraft: NoteEquation?
+    @ViewState private var renameRequest: NameRequest?
     private var sheet: NoteNode? { store.library.node(id: sheetID) }
     private var inkTool: InkTool { InkTool(rawValue: selectedTool) ?? .pen }
     private var paper: InkPaper { InkPaper(rawValue: sheet?.paperStyle.rawValue ?? "dotted") ?? .dotted }
     private var pageTheme: PageTheme {
         (PageColorScheme(rawValue: pageColorScheme) ?? .system).resolved(isDark: colorScheme == .dark)
+    }
+    private var workspaceAccent: Color {
+        (WorkspaceTheme(rawValue: workspaceTheme) ?? .classic).accent(isDark: colorScheme == .dark)
     }
 
     var body: some View {
@@ -39,19 +44,15 @@ struct SheetDetail: View {
                         Button("Restore") { store.restore(sheet.id) }
                     }.padding().background(.orange.opacity(0.1))
                 }
-                if !presentation.fullPage {
+                if !presentation.fullPage && presentation.headingVisible {
                 VStack(alignment: .leading, spacing: 12) {
                     HStack(alignment: .top) {
                         VStack(alignment: .leading, spacing: 8) {
                             Text(store.breadcrumb(sheet.parentID)).font(.caption).foregroundStyle(.secondary).lineLimit(1)
-                            TextField("Untitled sheet", text: titleBinding(sheet))
-                                .font(.system(size: 28, weight: .semibold, design: .serif)).textFieldStyle(.plain)
-                                .accessibilityLabel("Sheet title").disabled(sheet.isTrashed)
-                            HStack(spacing: 10) {
-                                Text(sheet.updatedAt.formatted(date: .abbreviated, time: .shortened))
-                                Text("·")
-                                Text("\(([sheet.body] + sheet.textBoxes.map(\.text)).joined(separator: " ").split(whereSeparator: \.isWhitespace).count) words")
-                            }.font(.caption).foregroundStyle(.secondary)
+                            Text(store.sheetHeading(sheet.id))
+                                .font(.system(size: 28, weight: .semibold, design: .serif))
+                                .lineLimit(2).accessibilityAddTraits(.isHeader)
+                            headerMetadata(sheet)
                         }
                         Spacer(minLength: 8)
                         HStack(alignment: .center, spacing: 6) {
@@ -62,6 +63,12 @@ struct SheetDetail: View {
                             }.buttonStyle(.plain).help("Favorite sheet").disabled(sheet.isTrashed)
                                 .accessibilityLabel(sheet.isFavorite ? "Remove from favorites" : "Favorite sheet")
                             Menu {
+                                if !sheet.isTrashed {
+                                    Button("Rename sheet…") {
+                                        renameRequest = NameRequest(kind: .sheet, renameID: sheet.id, title: sheet.title)
+                                    }
+                                    Divider()
+                                }
                                 Button("Export text…") { exportText(sheet) }
                                 #if os(macOS)
                                 Button("Export rich text…") { MacFileActions.exportRichText(sheet, store: store) }
@@ -107,6 +114,8 @@ struct SheetDetail: View {
                     }.frame(height: 34).disabled(sheet.isTrashed)
                     Button { showAttachmentImporter = true } label: { Image(systemName: "paperclip") }
                         .buttonStyle(.plain).help("Attach a file (up to 10 MiB)").disabled(sheet.isTrashed)
+                    sheetsButton
+                    headingButton
                     fullPageButton
                     toolbarButton
                 }.padding(.horizontal, 18).padding(.vertical, 10)
@@ -120,7 +129,7 @@ struct SheetDetail: View {
                         Text("Stylus activity is detected when your pen reaches the page.")
                     } label: {
                         Label(inputDevice.status, systemImage: inputDevice.detected ? "pencil.tip.crop.circle.badge.checkmark" : "pencil.tip")
-                            .font(.caption).foregroundStyle(inputDevice.detected ? Color.accentColor : Color.secondary)
+                            .font(.caption).foregroundStyle(inputDevice.detected ? workspaceAccent : Color.secondary)
                     }
                     Spacer(minLength: 0)
                     Text("Text and ink share this page").font(.caption).foregroundStyle(.secondary)
@@ -143,15 +152,25 @@ struct SheetDetail: View {
                                   onEquationEdit: { equationDraft = $0 })
                     .frame(maxWidth: .infinity, maxHeight: .infinity).disabled(sheet.isTrashed)
                     .overlay(alignment: .topTrailing) {
-                        if !presentation.toolsVisible {
-                            HStack(spacing: 12) { fullPageButton; toolbarButton }
-                                .padding(10).background(.regularMaterial, in: Capsule()).padding(12)
-                        }
+                        VStack(alignment: .trailing, spacing: 8) {
+                            if !presentation.toolsVisible {
+                                HStack(spacing: 12) { sheetsButton; headingButton; fullPageButton; toolbarButton }
+                                    .padding(10).background(.regularMaterial, in: Capsule())
+                            }
+                            let number = store.sheetNumber(sheet.id).map { "Sheet \($0)" } ?? "Sheet"
+                            Text(number)
+                                .font(.system(.caption, design: .monospaced)).fontWeight(.medium)
+                                .foregroundStyle(.primary).fixedSize()
+                                .padding(.horizontal, 12).padding(.vertical, 8)
+                                .background(.regularMaterial, in: Capsule())
+                                .allowsHitTesting(false)
+                                .accessibilityLabel("Current sheet, \(number)")
+                        }.padding(12)
                     }
                 if !sheet.attachments.isEmpty { attachments(sheet) }
             }
             .background(editorBackground)
-            .navigationTitle(sheet.title)
+            .navigationTitle(store.sheetHeading(sheet.id))
             .onReceive(NotificationCenter.default.publisher(for: .noteToolShortcut)) { note in
                 if let tool = note.object as? InkTool, !sheet.isTrashed { selectTool(tool) }
             }
@@ -166,6 +185,11 @@ struct SheetDetail: View {
                     }
                 }
             }
+            .sheet(item: $renameRequest) { request in
+                NameDialog(request: request) { title in
+                    if let id = request.renameID { store.rename(id, to: title) }
+                }
+            }
             .fileImporter(isPresented: $showAttachmentImporter, allowedContentTypes: [.item], allowsMultipleSelection: true) { result in
                 do { for url in try result.get() { try attach(url, to: sheet.id) } }
                 catch { store.errorMessage = error.localizedDescription }
@@ -174,6 +198,53 @@ struct SheetDetail: View {
                 if case .failure(let error) = result { store.errorMessage = error.localizedDescription }
             }
         }
+    }
+
+    private func headerMetadata(_ sheet: NoteNode) -> some View {
+        let number = store.sheetNumber(sheet.id).map { "Sheet \($0)" } ?? "Sheet"
+        let created = "Created " + sheet.createdAt.formatted(date: .abbreviated, time: .shortened)
+        let words = ([sheet.body] + sheet.textBoxes.map(\.text)).joined(separator: " ")
+            .split(whereSeparator: \.isWhitespace).count
+        return ViewThatFits(in: .horizontal) {
+            HStack(spacing: 10) {
+                Text(number).monospacedDigit()
+                Text("·")
+                Text(created)
+                Text("·")
+                Text("\(words) words")
+            }.fixedSize(horizontal: true, vertical: false)
+            VStack(alignment: .leading, spacing: 4) {
+                HStack(spacing: 10) {
+                    Text(number).monospacedDigit()
+                    Text("·")
+                    Text("\(words) words")
+                }
+                Text(created).fixedSize(horizontal: false, vertical: true)
+            }
+        }.font(.caption).foregroundStyle(.secondary)
+            .accessibilityElement(children: .combine)
+    }
+
+    private var sheetsButton: some View {
+        let visible = !presentation.fullPage && presentation.sheetsVisible
+        return Button { presentation.toggleSheets() } label: {
+            Image(systemName: visible ? "sidebar.right" : "rectangle.split.2x1")
+                .frame(width: 24, height: 28)
+        }.buttonStyle(.plain)
+            .help(visible ? "Hide sheets pane" : "Show sheets pane")
+            .accessibilityLabel(visible ? "Hide sheets pane" : "Show sheets pane")
+            .keyboardShortcut("2", modifiers: [.command, .shift])
+    }
+
+    private var headingButton: some View {
+        let visible = !presentation.fullPage && presentation.headingVisible
+        return Button { presentation.toggleHeading() } label: {
+            Image(systemName: visible ? "text.rectangle" : "text.badge.plus")
+                .frame(width: 24, height: 28)
+        }.buttonStyle(.plain)
+            .help(visible ? "Hide heading" : "Show heading")
+            .accessibilityLabel(visible ? "Hide heading" : "Show heading")
+            .keyboardShortcut("h", modifiers: [.command, .shift])
     }
 
     private var fullPageButton: some View {
@@ -202,12 +273,6 @@ struct SheetDetail: View {
         #else
         Color(uiColor: .systemBackground)
         #endif
-    }
-
-    private func titleBinding(_ sheet: NoteNode) -> Binding<String> {
-        Binding(get: { store.library.node(id: sheet.id)?.title ?? "" }, set: { value in
-            if !value.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty && value.count <= 256 { store.rename(sheet.id, to: value) }
-        })
     }
 
     #if os(macOS)
@@ -246,7 +311,7 @@ struct SheetDetail: View {
     private func toolButton(_ tool: InkTool, title: String, symbol: String) -> some View {
         Button { selectTool(tool) } label: {
             Image(systemName: symbol).font(.system(size: 15)).frame(width: 30, height: 30)
-                .background(inkTool == tool ? Color.accentColor.opacity(0.18) : .clear, in: RoundedRectangle(cornerRadius: 6))
+                .background(inkTool == tool ? workspaceAccent.opacity(0.18) : .clear, in: RoundedRectangle(cornerRadius: 6))
         }.buttonStyle(.plain)
             .help((tool == .line ? "Draw a straight line. Nearby horizontal and vertical lines snap into place; hold Shift on Mac to lock an axis." : "\(title) tool.") + " " + ToolShortcuts.help(for: tool))
             .accessibilityLabel("\(title) tool")
@@ -414,9 +479,9 @@ struct SheetDetail: View {
     }
 
     private func exportText(_ sheet: NoteNode) {
-        exportData = BackupDocument(data: Data((sheet.title + "\n\n" + sheet.plainTextExport).utf8))
+        exportData = BackupDocument(data: Data((sheet.displayTitle + "\n\n" + sheet.plainTextExport).utf8))
         exportType = .plainText
-        exportName = sheet.title
+        exportName = sheet.displayTitle
         showExporter = true
     }
 }
