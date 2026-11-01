@@ -71,6 +71,28 @@ assets is recorded separately after upload. Publication keeps the original tag
 and installer, with the signed appcast switched only after the new installer is
 publicly verified. The next hosted release run reserves build 2012.
 
+### Published build 2011 verification
+
+The [existing v1.0.3 release](https://github.com/icode100/iNotes/releases/tag/v1.0.3)
+now includes build 2011 from source
+[`a70be63`](https://github.com/icode100/iNotes/commit/a70be63bdba60a52b50f68513293571d28fc9a93).
+The uploaded DMG and checksum were downloaded independently and matched the
+local bytes. The downloaded DMG passed mounted signature/resource/ARM64 and
+store/backup checks before the feed was switched. The versioned feed and default
+latest-update URL then matched the signed local feed exactly; CryptoKit verified
+both public feed and archive against the committed key. Public feed SHA-256:
+`2f1074130addcae9ffde15eae777931ae5f36793add72f390e29b51f1eb4fee6`.
+The original tag and build2010 DMG remain intact so cached older feeds still work.
+
+Both exact-source hosted Native checks passed fully:
+[main run 41319483349](https://github.com/icode100/iNotes/actions/runs/41319483349)
+and [development run 41319483118](https://github.com/icode100/iNotes/actions/runs/41319483118).
+Each passed unit/integration tests, Mac packaging, native editor/cursor regressions,
+DMG verification, and iPad simulator compilation. This records this commit's
+success without rewriting the earlier v1.0.3 CI history. The installed local
+1.0.3/build2010 app was left intact for the user's own updater test; no new
+end-to-end installation result is claimed.
+
 ## Millimetre nibs and navigation — local 1.0.3 candidate
 
 This candidate retains the navigation fixes, restores pre-experiment writing
