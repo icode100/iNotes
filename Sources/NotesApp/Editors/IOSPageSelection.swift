@@ -161,8 +161,9 @@ final class IOSPageSelectionController: NSObject {
                 return value
             }
             let native = PKDrawing(strokes: moved)
+            guard let portable = try? PortableInkConverter.validatedStrokes(from: native) else { return base }
             result.pencilKitData = native.dataRepresentation()
-            result.strokes = PortableInkConverter.strokes(from: native)
+            result.strokes = portable
         }
         for index in result.textBoxes.indices where selected.textBoxes.contains(result.textBoxes[index].id) {
             result.textBoxes[index].x = max(0, min(100_000, base.textBoxes[index].x + dx))
@@ -267,7 +268,8 @@ final class IOSPageSelectionController: NSObject {
         var native: Data?
         if let drawing = nativeDrawing(content), !selection.nativeStrokes.isEmpty {
             let selected = PKDrawing(strokes: drawing.strokes.enumerated().filter { selection.nativeStrokes.contains($0.offset) }.map(\.element))
-            native = selected.dataRepresentation(); ink = PortableInkConverter.strokes(from: selected)
+            guard let portable = try? PortableInkConverter.validatedStrokes(from: selected) else { return nil }
+            native = selected.dataRepresentation(); ink = portable
         }
         return PageClipboardPayload(text: plain, rtfData: rtf(text), strokes: ink, pencilKitData: native, textBoxes: boxes, equations: equations)
     }
@@ -278,7 +280,8 @@ final class IOSPageSelectionController: NSObject {
         value.strokes.removeAll { selection.strokes.contains($0.id) }
         if let drawing = nativeDrawing(content), !selection.nativeStrokes.isEmpty {
             let native = PKDrawing(strokes: drawing.strokes.enumerated().filter { !selection.nativeStrokes.contains($0.offset) }.map(\.element))
-            value.pencilKitData = native.dataRepresentation(); value.strokes = PortableInkConverter.strokes(from: native)
+            guard let portable = try? PortableInkConverter.validatedStrokes(from: native) else { return }
+            value.pencilKitData = native.dataRepresentation(); value.strokes = portable
         }
         value.textBoxes.removeAll { selection.textBoxes.contains($0.id) }
         value.equations.removeAll { selection.equations.contains($0.id) }
@@ -292,6 +295,7 @@ final class IOSPageSelectionController: NSObject {
     }
 
     private func paste(_ payload: PageClipboardPayload, offset: Double, action: String) {
+        guard (try? PortableInkConverter.validatedDrawing(content.pencilKitData, fallback: content.strokes)) != nil else { return }
         var payload = payload
         let nativeAddition: PKDrawing?
         if payload.pencilKitData != nil {
@@ -330,7 +334,9 @@ final class IOSPageSelectionController: NSObject {
                 return PKStroke(ink: stroke.ink, path: stroke.path, transform: transform, mask: stroke.mask, randomSeed: stroke.randomSeed)
             }
             let combined = PKDrawing(strokes: before.strokes + moved)
-            value.pencilKitData = combined.dataRepresentation(); value.strokes = PortableInkConverter.strokes(from: combined)
+            guard (try? PortableInkConverter.validateNativeDrawing(combined)) != nil else { return }
+            guard let portable = try? PortableInkConverter.validatedStrokes(from: combined) else { return }
+            value.pencilKitData = combined.dataRepresentation(); value.strokes = portable
             selected.nativeStrokes = Set(before.strokes.count..<combined.strokes.count)
             selected.strokes = Set(value.strokes.suffix(payload.strokes.count).map(\.id))
         }
@@ -350,7 +356,10 @@ final class IOSPageSelectionController: NSObject {
         commit(value, action: action)
     }
 
-    private func nativeDrawing(_ content: PageContent) -> PKDrawing? { content.pencilKitData.flatMap { try? PKDrawing(data: $0) } }
+    private func nativeDrawing(_ content: PageContent) -> PKDrawing? {
+        guard content.pencilKitData != nil else { return nil }
+        return try? PortableInkConverter.validatedDrawing(content.pencilKitData, fallback: content.strokes)
+    }
 
     private var paperWidth: CGFloat {
         let width = page?.bounds.width ?? 1600

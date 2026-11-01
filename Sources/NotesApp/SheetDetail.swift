@@ -8,8 +8,10 @@ import AppKit
 struct SheetDetail: View {
     @EnvironmentObject private var store: NotesStore
     @EnvironmentObject private var inputDevice: InputDeviceMonitor
+    @EnvironmentObject private var presentation: EditorPresentation
     @Environment(\.colorScheme) private var colorScheme
-    @AppStorage("appearance") private var appearance = "system"
+    @AppStorage("pageColorScheme") private var pageColorScheme = "system"
+    @AppStorage("linePattern") private var linePattern = "solid"
     let sheetID: UUID
     @AppStorage("inkColor") private var inkColor = "#30343B"
     @AppStorage("inkWidth") private var inkWidth = 2.5
@@ -23,7 +25,9 @@ struct SheetDetail: View {
     private var sheet: NoteNode? { store.library.node(id: sheetID) }
     private var inkTool: InkTool { InkTool(rawValue: selectedTool) ?? .pen }
     private var paper: InkPaper { InkPaper(rawValue: sheet?.paperStyle.rawValue ?? "dotted") ?? .dotted }
-    private var pageTheme: PageTheme { colorScheme == .dark ? .dark : .light }
+    private var pageTheme: PageTheme {
+        (PageColorScheme(rawValue: pageColorScheme) ?? .system).resolved(isDark: colorScheme == .dark)
+    }
 
     var body: some View {
         if let sheet {
@@ -35,6 +39,7 @@ struct SheetDetail: View {
                         Button("Restore") { store.restore(sheet.id) }
                     }.padding().background(.orange.opacity(0.1))
                 }
+                if !presentation.fullPage {
                 VStack(alignment: .leading, spacing: 12) {
                     HStack(alignment: .top) {
                         VStack(alignment: .leading, spacing: 8) {
@@ -83,7 +88,10 @@ struct SheetDetail: View {
                     }
                     TagsField(tags: store.binding(sheet.id, \.tags, fallback: [])).disabled(sheet.isTrashed)
                 }.padding(.horizontal, 30).padding(.top, 25).padding(.bottom, 18)
+                    .background { WorkspaceScenery() }
                 Divider()
+                }
+                if presentation.toolsVisible {
                 HStack(spacing: 10) {
                     ScrollView(.horizontal, showsIndicators: false) {
                         HStack(spacing: 12) {
@@ -96,10 +104,12 @@ struct SheetDetail: View {
                             if inkTool == .text { Divider().frame(height: 22); formattingToolbar }
                             #endif
                         }.fixedSize(horizontal: true, vertical: false)
-                    }.frame(height: 34)
+                    }.frame(height: 34).disabled(sheet.isTrashed)
                     Button { showAttachmentImporter = true } label: { Image(systemName: "paperclip") }
-                        .buttonStyle(.plain).help("Attach a file (up to 10 MiB)")
-                }.padding(.horizontal, 18).padding(.vertical, 10).disabled(sheet.isTrashed)
+                        .buttonStyle(.plain).help("Attach a file (up to 10 MiB)").disabled(sheet.isTrashed)
+                    fullPageButton
+                    toolbarButton
+                }.padding(.horizontal, 18).padding(.vertical, 10)
                 HStack {
                     Menu {
                         Text(inputDevice.status)
@@ -116,6 +126,7 @@ struct SheetDetail: View {
                     Text("Text and ink share this page").font(.caption).foregroundStyle(.secondary)
                 }.padding(.horizontal, 20).padding(.bottom, 9)
                 Divider()
+                }
                 UnifiedPageEditor(text: store.binding(sheet.id, \.body, fallback: ""),
                                   rtfData: store.binding(sheet.id, \.richTextRTF, fallback: nil),
                                   strokes: store.binding(sheet.id, \.strokes, fallback: []),
@@ -123,12 +134,20 @@ struct SheetDetail: View {
                                   textBoxes: store.binding(sheet.id, \.textBoxes, fallback: []),
                                   equations: store.binding(sheet.id, \.equations, fallback: []),
                                   tool: inkTool, colorHex: inkColor, lineWidth: inkWidth, paper: paper, theme: pageTheme,
+                                  linePattern: LinePattern(rawValue: linePattern) ?? .solid,
+                                  pageTemplate: sheet.pageTemplate, templateLinePattern: sheet.templateLinePattern,
                                   onTextChange: { text, data in store.update(sheet.id) { $0.body = text; $0.richTextRTF = data } },
                                   onInkChange: { strokes, data in store.update(sheet.id) { $0.strokes = strokes; $0.pencilKitData = data } },
                                   onInputChange: { inputDevice.report($0) },
                                   onPageChange: { content in store.update(sheet.id) { $0.pageContent = content } },
                                   onEquationEdit: { equationDraft = $0 })
                     .frame(maxWidth: .infinity, maxHeight: .infinity).disabled(sheet.isTrashed)
+                    .overlay(alignment: .topTrailing) {
+                        if !presentation.toolsVisible {
+                            HStack(spacing: 12) { fullPageButton; toolbarButton }
+                                .padding(10).background(.regularMaterial, in: Capsule()).padding(12)
+                        }
+                    }
                 if !sheet.attachments.isEmpty { attachments(sheet) }
             }
             .background(editorBackground)
@@ -155,6 +174,26 @@ struct SheetDetail: View {
                 if case .failure(let error) = result { store.errorMessage = error.localizedDescription }
             }
         }
+    }
+
+    private var fullPageButton: some View {
+        Button { presentation.fullPage.toggle() } label: {
+            Image(systemName: presentation.fullPage ? "arrow.down.right.and.arrow.up.left" : "arrow.up.left.and.arrow.down.right")
+                .frame(width: 24, height: 28)
+        }.buttonStyle(.plain)
+            .help(presentation.fullPage ? "Exit full page" : "Full page · hide navigation and heading")
+            .accessibilityLabel(presentation.fullPage ? "Exit full page" : "Full page")
+            .keyboardShortcut("f", modifiers: [.command, .shift])
+    }
+
+    private var toolbarButton: some View {
+        Button { presentation.toolsVisible.toggle() } label: {
+            Image(systemName: presentation.toolsVisible ? "rectangle.topthird.inset.filled" : "slider.horizontal.3")
+                .frame(width: 24, height: 28)
+        }.buttonStyle(.plain)
+            .help(presentation.toolsVisible ? "Hide drawing toolbar" : "Show drawing toolbar")
+            .accessibilityLabel(presentation.toolsVisible ? "Hide drawing toolbar" : "Show drawing toolbar")
+            .keyboardShortcut("t", modifiers: [.command, .shift])
     }
 
     private var editorBackground: Color {
@@ -280,6 +319,11 @@ struct SheetDetail: View {
                 Button("Medium") { inkWidth = 2.5 }
                 Button("Broad") { inkWidth = 7 }
                 Button("Highlighter width") { inkWidth = 4.5 }
+                Picker("Straight line style", selection: $linePattern) {
+                    ForEach(LinePattern.allCases, id: \.self) { pattern in
+                        Text(pattern.rawValue.capitalized).tag(pattern.rawValue)
+                    }
+                }
                 Divider()
                 ForEach(PaperStyle.allCases, id: \.self) { style in
                     Button { store.update(sheetID) { $0.paperStyle = style } } label: {
@@ -287,15 +331,32 @@ struct SheetDetail: View {
                     }
                 }
                 Divider()
-                Text("Appearance")
-                ForEach(["system", "light", "dark"], id: \.self) { choice in
-                    Button { appearance = choice } label: {
-                        Label(choice == "system" ? "Match system" : choice.capitalized,
-                              systemImage: appearance == choice ? "checkmark" : "circle.lefthalf.filled")
+                Menu("Page template") {
+                    ForEach(PageTemplate.allCases, id: \.self) { template in
+                        Button { store.update(sheetID) { $0.pageTemplate = template } } label: {
+                            Label(templateTitle(template), systemImage: sheet?.pageTemplate == template ? "checkmark" : "rectangle")
+                        }.disabled(!template.isSupported(on: sheet?.paperStyle ?? .dotted))
+                    }
+                    Divider()
+                    Text("Left margin supports plain and ruled paper.")
+                    ForEach(LinePattern.allCases, id: \.self) { pattern in
+                        Button { store.update(sheetID) { $0.templateLinePattern = pattern } } label: {
+                            Label(pattern.rawValue.capitalized + " template line", systemImage: sheet?.templateLinePattern == pattern ? "checkmark" : "line.diagonal")
+                        }
                     }
                 }
+                Divider()
+                AppearanceMenu()
             } label: { Image(systemName: "slider.horizontal.3") }
-            .help("Stroke width, paper style, and appearance").accessibilityLabel("Paper and appearance")
+            .help("Nib width, line style, paper templates, and appearance").accessibilityLabel("Paper and appearance")
+        }
+    }
+
+    private func templateTitle(_ template: PageTemplate) -> String {
+        switch template {
+        case .none: return "No template"
+        case .centerDivider: return "Center divider"
+        case .leftMargin: return "Left margin"
         }
     }
 

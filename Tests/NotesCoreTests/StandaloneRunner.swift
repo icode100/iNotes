@@ -79,7 +79,19 @@ struct StandaloneTestRunner {
         let pages = PageContentTests()
         let geometry = PageSelectionGeometryTests()
         let backups = BackupArchiveTests()
+        let presentation = PagePresentationTests()
+        let inkValidation = InkValidationTests()
         let tests: [(String, XCTestCase, () throws -> Void)] = [
+            ("legacy line and template defaults", presentation, presentation.testLegacyArchivesDefaultToSolidLinesWithoutTemplates),
+            ("line and template archive import duplicate", presentation, presentation.testLineAndTemplateChoicesSurviveSaveImportAndDuplicate),
+            ("line pattern clipboard and selection", presentation, presentation.testPatternSurvivesClipboardAndSelectionTranslation),
+            ("template compatibility and bounded dash lengths", presentation, presentation.testTemplateCompatibilityAndDashLengthsAreBounded),
+            ("empty ink rejected before erase", inkValidation, inkValidation.testEmptyStrokeRejectedThroughArchiveAndClipboardBeforeEditing),
+            ("extreme finite ink rejected", inkValidation, inkValidation.testExtremeFiniteCoordinatesRejectedAtEveryPortableBoundary),
+            ("invalid ink values rejected", inkValidation, inkValidation.testInvalidWidthPressureAndNonfiniteGeometryAreRejected),
+            ("ink stroke and sample budgets", inkValidation, inkValidation.testStrokeAndAggregatePointBudgets),
+            ("empty pages and legitimate dots preserved", inkValidation, inkValidation.testEmptyPageOnePointDotsAndBoundaryCoordinatesStillRoundTrip),
+            ("global vintage paper and contrast", themes, themes.testGlobalPaperPreferenceAndVintageContrast),
             ("mixed page archive and search", pages, pages.testMixedPageArchiveRoundTripAndSearch),
             ("legacy page object migration", pages, pages.testLegacyArchiveDefaultsAndPromotesBeforeAddingObjects),
             ("invalid page objects", pages, pages.testInvalidPageObjectsRejectWithoutChangingSavedNote),

@@ -1,13 +1,31 @@
 import Foundation
 
+/// One application-wide paper preference; notebook colors remain canonical.
+public enum PageColorScheme: String, CaseIterable, Sendable {
+    case system, vintage
+
+    public var displayName: String { self == .system ? "System theme" : "Vintage" }
+
+    public func resolved(isDark: Bool) -> PageTheme {
+        self == .vintage ? .vintage : (isDark ? .dark : .light)
+    }
+}
+
 /// A display theme for paper and ink. Stored strokes keep their original colors;
 /// callers resolve a color while drawing rather than rewriting a notebook.
 public enum PageTheme: String, CaseIterable, Sendable {
-    case light, dark
+    case light, dark, vintage
 
-    public var paperHex: String { self == .light ? "#FFFFFF" : "#1B2027" }
-    public var ruleHex: String { self == .light ? "#8E9FB3" : "#63768A" }
-    public var textHex: String { self == .light ? "#20242A" : "#EDF1F5" }
+    public var paperHex: String {
+        switch self { case .light: "#FFFFFF"; case .dark: "#1B2027"; case .vintage: "#F3E9D2" }
+    }
+    public var ruleHex: String {
+        switch self { case .light: "#8E9FB3"; case .dark: "#63768A"; case .vintage: "#A59679" }
+    }
+    public var textHex: String { self == .dark ? "#EDF1F5" : "#20242A" }
+    public var templateHex: String {
+        switch self { case .light: "#9C4C57"; case .dark: "#E4A0AB"; case .vintage: "#995D47" }
+    }
 
     private static let darkPalette: [String: String] = [
         "#30343B": "#EDF1F5",
@@ -41,7 +59,7 @@ public enum PageTheme: String, CaseIterable, Sendable {
     /// Reverses only the known display palette. Custom color lightening is not
     /// reversible: editors must retain canonical color metadata for those colors.
     public func canonicalInkHex(_ displayed: String) -> String {
-        guard let rgb = RGB(hex: displayed) else { return self == .light ? textHex : "#30343B" }
+        guard let rgb = RGB(hex: displayed) else { return self == .dark ? "#30343B" : textHex }
         let normalized = rgb.hex
         guard self == .dark else { return normalized }
         return Self.darkPalette.first(where: { $0.value == normalized })?.key ?? normalized

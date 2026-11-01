@@ -37,6 +37,7 @@ struct iNotesApp: App {
                     print(try EquationDiagnostics.run())
                     print(try ToolShortcutDiagnostics.run())
                     print(try RuledTextDiagnostics.run())
+                    print(try WorkspaceDiagnostics.run())
                 }
                 print(try StoreDiagnostics.run())
                 print(try BackupDiagnostics.run())

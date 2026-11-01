@@ -125,7 +125,7 @@ struct InkEditor: NSViewRepresentable {
 enum InkExport {
     static let paperSize = NSSize(width: 1600, height: 2200)
 
-    static func png(strokes: [InkStroke], paper: InkPaper = .dotted, theme: PageTheme = .light) -> Data? {
+    static func png(strokes: [InkStroke], paper: InkPaper = .dotted, theme: PageTheme = .light, pageTemplate: PageTemplate = .none, templateLinePattern: LinePattern = .solid) -> Data? {
         guard let bitmap = NSBitmapImageRep(
             bitmapDataPlanes: nil, pixelsWide: Int(paperSize.width), pixelsHigh: Int(paperSize.height),
             bitsPerSample: 8, samplesPerPixel: 4, hasAlpha: true, isPlanar: false,
@@ -135,7 +135,7 @@ enum InkExport {
         NSGraphicsContext.current = context
         context.cgContext.translateBy(x: 0, y: paperSize.height)
         context.cgContext.scaleBy(x: 1, y: -1)
-        InkRenderer.draw(strokes: strokes, paper: paper, in: NSRect(origin: .zero, size: paperSize), theme: theme)
+        InkRenderer.draw(strokes: strokes, paper: paper, in: NSRect(origin: .zero, size: paperSize), theme: theme, pageTemplate: pageTemplate, templateLinePattern: templateLinePattern)
         context.flushGraphics()
         NSGraphicsContext.restoreGraphicsState()
         return bitmap.representation(using: .png, properties: [:])
@@ -162,7 +162,7 @@ enum InkRenderer {
         return path.bounds.insetBy(dx: -width / 2, dy: -width / 2)
     }
 
-    static func draw(strokes: [InkStroke], paper: InkPaper, in requestedRect: NSRect, drawsPaper: Bool = true, theme: PageTheme = .light) {
+    static func draw(strokes: [InkStroke], paper: InkPaper, in requestedRect: NSRect, drawsPaper: Bool = true, theme: PageTheme = .light, pageTemplate: PageTemplate = .none, templateLinePattern: LinePattern = .solid, pageBounds: NSRect? = nil) {
         // Layer-backed offscreen rendering can request an effectively infinite
         // dirty rectangle. Intersect the real clip before constructing a grid.
         var dirtyRect = requestedRect
@@ -208,6 +208,23 @@ enum InkRenderer {
             }
             }
         }
+        if drawsPaper {
+            let extent = pageBounds ?? NSRect(origin: .zero, size: InkExport.paperSize)
+            let effective = pageTemplate.effective(on: PaperStyle(rawValue: paper.rawValue) ?? .blank)
+            if effective != .none {
+                let x = effective == .centerDivider ? extent.midX : extent.minX + 80
+                if x >= dirtyRect.minX - 2 && x <= dirtyRect.maxX + 2 {
+                    let divider = NSBezierPath()
+                    divider.move(to: NSPoint(x: x, y: extent.minY))
+                    divider.line(to: NSPoint(x: x, y: min(extent.maxY, InkGeometryLimits.maximumPageDimension)))
+                    divider.lineWidth = 2
+                    divider.lineCapStyle = .round
+                    applyPattern(templateLinePattern, width: 2, to: divider)
+                    color(theme.templateHex).setStroke()
+                    divider.stroke()
+                }
+            }
+        }
         for stroke in strokes { draw(stroke, theme: theme) }
     }
 
@@ -220,6 +237,18 @@ enum InkRenderer {
             let width = baseWidth * pressure(first.pressure)
             inkColor.withAlphaComponent(stroke.style == .highlighter ? highlighterAlpha : stroke.style == .pencil ? 0.7 : 1).set()
             NSBezierPath(ovalIn: NSRect(x: first.x - width / 2, y: first.y - width / 2, width: width, height: width)).fill()
+            return
+        }
+        if stroke.linePattern != .solid {
+            let path = NSBezierPath()
+            path.move(to: NSPoint(x: first.x, y: first.y))
+            for index in 1..<stroke.points.count { appendCurve(to: path, points: stroke.points, at: index) }
+            path.lineWidth = baseWidth
+            path.lineCapStyle = .round
+            path.lineJoinStyle = .round
+            applyPattern(stroke.linePattern, width: baseWidth, to: path)
+            inkColor.withAlphaComponent(stroke.style == .highlighter ? highlighterAlpha : 1).setStroke()
+            path.stroke()
             return
         }
         // Translucent tools are drawn in ONE operation, so neighboring segments
@@ -253,6 +282,11 @@ enum InkRenderer {
         }
     }
 
+    private static func applyPattern(_ pattern: LinePattern, width: Double, to path: NSBezierPath) {
+        let lengths = pattern.dashLengths(width: width).map { CGFloat($0) }
+        if !lengths.isEmpty { path.setLineDash(lengths, count: lengths.count, phase: 0) }
+    }
+
     private static func appendCurve(to path: NSBezierPath, points: [InkPoint], at index: Int) {
         let p0 = points[max(0, index - 2)], p1 = points[index - 1]
         let p2 = points[index], p3 = points[min(points.count - 1, index + 1)]
@@ -280,6 +314,7 @@ final class InkDocumentView: NSView {
     var strokes: [InkStroke] = []
     var colorHex = "#314D43" { didSet { if colorHex != oldValue { invalidateTipCursor() } } }
     var lineWidth: Double = 2.5 { didSet { if lineWidth != oldValue { invalidateTipCursor() } } }
+    var linePattern: LinePattern = .solid
     var tool: InkTool = .pen { didSet { if tool != oldValue { invalidateTipCursor() } } }
     var paper: InkPaper = .dotted
     var theme: PageTheme = .light {
@@ -400,7 +435,8 @@ final class InkDocumentView: NSView {
         } else {
             isLineGesture = tool == .line
             activeStroke = InkStroke(points: [point], colorHex: colorHex, width: lineWidth,
-                                     style: InkStyle(rawValue: tool.rawValue) ?? .pen)
+                                     style: InkStyle(rawValue: tool.rawValue) ?? .pen,
+                                     linePattern: tool == .line ? linePattern : .solid)
             needsDisplay = true
         }
     }
@@ -510,6 +546,8 @@ final class InkDocumentView: NSView {
     private func erase(at point: InkPoint) {
         let previousCount = strokes.count
         strokes.removeAll { stroke in
+            // Defensive consumer guard for legacy or in-memory malformed data.
+            guard !stroke.points.isEmpty else { return true }
             let radius = max(12, stroke.width / 2 + 8)
             if stroke.points.count == 1, let only = stroke.points.first {
                 return hypot(only.x - point.x, only.y - point.y) <= radius

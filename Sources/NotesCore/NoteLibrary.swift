@@ -267,12 +267,7 @@ public struct NoteLibrary: Codable, Equatable, Sendable {
             }
         }
         if previous?.strokes != node.strokes {
-            for stroke in node.strokes {
-                guard stroke.width.isFinite, stroke.width > 0, stroke.width <= 100,
-                      stroke.points.allSatisfy({ $0.x.isFinite && $0.y.isFinite && $0.pressure.isFinite && (0...1).contains($0.pressure) }) else {
-                    throw LibraryError.invalidData("A drawing contains invalid coordinates or pressure.")
-                }
-            }
+            try InkGeometryLimits.validate(node.strokes)
         }
         guard node.createdAt.timeIntervalSince1970.isFinite, node.updatedAt.timeIntervalSince1970.isFinite else {
             throw LibraryError.invalidData("Invalid note date.")

@@ -37,6 +37,9 @@ extension Notification.Name {
 
 struct ContentView: View {
     @EnvironmentObject private var store: NotesStore
+    @StateObject private var presentation: EditorPresentation
+    @Environment(\.colorScheme) private var colorScheme
+    @AppStorage("workspaceTheme") private var workspaceTheme = "classic"
     @ViewState private var nameRequest: NameRequest?
     @ViewState private var showImporter = false
     @ViewState private var backupFolderDestination: BackupDestination?
@@ -46,7 +49,13 @@ struct ContentView: View {
     @ViewState private var showRecovery = false
     @ViewState private var showEmptyTrash = false
     @ViewState private var columnVisibility: NavigationSplitViewVisibility = .all
+    @ViewState private var previousColumns: NavigationSplitViewVisibility = .all
     @FocusState private var searchFocused: Bool
+
+    @MainActor
+    init(presentation: EditorPresentation? = nil) {
+        _presentation = StateObject(wrappedValue: presentation ?? EditorPresentation())
+    }
 
     var body: some View {
         NavigationSplitView(columnVisibility: $columnVisibility) {
@@ -54,21 +63,42 @@ struct ContentView: View {
         } content: {
             sheetList.navigationSplitViewColumnWidth(min: 210, ideal: 260, max: 360)
         } detail: {
-            if let sheet = store.selectedSheet {
-                SheetDetail(sheetID: sheet.id).id(sheet.id)
-            } else {
-                ContentUnavailableView {
-                    Label("Room for a new idea", systemImage: "square.and.pencil")
-                } description: {
-                    Text("Choose a sheet, or make a new one in a chapter or topic.")
-                } actions: {
-                    Button("New sheet", action: newSheet).buttonStyle(.borderedProminent)
+            Group {
+                if let sheet = store.selectedSheet {
+                    SheetDetail(sheetID: sheet.id).id(sheet.id)
+                } else {
+                    ContentUnavailableView {
+                        Label("Room for a new idea", systemImage: "square.and.pencil")
+                    } description: {
+                        Text("Choose a sheet, or make a new one in a chapter or topic.")
+                    } actions: {
+                        Button("New sheet", action: newSheet).buttonStyle(.borderedProminent)
+                    }
                 }
             }
+            #if os(macOS)
+            .background { WorkspaceNavigationChrome(fullPage: presentation.fullPage) }
+            #endif
         }
-        .tint(Color.accentColor)
+        .environmentObject(presentation)
+        .tint((WorkspaceTheme(rawValue: workspaceTheme) ?? .classic).accent(isDark: colorScheme == .dark))
+        #if !os(macOS)
+        .onChange(of: presentation.fullPage) { _, fullPage in
+            if fullPage { previousColumns = columnVisibility; columnVisibility = .detailOnly }
+            else { columnVisibility = previousColumns }
+        }
+        #endif
+        .onChange(of: store.selectedSheet?.id) { _, selectedID in
+            if selectedID == nil { presentation.fullPage = false }
+        }
+        #if os(macOS)
+        .toolbar(presentation.fullPage ? .hidden : .visible, for: .windowToolbar)
+        #else
+        .toolbar(presentation.fullPage ? .hidden : .visible, for: .navigationBar)
+        #endif
         .toolbar {
             ToolbarItemGroup(placement: .primaryAction) {
+                AppearanceMenu()
                 Menu {
                     Button("New sheet", systemImage: "doc.badge.plus", action: newSheet)
                     if let folder = store.folders.first(where: { $0.id == store.folderID }) {
@@ -176,7 +206,7 @@ struct ContentView: View {
                     Button("Empty Trash…", role: .destructive) { showEmptyTrash = true }
                         .disabled(!store.library.nodes.contains { $0.isTrashed })
                 }
-            }.listStyle(.sidebar)
+            }.listStyle(.sidebar).scrollContentBackground(workspaceTheme == "classic" ? .visible : .hidden)
             VStack(alignment: .leading, spacing: 5) {
                 Label(store.saveStatus, systemImage: store.dirty ? "circle.dotted" : "checkmark.circle")
                     .font(.caption).foregroundStyle(store.dirty ? Color.orange : Color.secondary)
@@ -193,7 +223,7 @@ struct ContentView: View {
                 }
                 Text("iNotes · local first").font(.caption2).foregroundStyle(.tertiary)
             }.frame(maxWidth: .infinity, alignment: .leading).padding(16)
-        }.navigationTitle("iNotes")
+        }.background { WorkspaceScenery() }.navigationTitle("iNotes")
     }
 
     private func parentIsVisible(_ node: NoteNode) -> Bool {
@@ -236,7 +266,7 @@ struct ContentView: View {
                         }
                     }
                 }
-            }.listStyle(.inset)
+            }.listStyle(.inset).scrollContentBackground(workspaceTheme == "classic" ? .visible : .hidden)
             if store.visibleSheets.isEmpty {
                 Text(store.filter == .trash ? "Trash is empty" : store.search.isEmpty ? "No sheets here yet" : "No matching notes")
                     .font(.callout).foregroundStyle(.secondary).padding()
@@ -247,6 +277,7 @@ struct ContentView: View {
                 if store.filter != .trash { Button(action: newSheet) { Label("New sheet", systemImage: "square.and.pencil") }.labelStyle(.iconOnly).buttonStyle(.plain).help("New sheet (⌘N)") }
             }.padding(12)
         }
+        .background { WorkspaceScenery() }
         .navigationTitle(store.search.isEmpty ? (store.library.node(id: store.folderID ?? UUID())?.title ?? store.filter.rawValue) : "Search results")
     }
 

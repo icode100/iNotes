@@ -7,6 +7,23 @@ import XCTest
 final class PageThemeTests: XCTestCase {
     private let palette = ["#30343B", "#314D43", "#3869B2", "#B14D55", "#E2B84D"]
 
+    func testGlobalPaperPreferenceAndVintageContrast() {
+        XCTAssertEqual(PageColorScheme.system.resolved(isDark: false), .light)
+        XCTAssertEqual(PageColorScheme.system.resolved(isDark: true), .dark)
+        XCTAssertEqual(PageColorScheme.vintage.resolved(isDark: false), .vintage)
+        XCTAssertEqual(PageColorScheme.vintage.resolved(isDark: true), .vintage)
+        XCTAssertTrue(contrast(PageTheme.vintage.textHex, PageTheme.vintage.paperHex) >= 7)
+        XCTAssertTrue(contrast(PageTheme.vintage.ruleHex, PageTheme.vintage.paperHex) >= 2.3)
+        for theme in PageTheme.allCases {
+            XCTAssertTrue(contrast(theme.templateHex, theme.paperHex) >= 3)
+        }
+        for color in palette {
+            XCTAssertEqual(PageTheme.vintage.resolvedInkHex(color), color)
+            XCTAssertEqual(PageTheme.vintage.canonicalInkHex(color), color)
+        }
+        XCTAssertEqual(PageTheme.vintage.resolvedInkHex("invalid"), PageTheme.vintage.textHex)
+    }
+
     func testDefaultTextAndDarkInkContrast() {
         XCTAssertTrue(contrast(PageTheme.dark.textHex, PageTheme.dark.paperHex) >= 7)
         XCTAssertTrue(contrast(PageTheme.light.textHex, PageTheme.light.paperHex) >= 7)

@@ -233,6 +233,19 @@ enum EditorDiagnostics {
         guard let page = findPage(sharedHost) else { throw Failure(description: "Shared page did not mount") }
         guard let pageScroll = page.enclosingScrollView else { throw Failure(description: "Shared page scroll view did not mount") }
         try check(page.textView.string == pageText && page.inkView.strokes == pageStrokes, "text and ink mount on the same paper")
+        try check(pageScroll.contentView is CenteredPageClipView, "shared page uses the centering clip without a replacement document hierarchy")
+        pageScroll.magnification = 0.25
+        pageScroll.contentView.scroll(to: .zero)
+        pageScroll.layoutSubtreeIfNeeded()
+        try check(abs(pageScroll.contentView.bounds.midX - page.frame.midX) < 1,
+                  "zoomed-out paper is horizontally centered in its workspace")
+        try check(pageScroll.documentView === page && page.textView.superview === page,
+                  "centering preserves page input and text tracking owners")
+        let constrained = pageScroll.contentView.constrainBoundsRect(NSRect(x: 0, y: 0, width: 2400, height: 2600))
+        try check(abs(constrained.midX - page.frame.midX) < 1 && abs(constrained.midY - page.frame.midY) < 1,
+                  "page centers in both dimensions whenever the whole sheet fits")
+        pageScroll.magnification = 1
+        pageScroll.contentView.scroll(to: .zero)
         try check(!page.textView.drawsBackground && !page.inkView.drawsPaper
                   && page.subviews.firstIndex(of: page.textView)! < page.subviews.firstIndex(of: page.inkView)!
                   && page.subviews.last === page.selectionView && !page.selectionView.isOpaque,
@@ -440,6 +453,94 @@ enum EditorDiagnostics {
         lineCanvas.mouseUp(with: try event(.leftMouseUp, x: 260, y: 200, pressure: 0, modifiers: .shift))
         let shifted = committedLines.last!.points
         try check(shifted[0].y == shifted[1].y, "Shift forces the closest table axis")
+        lineCanvas.linePattern = .dashed
+        lineCanvas.mouseDown(with: down)
+        lineCanvas.mouseUp(with: try event(.leftMouseUp, x: 400, y: 100, pressure: 0))
+        try check(committedLines.last?.linePattern == .dashed, "straight lines retain the selected dash pattern")
+        lineCanvas.undo(nil)
+        try check(committedLines.last?.linePattern == .solid, "patterned-line undo restores prior lines")
+        lineCanvas.redo(nil)
+        try check(committedLines.last?.linePattern == .dashed, "patterned-line redo preserves dash metadata")
+        lineCanvas.tool = .pen
+        lineCanvas.mouseDown(with: down); lineCanvas.mouseUp(with: up)
+        try check(committedLines.last?.linePattern == .solid, "line pattern selection does not unexpectedly dash freehand pen strokes")
+        let malformedCanvas = InkDocumentView(frame: NSRect(origin: .zero, size: InkExport.paperSize))
+        // Create the legitimate dot through native input so its page point
+        // follows AppKit's flipped-coordinate conversion on an unattached view.
+        malformedCanvas.tool = .pen
+        malformedCanvas.mouseDown(with: down); malformedCanvas.mouseUp(with: down)
+        try check(malformedCanvas.strokes.count == 1 && malformedCanvas.strokes[0].points.count == 1,
+                  "one-point pen gesture remains a valid visible dot")
+        malformedCanvas.strokes.insert(InkStroke(points: []), at: 0)
+        malformedCanvas.tool = .eraser
+        malformedCanvas.mouseDown(with: down); malformedCanvas.mouseUp(with: down)
+        try check(malformedCanvas.strokes.isEmpty, "eraser safely removes a legacy empty stroke and a valid one-point dot without constructing an invalid range")
+        let boundedPage = UnifiedMacPageView(frame: NSRect(origin: .zero, size: InkExport.paperSize))
+        boundedPage.inkView.strokes = [InkStroke(points: [InkPoint(x: 20, y: 1e12)])]
+        boundedPage.resizePaperToContent()
+        try check(boundedPage.bounds.height == InkGeometryLimits.maximumPageDimension,
+                  "in-memory extreme geometry cannot create an unbounded Mac page or export")
+
+        func renderAppearanceSample(strokes: [InkStroke] = [], paper: InkPaper = .blank,
+                                    theme: PageTheme = .light, template: PageTemplate = .none,
+                                    pattern: LinePattern = .solid) -> NSBitmapImageRep? {
+            guard let bitmap = NSBitmapImageRep(bitmapDataPlanes: nil, pixelsWide: 320, pixelsHigh: 240,
+                                               bitsPerSample: 8, samplesPerPixel: 4, hasAlpha: true, isPlanar: false,
+                                               colorSpaceName: .deviceRGB, bytesPerRow: 0, bitsPerPixel: 0),
+                  let graphics = NSGraphicsContext(bitmapImageRep: bitmap) else { return nil }
+            NSGraphicsContext.saveGraphicsState()
+            NSGraphicsContext.current = graphics
+            let region = NSRect(x: 0, y: 0, width: 320, height: 240)
+            graphics.cgContext.clip(to: region)
+            InkRenderer.draw(strokes: strokes, paper: paper, in: region, theme: theme,
+                             pageTemplate: template, templateLinePattern: pattern, pageBounds: region)
+            graphics.flushGraphics()
+            NSGraphicsContext.restoreGraphicsState()
+            guard let data = bitmap.representation(using: .png, properties: [:]) else { return nil }
+            return NSBitmapImageRep(data: data)
+        }
+        func pixelDistance(_ a: NSColor?, _ b: NSColor?) -> CGFloat {
+            guard let a = a?.usingColorSpace(.sRGB), let b = b?.usingColorSpace(.sRGB) else { return 0 }
+            return abs(a.redComponent - b.redComponent) + abs(a.greenComponent - b.greenComponent) + abs(a.blueComponent - b.blueComponent)
+        }
+        var lineCoverage: [LinePattern: Int] = [:]
+        for pattern in LinePattern.allCases {
+            let stroke = InkStroke(points: [InkPoint(x: 20, y: 120), InkPoint(x: 300, y: 120)],
+                                   colorHex: "#30343B", width: 4, linePattern: pattern)
+            guard let sample = renderAppearanceSample(strokes: [stroke]) else { throw Failure(description: "Line pattern did not render") }
+            lineCoverage[pattern] = (25..<295).filter { x in
+                pixelDistance(sample.colorAt(x: x, y: 119), sample.colorAt(x: x, y: 110)) > 0.5
+            }.count
+        }
+        try check(lineCoverage[.solid]! > 260 && lineCoverage[.dashed]! > 80 && lineCoverage[.dashed]! < 250
+                  && lineCoverage[.dotted]! > 30 && lineCoverage[.dotted]! < lineCoverage[.dashed]!,
+                  "solid, dashed and dotted strokes render continuous, dashed and round-dot coverage respectively")
+        for theme in PageTheme.allCases {
+            for paper in InkPaper.allCases {
+                for pattern in LinePattern.allCases {
+                    guard let sample = renderAppearanceSample(paper: paper, theme: theme, template: .centerDivider, pattern: pattern) else {
+                        throw Failure(description: "Template sample did not render")
+                    }
+                    let distinctPixels = (2..<238).filter { y in
+                        pixelDistance(sample.colorAt(x: 160, y: y), sample.colorAt(x: 165, y: y)) > 0.15
+                    }.count
+                    try check(distinctPixels > 20, "\(theme.rawValue) \(paper.rawValue) paper has a visible \(pattern.rawValue) central divider")
+                }
+            }
+            for paper in InkPaper.allCases {
+                guard let sample = renderAppearanceSample(paper: paper, theme: theme, template: .leftMargin),
+                      let plain = renderAppearanceSample(paper: paper, theme: theme) else { throw Failure(description: "Margin sample did not render") }
+                let changedPixels = (2..<238).filter { y in
+                    pixelDistance(sample.colorAt(x: 80, y: y), plain.colorAt(x: 80, y: y)) > 0.15
+                }.count
+                try check((paper == .blank || paper == .ruled) ? changedPixels > 20 : changedPixels == 0,
+                          "left margin is restricted to ruled and plain paper in \(theme.rawValue)")
+            }
+        }
+        guard let vintageSample = renderAppearanceSample(theme: .vintage) else { throw Failure(description: "Vintage paper did not render") }
+        let vintagePixel = vintageSample.colorAt(x: 10, y: 10)!.usingColorSpace(.sRGB)!
+        try check(vintagePixel.redComponent > 0.9 && vintagePixel.blueComponent < 0.9,
+                  "vintage paper renders off-white independently of the system appearance")
         // Theme rendering is a view transformation: all original pen colors,
         // geometry, and undo snapshots stay canonical when the paper changes.
         let canonicalThemeStrokes = [InkStroke(points: [InkPoint(x: 100, y: 180), InkPoint(x: 300, y: 180)], colorHex: "#30343B", width: 6)]
@@ -627,6 +728,25 @@ enum EditorDiagnostics {
         #endif
         selector.history.undo()
         try check(selector.content.pencilKitData == nativeSelectionContent.pencilKitData, "native duplicate undo restores original archived bytes")
+
+        let savedNativeContent = selector.content
+        let writesBeforeInvalid = selectionWrites
+        selector.history.removeAllActions()
+        var invalidNative = PortableInkConverter.drawing(from: [untouchedInk]).strokes[0]
+        invalidNative.transform = CGAffineTransform(translationX: 200_000, y: 0)
+        let malformedNativeContent = PageContent(strokes: [untouchedInk], pencilKitData: PKDrawing(strokes: [invalidNative]).dataRepresentation())
+        selector.commit(malformedNativeContent, action: "Invalid Native Import")
+        try check(selector.content == savedNativeContent && selectionWrites == writesBeforeInvalid && !selector.history.canUndo,
+                  "rejected native geometry cannot alter selection content, persisted writes or undo history")
+        selector.load(malformedNativeContent)
+        selector.selection = MacPageSelection(strokes: [untouchedInk.id], nativeStrokes: [0])
+        let rejectedMove = selector.translated(malformedNativeContent, selection: selector.selection, dx: 10, dy: 10)
+        try check(rejectedMove == malformedNativeContent && selector.clipboardPayload() == nil,
+                  "invalid native selection cannot be silently converted into empty portable ink on move or copy")
+        selector.perform(.delete)
+        try check(selector.content == malformedNativeContent && selectionWrites == writesBeforeInvalid,
+                  "invalid native delete leaves the original stored page intact")
+        selector.load(savedNativeContent)
 
         // Native typing, native ink and spatial page edits must share one
         // chronology even after switching tools and first responders.

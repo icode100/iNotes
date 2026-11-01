@@ -133,6 +133,7 @@ final class MacPageSelectionController: NSObject {
 
     func translated(_ base: PageContent, selection selected: MacPageSelection, dx: Double, dy: Double) -> PageContent {
         guard dx.isFinite, dy.isFinite else { return base }
+        if base.pencilKitData != nil, nativeDrawing(base) == nil { return content }
         var points = base.strokes.filter { selected.strokes.contains($0.id) }.flatMap(\.points)
         points += base.textBoxes.filter { selected.textBoxes.contains($0.id) }.map { InkPoint(x: $0.x, y: $0.y) }
         points += base.equations.filter { selected.equations.contains($0.id) }.map { InkPoint(x: $0.x, y: $0.y) }
@@ -159,8 +160,9 @@ final class MacPageSelectionController: NSObject {
                 return value
             }
             let native = PKDrawing(strokes: moved)
+            guard let portable = try? PortableInkConverter.validatedStrokes(from: native) else { return content }
             result.pencilKitData = native.dataRepresentation()
-            result.strokes = PortableInkConverter.strokes(from: native)
+            result.strokes = portable
         }
         for index in result.textBoxes.indices where selected.textBoxes.contains(result.textBoxes[index].id) {
             result.textBoxes[index].x = max(0, min(100_000, base.textBoxes[index].x + dx))
@@ -194,6 +196,10 @@ final class MacPageSelectionController: NSObject {
     func commit(_ value: PageContent, previous: PageContent? = nil, action: String) {
         let before = previous ?? content
         guard value != before else { cancelPreview(); return }
+        // Reject the whole transaction before history, view or persisted data
+        // change. A failed native conversion must never become empty ink.
+        guard (try? InkGeometryLimits.validate(value.strokes)) != nil else { cancelPreview(); NSSound.beep(); return }
+        if value.pencilKitData != nil, nativeDrawing(value) == nil { cancelPreview(); NSSound.beep(); return }
         let needsGroup = history.groupingLevel == 0
         if needsGroup { history.beginUndoGrouping() }
         history.registerUndo(withTarget: self) { target in target.commit(before, previous: value, action: action) }
@@ -260,6 +266,7 @@ final class MacPageSelectionController: NSObject {
 
     func clipboardPayload() -> PageClipboardPayload? {
         guard !selection.isEmpty else { return nil }
+        if content.pencilKitData != nil, nativeDrawing(content) == nil { return nil }
         let promoted = promotedContent()
         let boxes = promoted.0.textBoxes.filter { promoted.1.textBoxes.contains($0.id) }
         let text = NSMutableAttributedString(string: "")
@@ -273,18 +280,21 @@ final class MacPageSelectionController: NSObject {
         var native: Data?
         if let drawing = nativeDrawing(content), !selection.nativeStrokes.isEmpty {
             let selected = PKDrawing(strokes: drawing.strokes.enumerated().filter { selection.nativeStrokes.contains($0.offset) }.map(\.element))
-            native = selected.dataRepresentation(); ink = PortableInkConverter.strokes(from: selected)
+            guard let portable = try? PortableInkConverter.validatedStrokes(from: selected) else { return nil }
+            native = selected.dataRepresentation(); ink = portable
         }
         return PageClipboardPayload(text: plain, rtfData: rtf(text), strokes: ink, pencilKitData: native, textBoxes: boxes, equations: equations)
     }
 
     private func deleteSelection() {
         guard !selection.isEmpty else { return }
+        if content.pencilKitData != nil, nativeDrawing(content) == nil { NSSound.beep(); return }
         var value = content
         value.strokes.removeAll { selection.strokes.contains($0.id) }
         if let drawing = nativeDrawing(content), !selection.nativeStrokes.isEmpty {
             let native = PKDrawing(strokes: drawing.strokes.enumerated().filter { !selection.nativeStrokes.contains($0.offset) }.map(\.element))
-            value.pencilKitData = native.dataRepresentation(); value.strokes = PortableInkConverter.strokes(from: native)
+            guard let portable = try? PortableInkConverter.validatedStrokes(from: native) else { NSSound.beep(); return }
+            value.pencilKitData = native.dataRepresentation(); value.strokes = portable
         }
         value.textBoxes.removeAll { selection.textBoxes.contains($0.id) }
         value.equations.removeAll { selection.equations.contains($0.id) }
@@ -317,7 +327,7 @@ final class MacPageSelectionController: NSObject {
             value.strokes.append(stroke); selected.strokes.insert(stroke.id)
         }
         if let addition = nativeAddition {
-            let before = nativeDrawing(content) ?? PortableInkConverter.drawing(from: content.strokes)
+            guard let before = try? PortableInkConverter.validatedDrawing(content.pencilKitData, fallback: content.strokes) else { NSSound.beep(); return }
             let moved = addition.strokes.map { stroke -> PKStroke in
                 let transform = stroke.transform.concatenating(CGAffineTransform(translationX: offsetX, y: offset))
                 #if compiler(>=6.4)
@@ -330,7 +340,8 @@ final class MacPageSelectionController: NSObject {
                 return PKStroke(ink: stroke.ink, path: stroke.path, transform: transform, mask: stroke.mask, randomSeed: stroke.randomSeed)
             }
             let combined = PKDrawing(strokes: before.strokes + moved)
-            value.pencilKitData = combined.dataRepresentation(); value.strokes = PortableInkConverter.strokes(from: combined)
+            guard let portable = try? PortableInkConverter.validatedStrokes(from: combined) else { NSSound.beep(); return }
+            value.pencilKitData = combined.dataRepresentation(); value.strokes = portable
             selected.nativeStrokes = Set(before.strokes.count..<combined.strokes.count)
             selected.strokes = Set(value.strokes.suffix(payload.strokes.count).map(\.id))
         }
@@ -354,7 +365,10 @@ final class MacPageSelectionController: NSObject {
         commit(value, action: action)
     }
 
-    private func nativeDrawing(_ content: PageContent) -> PKDrawing? { content.pencilKitData.flatMap { try? PKDrawing(data: $0) } }
+    private func nativeDrawing(_ content: PageContent) -> PKDrawing? {
+        guard content.pencilKitData != nil else { return nil }
+        return try? PortableInkConverter.validatedDrawing(content.pencilKitData, fallback: content.strokes)
+    }
 
     private func canonicalBody() -> NSAttributedString {
         if let page, page.textView.string == content.text { return ThemeTextAttributes.canonical(page.textView.attributedString(), theme: page.theme) }

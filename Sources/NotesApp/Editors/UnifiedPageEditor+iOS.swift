@@ -18,6 +18,9 @@ struct UnifiedPageEditor: UIViewRepresentable {
     var lineWidth: Double = 2.5
     var paper: InkPaper = .dotted
     var theme: PageTheme = .light
+    var linePattern: LinePattern = .solid
+    var pageTemplate: PageTemplate = .none
+    var templateLinePattern: LinePattern = .solid
     var onTextChange: ((String, Data?) -> Void)? = nil
     var onInkChange: (([InkStroke], Data?) -> Void)? = nil
     var onInputChange: ((String) -> Void)? = nil
@@ -28,12 +31,14 @@ struct UnifiedPageEditor: UIViewRepresentable {
          textBoxes: Binding<[PageTextBox]> = .constant([]), equations: Binding<[NoteEquation]> = .constant([]),
          tool: InkTool = .pen, colorHex: String = "#314D43", lineWidth: Double = 2.5,
          paper: InkPaper = .dotted, theme: PageTheme = .light,
+         linePattern: LinePattern = .solid, pageTemplate: PageTemplate = .none, templateLinePattern: LinePattern = .solid,
          onTextChange: ((String, Data?) -> Void)? = nil, onInkChange: (([InkStroke], Data?) -> Void)? = nil,
          onInputChange: ((String) -> Void)? = nil, onPageChange: ((PageContent) -> Void)? = nil,
          onEquationEdit: ((NoteEquation) -> Void)? = nil) {
         _text = text; _rtfData = rtfData; _strokes = strokes; _pencilKitData = pencilKitData
         _textBoxes = textBoxes; _equations = equations; self.tool = tool; self.colorHex = colorHex
         self.lineWidth = lineWidth; self.paper = paper; self.theme = theme
+        self.linePattern = linePattern; self.pageTemplate = pageTemplate; self.templateLinePattern = templateLinePattern
         self.onTextChange = onTextChange; self.onInkChange = onInkChange; self.onInputChange = onInputChange
         self.onPageChange = onPageChange; self.onEquationEdit = onEquationEdit
     }
@@ -68,6 +73,7 @@ struct UnifiedPageEditor: UIViewRepresentable {
         private let picker = PKToolPicker()
         private var isLoading = false
         private var nativeToolActive = false
+        private var rejectedDrawing = false
         private var lastData: Data?
         private var lastStrokes: [InkStroke] = []
         private var expectedDrawingData: Data?
@@ -189,6 +195,8 @@ struct UnifiedPageEditor: UIViewRepresentable {
             view.panGestureRecognizer.minimumNumberOfTouches = parent.tool == .text || selecting ? 2 : 1
             view.page.paper.style = parent.paper
             view.page.paper.theme = theme
+            view.page.paper.pageTemplate = parent.pageTemplate
+            view.page.paper.templateLinePattern = parent.templateLinePattern
             view.page.overrideUserInterfaceStyle = theme == .dark ? .dark : .light
             editor.overrideUserInterfaceStyle = view.page.overrideUserInterfaceStyle
             // PencilKit transforms ink colors itself when a canvas is dark.
@@ -203,8 +211,7 @@ struct UnifiedPageEditor: UIViewRepresentable {
             RuledTextLayout.attach(to: editor, paper: parent.paper, pageOriginY: editor.frame.minY)
             let themeChanged = appliedTheme != theme
             if lastData != content.pencilKitData || lastStrokes != content.strokes {
-                let canonical = content.pencilKitData.flatMap { try? PKDrawing(data: $0) }
-                    ?? PortableInkConverter.drawing(from: content.strokes)
+                let canonical = loadDrawing(content, in: view)
                 rememberCanonicalColors(in: canonical)
                 show(canonicalDrawing: canonical, on: view.page.canvas, theme: theme)
                 lastData = content.pencilKitData
@@ -221,8 +228,9 @@ struct UnifiedPageEditor: UIViewRepresentable {
             }
             appliedTheme = theme
             configureTool(on: view.page.canvas, theme: theme)
-            view.page.canvas.drawingGestureRecognizer.isEnabled = enabled && parent.tool != .text && parent.tool != .line && !selecting
-            lineGesture?.isEnabled = enabled && parent.tool == .line
+            view.page.canvas.drawingGestureRecognizer.isEnabled = enabled && !rejectedDrawing && parent.tool != .text && parent.tool != .line && !selecting
+            lineGesture?.isEnabled = enabled && !rejectedDrawing && parent.tool == .line
+            view.page.selectionView.isUserInteractionEnabled = enabled && selecting && !rejectedDrawing
             renderObjects(content, on: view, theme: theme, enabled: enabled)
             view.resizePage()
             linePreview.frame = view.page.bounds
@@ -243,8 +251,8 @@ struct UnifiedPageEditor: UIViewRepresentable {
             page.selectionView.isHidden = !page.selectionEnabled
             page.selectionView.isUserInteractionEnabled = page.selectionEnabled
             view.panGestureRecognizer.minimumNumberOfTouches = tool == .text || page.selectionEnabled ? 2 : 1
-            page.canvas.drawingGestureRecognizer.isEnabled = tool != .text && tool != .line && !page.selectionEnabled
-            lineGesture?.isEnabled = tool == .line
+            page.canvas.drawingGestureRecognizer.isEnabled = !rejectedDrawing && tool != .text && tool != .line && !page.selectionEnabled
+            lineGesture?.isEnabled = !rejectedDrawing && tool == .line
             if tool == .text {
                 picker.setVisible(false, forFirstResponder: page.canvas)
                 page.canvas.resignFirstResponder()
@@ -324,6 +332,8 @@ struct UnifiedPageEditor: UIViewRepresentable {
         }
 
         func viewForZooming(in scrollView: UIScrollView) -> UIView? { view?.page }
+        func scrollViewDidZoom(_ scrollView: UIScrollView) { view?.centerPage() }
+        func scrollViewDidScroll(_ scrollView: UIScrollView) { view?.updateVisiblePaper() }
 
         func textViewDidChange(_ textView: UITextView) {
             textView.undoManager?.levelsOfUndo = 50
@@ -368,6 +378,7 @@ struct UnifiedPageEditor: UIViewRepresentable {
                 let selectedWidth = Double(ink?.width ?? CGFloat(parent.lineWidth))
                 let pressureFactor = 0.35 + 0.65 * (start.pressure + end.pressure) / 2
                 linePreview.lineWidth = CGFloat(selectedWidth * pressureFactor)
+                linePreview.lineDashPattern = parent.linePattern == .solid ? nil : parent.linePattern.dashLengths(width: selectedWidth).map { NSNumber(value: $0) }
                 linePreview.path = path
             case .ended:
                 linePreview.path = nil
@@ -383,17 +394,16 @@ struct UnifiedPageEditor: UIViewRepresentable {
             let selectedInk = canvas.tool as? PKInkingTool
             let selectedWidth = selectedInk.map { Double($0.width) } ?? parent.lineWidth
             let width = max(0.5, min(100, selectedWidth))
-            let points = [start, end].enumerated().map { index, point in
-                let pressure = max(0, min(1, point.pressure))
-                let size = width * (0.35 + 0.65 * pressure)
-                return PKStrokePoint(location: CGPoint(x: point.x, y: point.y), timeOffset: Double(index) / 60,
-                                     size: CGSize(width: size, height: size), opacity: 1, force: CGFloat(pressure),
-                                     azimuth: 0, altitude: .pi / 2)
+            let portable = InkStroke(points: [start, end], colorHex: (selectedInk?.color ?? UIColor(noteHex: parent.colorHex)).noteHex,
+                                     width: width, style: .pen, linePattern: parent.linePattern)
+            do {
+                let addition = try PortableInkConverter.validatedDrawing(nil, fallback: [portable])
+                let combined = PKDrawing(strokes: canvas.drawing.strokes + addition.strokes)
+                try PortableInkConverter.validateNativeDrawing(combined)
+                replaceDrawing(combined, in: canvas, registerUndo: true)
+            } catch {
+                view?.setInkError("This line exceeds the supported drawing limits. Try a shorter line or wider spacing.")
             }
-            let path = PKStrokePath(controlPoints: points, creationDate: Date())
-            let ink = PKInk(.pen, color: selectedInk?.color ?? UIColor(noteHex: parent.colorHex))
-            let stroke = PKStroke(ink: ink, path: path)
-            replaceDrawing(PKDrawing(strokes: canvas.drawing.strokes + [stroke]), in: canvas, registerUndo: true)
         }
 
         /// Line gestures never enter PencilKit's freehand undo history. Their
@@ -416,15 +426,32 @@ struct UnifiedPageEditor: UIViewRepresentable {
         }
 
         private func persistInk(_ canvas: PKCanvasView) {
-            guard !isLoading else { return }
+            guard !isLoading, !rejectedDrawing else { return }
             #if DEBUG
             guard !isRunningDiagnostics else { return }
             #endif
             let displayedData = canvas.drawing.dataRepresentation()
             guard displayedData != expectedDrawingData else { return }
             let canonical = canonicalDrawing(from: canvas.drawing, theme: appliedTheme ?? parent.theme)
+            guard (try? PortableInkConverter.validateNativeDrawing(canonical)) != nil else {
+                // Preserve the last accepted model if a native gesture exceeds
+                // the document budget. Never save truncated sampled ink.
+                if let view {
+                    let accepted = loadDrawing(selection.content, in: view)
+                    show(canonicalDrawing: accepted, on: canvas, theme: appliedTheme ?? parent.theme)
+                    view.setInkError("This drawing exceeds the supported page limits. The last saved ink has been restored.")
+                }
+                return
+            }
             let data = canonical.dataRepresentation()
-            let portable = portableStrokes(from: canonical)
+            guard let portable = try? portableStrokes(from: canonical) else {
+                if let view {
+                    let accepted = loadDrawing(selection.content, in: view)
+                    show(canonicalDrawing: accepted, on: canvas, theme: appliedTheme ?? parent.theme)
+                    view.setInkError("This drawing exceeds the supported sampling limits. The last saved ink has been restored.")
+                }
+                return
+            }
             expectedDrawingData = displayedData
             lastData = data
             lastStrokes = portable
@@ -457,11 +484,26 @@ struct UnifiedPageEditor: UIViewRepresentable {
             }
         }
 
+        private func loadDrawing(_ content: PageContent, in view: UnifiedPageScrollView) -> PKDrawing {
+            do {
+                let drawing = try PortableInkConverter.validatedDrawing(content.pencilKitData, fallback: content.strokes)
+                rejectedDrawing = false
+                view.setInkError(nil)
+                return drawing
+            } catch {
+                // Keep the original bytes intact. A failed native load must not
+                // become an empty drawing that is later autosaved over the note.
+                rejectedDrawing = true
+                view.setInkError("This sheet contains unsupported ink and cannot be edited safely. Its saved drawing has been preserved.")
+                return PKDrawing()
+            }
+        }
+
         private func render(_ content: PageContent, on view: UnifiedPageScrollView, theme: PageTheme) {
             richTextCoordinator.load(text: content.text, rtf: content.rtfData, into: view.page.textView)
             RuledTextLayout.attach(to: view.page.textView, paper: parent.paper, pageOriginY: view.page.textView.frame.minY)
             if lastData != content.pencilKitData || lastStrokes != content.strokes {
-                let canonical = content.pencilKitData.flatMap { try? PKDrawing(data: $0) } ?? PortableInkConverter.drawing(from: content.strokes)
+                let canonical = loadDrawing(content, in: view)
                 rememberCanonicalColors(in: canonical)
                 show(canonicalDrawing: canonical, on: view.page.canvas, theme: theme)
                 lastData = content.pencilKitData; lastStrokes = content.strokes
@@ -566,17 +608,25 @@ struct UnifiedPageEditor: UIViewRepresentable {
             })
         }
 
-        private func portableStrokes(from drawing: PKDrawing) -> [InkStroke] {
-            drawing.strokes.flatMap { stroke in
-                var converted = PortableInkConverter.strokes(from: PKDrawing(strokes: [stroke]))
+        private func portableStrokes(from drawing: PKDrawing) throws -> [InkStroke] {
+            try PortableInkConverter.validateNativeDrawing(drawing)
+            var result: [InkStroke] = []
+            var pointCount = 0
+            for stroke in drawing.strokes {
+                var converted = try PortableInkConverter.validatedStrokes(from: PKDrawing(strokes: [stroke]))
                 if stroke.path.count == 2, stroke.mask == nil, stroke.ink.inkType == .pen, converted.count == 1 {
                     converted[0].points = [stroke.path[0], stroke.path[1]].map { point in
                         let location = point.location.applying(stroke.transform)
                         return InkPoint(x: location.x, y: location.y, pressure: Double(max(0, min(1, point.force))))
                     }
                 }
-                return converted
+                let additionCount = converted.reduce(0) { $0 + $1.points.count }
+                guard additionCount <= InkGeometryLimits.maximumPointCount - pointCount,
+                      converted.count <= InkGeometryLimits.maximumStrokeCount - result.count else { throw LibraryError.tooLarge }
+                pointCount += additionCount
+                result.append(contentsOf: converted)
             }
+            return result
         }
 
         #if DEBUG
@@ -590,6 +640,9 @@ struct UnifiedPageEditor: UIViewRepresentable {
             guard let view else { return }
             let canvas = view.page.canvas
             let original = canvas.drawing
+            let originalPattern = parent.linePattern
+            parent.linePattern = .solid
+            defer { parent.linePattern = originalPattern }
             var checks = 0
             isRunningDiagnostics = true
             let resultURL = FileManager.default.urls(for: .cachesDirectory, in: .userDomainMask)[0]
@@ -629,8 +682,9 @@ struct UnifiedPageEditor: UIViewRepresentable {
                 try require(canvas.drawing.strokes.count == 2, "Redo must restore the second line")
                 let diagonal = InkLineGeometry.snappedEnd(start: InkPoint(x: 0, y: 0), end: InkPoint(x: 100, y: 130))
                 try require(diagonal.x == 100 && diagonal.y == 130, "Arbitrary line angle must remain unchanged")
-                let portable = portableStrokes(from: canvas.drawing)
+                let portable = try portableStrokes(from: canvas.drawing)
                 try require(portable.count == 2 && portable.allSatisfy { $0.style == .pen && $0.points.count == 2 }, "Lines must survive as two-endpoint portable pen strokes")
+                checks += try runV1Diagnostics()
                 checks += try runThemeDiagnostics()
                 checks += try runSelectionDiagnostics()
                 checks += try runRuledDiagnostics()
@@ -649,6 +703,102 @@ struct UnifiedPageEditor: UIViewRepresentable {
                 try JSONSerialization.data(withJSONObject: result, options: [.prettyPrinted, .sortedKeys]).write(to: resultURL, options: .atomic)
                 print("iNotes iPad diagnostics: \(result)")
             } catch { print("Could not write iPad diagnostics: \(error)") }
+        }
+
+        private func runV1Diagnostics() throws -> Int {
+            var checks = 0
+            func require(_ condition: @autoclosure () -> Bool, _ message: String) throws {
+                if !condition() { throw NSError(domain: "iNotes.V1Diagnostics", code: 1, userInfo: [NSLocalizedDescriptionKey: message]) }
+                checks += 1
+            }
+            let fixture = UnifiedPageScrollView(frame: CGRect(x: 0, y: 0, width: 1000, height: 800))
+            let fixtureEditor = UnifiedPageEditor(text: .constant(""), rtfData: .constant(nil), strokes: .constant([]), pencilKitData: .constant(nil))
+            let fixtureCoordinator = Coordinator(fixtureEditor)
+            fixture.delegate = fixtureCoordinator
+            fixtureCoordinator.attach(fixture)
+            defer { fixtureCoordinator.detach(fixture) }
+            fixture.zoomScale = 0.25
+            fixture.resizePage()
+            fixture.layoutIfNeeded()
+            try require(abs(fixture.page.frame.midX - 500) < 0.1, "Zoomed-out paper must stay horizontally centered")
+            try require(abs(fixture.page.frame.midY - 400) < 0.1, "Paper shorter than the viewport must stay vertically centered")
+            fixture.frame.size.width = 1200
+            fixture.layoutIfNeeded()
+            try require(abs(fixture.page.frame.midX - 600) < 0.1, "Paper must recenter after the workspace changes size")
+
+            let paper = fixture.page.paper
+            paper.theme = .vintage
+            try require(UIColor(cgColor: paper.layer.backgroundColor!).noteHex == PageTheme.vintage.paperHex,
+                        "Vintage paper must use its own off-white background")
+            let templateLayer = paper.layer.sublayers?[1] as? CAShapeLayer
+            for style in InkPaper.allCases {
+                paper.style = style
+                paper.pageTemplate = .centerDivider
+                for pattern in LinePattern.allCases {
+                    paper.templateLinePattern = pattern
+                    paper.layoutIfNeeded()
+                    try require(abs((templateLayer?.path?.boundingBox.minX ?? -1) - 800) < 0.01,
+                                "Center template must bisect every paper style")
+                    try require((templateLayer?.lineDashPattern == nil) == (pattern == .solid),
+                                "Template dash setting must match its selected pattern")
+                }
+                paper.pageTemplate = .leftMargin
+                paper.layoutIfNeeded()
+                let supported = style == .blank || style == .ruled
+                try require((templateLayer?.path?.isEmpty == false) == supported,
+                            "Left margin must be available only for plain and ruled paper")
+                if supported {
+                    try require(abs((templateLayer?.path?.boundingBox.minX ?? -1) - 80) < 0.01,
+                                "Left margin must use the shared eighty-point inset")
+                }
+            }
+            paper.frame.size.height = CGFloat(InkGeometryLimits.maximumPageDimension)
+            paper.style = .ruled
+            paper.visiblePageRect = CGRect(x: 0, y: 50_000, width: 1600, height: 800)
+            paper.layoutIfNeeded()
+            let rules = paper.layer.sublayers?.first as? CAShapeLayer
+            var pathElements = 0
+            rules?.path?.applyWithBlock { _ in pathElements += 1 }
+            try require(pathElements < 100, "Long pages must build only visible paper guides with overscan")
+
+            for pattern in [LinePattern.dashed, .dotted] {
+                let stroke = InkStroke(points: [InkPoint(x: 100, y: 100), InkPoint(x: 400, y: 100)],
+                                       width: 2.5, linePattern: pattern)
+                let native = try PortableInkConverter.validatedDrawing(nil, fallback: [stroke])
+                try require(native.strokes.count > 1, "Patterned ink must retain separate native visible segments")
+                let reloaded = try PortableInkConverter.validatedDrawing(native.dataRepresentation(), fallback: [])
+                let portable = PortableInkConverter.strokes(from: reloaded)
+                try require(portable.count == native.strokes.count, "Pattern gaps must survive native serialization and portable conversion")
+                let firstEnd = native.strokes[0].path.last!.location.x
+                let secondStart = native.strokes[1].path.first!.location.x
+                try require(secondStart > firstEnd + 1, "Dash and dot geometry must contain a real gap")
+                guard let view else { continue }
+                let canvas = view.page.canvas
+                let before = canvas.drawing
+                parent.linePattern = pattern
+                commitLine(start: InkPoint(x: 100, y: 600), end: InkPoint(x: 400, y: 600), in: canvas)
+                let count = canvas.drawing.strokes.count
+                try require(count > before.strokes.count + 1, "Patterned line gesture must insert its visible segments")
+                canvas.undoManager?.undo()
+                try require(canvas.drawing.strokes.count == before.strokes.count, "One undo must remove an entire patterned gesture")
+                canvas.undoManager?.redo()
+                try require(canvas.drawing.strokes.count == count, "One redo must restore the entire patterned gesture")
+            }
+            parent.linePattern = .solid
+            let excessive = InkStroke(points: [InkPoint(x: 10, y: 1e12), InkPoint(x: 20, y: 1e12)])
+            var rejected = false
+            do { _ = try PortableInkConverter.validatedDrawing(nil, fallback: [excessive]) } catch { rejected = true }
+            try require(rejected, "Archive portable ink must reject extreme coordinates before PencilKit conversion")
+            var transformed = PortableInkConverter.drawing(from: [InkStroke(points: [InkPoint(x: 1, y: 1), InkPoint(x: 2, y: 2)])]).strokes[0]
+            transformed.transform = CGAffineTransform(translationX: 0, y: 1e12)
+            rejected = false
+            do { _ = try PortableInkConverter.validatedDrawing(PKDrawing(strokes: [transformed]).dataRepresentation(), fallback: []) } catch { rejected = true }
+            try require(rejected, "Archive native ink must reject extreme transforms before rendering or sampling")
+            let oversizedPattern = InkStroke(points: [InkPoint(x: 0, y: 0), InkPoint(x: 0, y: 100_000)], width: 0.5, linePattern: .dotted)
+            rejected = false
+            do { _ = try PortableInkConverter.validatedDrawing(nil, fallback: [oversizedPattern]) } catch { rejected = true }
+            try require(rejected, "Pattern expansion must reject excessive native segment counts before allocation")
+            return checks
         }
 
         private func runThemeDiagnostics() throws -> Int {
@@ -1145,10 +1295,12 @@ private final class PencilLineGestureRecognizer: UIGestureRecognizer {
 final class UnifiedPageScrollView: UIScrollView {
     let page = UnifiedPencilPage()
     var onAttachment: (() -> Void)?
+    private let inkErrorLabel = UILabel()
 
     override init(frame: CGRect) {
         super.init(frame: frame)
         backgroundColor = .secondarySystemBackground
+        contentInsetAdjustmentBehavior = .never
         minimumZoomScale = 0.25
         maximumZoomScale = 4
         alwaysBounceVertical = true
@@ -1157,6 +1309,13 @@ final class UnifiedPageScrollView: UIScrollView {
         delaysContentTouches = false
         panGestureRecognizer.allowedTouchTypes = [UITouch.TouchType.direct, .indirect, .indirectPointer].map { NSNumber(value: $0.rawValue) }
         addSubview(page)
+        inkErrorLabel.numberOfLines = 0
+        inkErrorLabel.font = .preferredFont(forTextStyle: .footnote)
+        inkErrorLabel.textColor = .label
+        inkErrorLabel.backgroundColor = .secondarySystemBackground
+        inkErrorLabel.isHidden = true
+        inkErrorLabel.accessibilityTraits = .staticText
+        addSubview(inkErrorLabel)
         resizePage()
         accessibilityLabel = "Note page"
     }
@@ -1173,7 +1332,8 @@ final class UnifiedPageScrollView: UIScrollView {
         let textHeight = page.textView.sizeThatFits(CGSize(width: width - 80, height: .greatestFiniteMagnitude)).height
         let inkBottom = page.canvas.drawing.bounds.maxY
         let objectBottom = (Array(page.textBoxViews.values).map { $0.frame.maxY } + Array(page.equationViews.values).map { $0.frame.maxY }).max() ?? 0
-        let height = max(2200, textHeight + 80, inkBottom.isFinite ? inkBottom + 80 : 0, objectBottom + 80)
+        let desiredHeight = max(2200, textHeight + 80, inkBottom.isFinite ? inkBottom + 80 : 0, objectBottom + 80)
+        let height = min(CGFloat(InkGeometryLimits.maximumPageDimension), desiredHeight.isFinite ? desiredHeight : 2200)
         page.bounds = CGRect(x: 0, y: 0, width: width, height: height)
         page.center = CGPoint(x: width * zoomScale / 2, y: height * zoomScale / 2)
         page.paper.frame = page.bounds
@@ -1182,6 +1342,32 @@ final class UnifiedPageScrollView: UIScrollView {
         page.selectionView.frame = page.bounds
         page.textView.frame = CGRect(x: 40, y: 40, width: width - 80, height: height - 80)
         contentSize = CGSize(width: width * zoomScale, height: height * zoomScale)
+        centerPage()
+    }
+
+    override func layoutSubviews() {
+        super.layoutSubviews()
+        centerPage()
+    }
+
+    func centerPage() {
+        let scaled = CGSize(width: page.bounds.width * zoomScale, height: page.bounds.height * zoomScale)
+        page.center = CGPoint(x: max(bounds.width, scaled.width) / 2,
+                              y: max(bounds.height, scaled.height) / 2)
+        let labelWidth = max(0, bounds.width - 32)
+        let labelHeight = inkErrorLabel.sizeThatFits(CGSize(width: labelWidth, height: 160)).height
+        inkErrorLabel.frame = CGRect(x: bounds.minX + 16, y: bounds.minY + 12, width: labelWidth, height: labelHeight)
+        updateVisiblePaper()
+    }
+
+    func updateVisiblePaper() {
+        page.paper.visiblePageRect = page.convert(bounds, from: self).intersection(page.bounds)
+    }
+
+    func setInkError(_ message: String?) {
+        inkErrorLabel.text = message
+        inkErrorLabel.isHidden = message == nil
+        setNeedsLayout()
     }
 }
 
@@ -1269,15 +1455,22 @@ final class UnifiedPencilPage: UIView {
 final class UnifiedPaperView: UIView {
     var style: InkPaper = .dotted { didSet { if style != oldValue { setNeedsLayout() } } }
     var theme: PageTheme = .light { didSet { if theme != oldValue { updateColors(); setNeedsLayout() } } }
+    var pageTemplate: PageTemplate = .none { didSet { if pageTemplate != oldValue { setNeedsLayout() } } }
+    var templateLinePattern: LinePattern = .solid { didSet { if templateLinePattern != oldValue { setNeedsLayout() } } }
+    var visiblePageRect: CGRect = .zero { didSet { if visiblePageRect != oldValue { setNeedsLayout() } } }
     private let rules = CAShapeLayer()
-    private var previousSize: CGSize = .zero
-    private var previousStyle: InkPaper?
+    private let template = CAShapeLayer()
+    private var previousConfiguration = ""
 
     override init(frame: CGRect) {
         super.init(frame: frame)
         rules.fillColor = UIColor.clear.cgColor
         rules.lineWidth = 1
+        template.fillColor = UIColor.clear.cgColor
+        template.lineWidth = 2
+        template.lineCap = .round
         layer.addSublayer(rules)
+        layer.addSublayer(template)
         updateColors()
     }
 
@@ -1286,23 +1479,39 @@ final class UnifiedPaperView: UIView {
     private func updateColors() {
         layer.backgroundColor = UIColor(noteHex: theme.paperHex).cgColor
         rules.strokeColor = UIColor(noteHex: theme.ruleHex).cgColor
+        template.strokeColor = UIColor(noteHex: theme.templateHex).cgColor
     }
 
     override func layoutSubviews() {
         super.layoutSubviews()
-        guard bounds.size != previousSize || style != previousStyle else { return }
-        previousSize = bounds.size
-        previousStyle = style
+        let configuration = "\(bounds)|\(visiblePageRect)|\(style.rawValue)|\(pageTemplate.rawValue)|\(templateLinePattern.rawValue)"
+        guard configuration != previousConfiguration else { return }
+        previousConfiguration = configuration
         let path = CGMutablePath()
         let spacing: CGFloat = 28
+        // Render a bounded viewport plus overscan. Never allocate a path for
+        // every rule in a potentially tall document, even if a caller bypasses
+        // the import validator or sets an unsupported frame.
+        let raw = visiblePageRect.isEmpty ? bounds : visiblePageRect
+        let maxDimension = CGFloat(InkGeometryLimits.maximumPageDimension)
+        let safeBounds = CGRect(x: 0, y: 0, width: min(maxDimension, max(0, bounds.width)),
+                                height: min(maxDimension, max(0, bounds.height)))
+        let clipped = raw.insetBy(dx: -56, dy: -56).intersection(safeBounds)
+        guard !clipped.isNull, !clipped.isInfinite, clipped.minX.isFinite, clipped.minY.isFinite else {
+            rules.path = nil; template.path = nil; return
+        }
+        let firstY = max(spacing, floor(clipped.minY / spacing) * spacing)
+        let lastY = min(clipped.maxY, firstY + spacing * 2_000)
         if style != .blank {
-            for y in stride(from: spacing, through: bounds.height, by: spacing) {
+            for y in stride(from: firstY, through: lastY, by: spacing) {
                 path.move(to: CGPoint(x: style == .dotted ? spacing : 0, y: y))
-                path.addLine(to: CGPoint(x: bounds.width, y: y))
+                path.addLine(to: CGPoint(x: safeBounds.width, y: y))
             }
             if style == .grid {
-                for x in stride(from: spacing, through: bounds.width, by: spacing) {
-                    path.move(to: CGPoint(x: x, y: 0)); path.addLine(to: CGPoint(x: x, y: bounds.height))
+                let firstX = max(spacing, floor(clipped.minX / spacing) * spacing)
+                let lastX = min(clipped.maxX, firstX + spacing * 2_000)
+                for x in stride(from: firstX, through: lastX, by: spacing) {
+                    path.move(to: CGPoint(x: x, y: clipped.minY)); path.addLine(to: CGPoint(x: x, y: lastY))
                 }
             }
         }
@@ -1311,6 +1520,18 @@ final class UnifiedPaperView: UIView {
         rules.lineWidth = style == .dotted ? 3 : 1
         rules.lineDashPattern = style == .dotted ? [0.1, 27.9] : nil
         rules.lineCap = style == .dotted ? .round : .butt
+        let guide = CGMutablePath()
+        let effective = pageTemplate.effective(on: PaperStyle(rawValue: style.rawValue) ?? .blank)
+        if effective != .none {
+            let x: CGFloat = effective == .centerDivider ? safeBounds.width / 2 : 80
+            guide.move(to: CGPoint(x: x, y: clipped.minY))
+            guide.addLine(to: CGPoint(x: x, y: lastY))
+        }
+        template.frame = bounds
+        template.path = guide
+        let lengths = templateLinePattern.dashLengths(width: 2)
+        template.lineDashPattern = lengths.isEmpty ? nil : lengths.map { NSNumber(value: $0) }
+        template.lineDashPhase = clipped.minY
     }
 }
 

@@ -24,17 +24,59 @@ public enum PaperStyle: String, Codable, CaseIterable, Sendable {
     case blank, ruled, dotted, grid
 }
 
+public enum LinePattern: String, Codable, CaseIterable, Sendable {
+    case solid, dashed, dotted
+
+    public var displayName: String { rawValue.capitalized }
+
+    /// Page-space lengths, scaled with the nib rather than the current zoom.
+    /// Dotted paths use round line caps to make each short segment a dot.
+    public func dashLengths(width: Double) -> [Double] {
+        let safeWidth = width.isFinite ? min(100, max(0.5, width)) : 2.5
+        switch self {
+        case .solid: return []
+        case .dashed: return [safeWidth * 6, safeWidth * 3]
+        case .dotted: return [0.01, safeWidth * 3]
+        }
+    }
+}
+
+public enum PageTemplate: String, Codable, CaseIterable, Sendable {
+    case none, centerDivider, leftMargin
+
+    public var displayName: String {
+        switch self {
+        case .none: return "No template"
+        case .centerDivider: return "Center divider"
+        case .leftMargin: return "Left margin"
+        }
+    }
+
+    public func isSupported(on paper: PaperStyle) -> Bool {
+        self != .leftMargin || paper == .blank || paper == .ruled
+    }
+
+    /// Retain the chosen template in storage when changing paper; unsupported
+    /// combinations simply have no overlay until compatible paper is selected.
+    public func effective(on paper: PaperStyle) -> PageTemplate {
+        isSupported(on: paper) ? self : .none
+    }
+}
+
 public struct InkStroke: Identifiable, Codable, Equatable, Sendable {
     public var id: UUID
     public var points: [InkPoint]
     public var colorHex: String
     public var width: Double
     public var style: InkStyle
-    public init(id: UUID = UUID(), points: [InkPoint], colorHex: String = "#202020", width: Double = 2.5, style: InkStyle = .pen) {
+    public var linePattern: LinePattern
+    public init(id: UUID = UUID(), points: [InkPoint], colorHex: String = "#202020", width: Double = 2.5, style: InkStyle = .pen,
+                linePattern: LinePattern = .solid) {
         self.id = id; self.points = points; self.colorHex = colorHex; self.width = width; self.style = style
+        self.linePattern = linePattern
     }
 
-    private enum CodingKeys: String, CodingKey { case id, points, colorHex, width, style }
+    private enum CodingKeys: String, CodingKey { case id, points, colorHex, width, style, linePattern }
 
     public init(from decoder: Decoder) throws {
         let values = try decoder.container(keyedBy: CodingKeys.self)
@@ -44,6 +86,7 @@ public struct InkStroke: Identifiable, Codable, Equatable, Sendable {
         width = try values.decode(Double.self, forKey: .width)
         // Format v1 archives from the first release contain pen paths without a style field.
         style = try values.decodeIfPresent(InkStyle.self, forKey: .style) ?? .pen
+        linePattern = try values.decodeIfPresent(LinePattern.self, forKey: .linePattern) ?? .solid
     }
 }
 
@@ -74,6 +117,8 @@ public struct NoteNode: Identifiable, Codable, Equatable, Sendable {
     public var updatedAt: Date
     public var order: Int
     public var paperStyle: PaperStyle
+    public var pageTemplate: PageTemplate
+    public var templateLinePattern: LinePattern
     public var textBoxes: [PageTextBox]
     public var equations: [NoteEquation]
 
@@ -82,19 +127,21 @@ public struct NoteNode: Identifiable, Codable, Equatable, Sendable {
                 pencilKitData: Data? = nil, attachments: [NoteAttachment] = [], tags: [String] = [],
                 isFavorite: Bool = false, isTrashed: Bool = false,
                 createdAt: Date = Date(), updatedAt: Date = Date(), order: Int = 0, paperStyle: PaperStyle = .dotted,
-                textBoxes: [PageTextBox] = [], equations: [NoteEquation] = []) {
+                textBoxes: [PageTextBox] = [], equations: [NoteEquation] = [],
+                pageTemplate: PageTemplate = .none, templateLinePattern: LinePattern = .solid) {
         self.id = id; self.parentID = parentID; self.kind = kind; self.title = title
         self.body = body; self.richTextRTF = richTextRTF; self.strokes = strokes
         self.pencilKitData = pencilKitData; self.attachments = attachments; self.tags = tags
         self.isFavorite = isFavorite; self.isTrashed = isTrashed
         self.createdAt = createdAt; self.updatedAt = updatedAt; self.order = order; self.paperStyle = paperStyle
         self.textBoxes = textBoxes; self.equations = equations
+        self.pageTemplate = pageTemplate; self.templateLinePattern = templateLinePattern
     }
 
     private enum CodingKeys: String, CodingKey {
         case id, parentID, kind, title, body, richTextRTF, strokes, pencilKitData, attachments
         case tags, isFavorite, isTrashed, createdAt, updatedAt, order, paperStyle
-        case textBoxes, equations
+        case textBoxes, equations, pageTemplate, templateLinePattern
     }
 
     public init(from decoder: Decoder) throws {
@@ -117,6 +164,8 @@ public struct NoteNode: Identifiable, Codable, Equatable, Sendable {
         paperStyle = try values.decodeIfPresent(PaperStyle.self, forKey: .paperStyle) ?? .dotted
         textBoxes = try values.decodeIfPresent([PageTextBox].self, forKey: .textBoxes) ?? []
         equations = try values.decodeIfPresent([NoteEquation].self, forKey: .equations) ?? []
+        pageTemplate = try values.decodeIfPresent(PageTemplate.self, forKey: .pageTemplate) ?? .none
+        templateLinePattern = try values.decodeIfPresent(LinePattern.self, forKey: .templateLinePattern) ?? .solid
     }
 }
 

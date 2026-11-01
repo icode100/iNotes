@@ -1,5 +1,29 @@
 # Validation
 
+## Version 1.0.0 validation
+
+The local ARM64 release candidate passed 60 XCTest unit/integration tests and
+259 packaged native editor checks, 31 equation checks, 12 ruled-text checks,
+8 tool-shortcut checks, and 46 full-workspace checks. The workspace suite mounts
+the actual three-column UI and verifies full-page/toolbar restoration, native
+editor identity, typing undo/redo, caret and zoom preservation, pen cursor
+ownership, read-only Trash controls, and empty-selection recovery. Storage,
+backup, and signed-updater configuration diagnostics also passed.
+
+The iPad ARM64 simulator target compiled on the installed iOS 27.2 SDK and passed
+148 native checks on an isolated iPad Pro M5 simulator. New checks cover centered
+zoom, patterned lines and native round trips, templates, vintage paper, geometry
+rejection, and bounded paper rendering. Physical Apple Pencil/tablet pressure,
+tilt, and palm rejection still require hardware testing.
+
+Live Mac UI checks exercised full-page hiding of both navigation panes, centered
+25% zoom, global vintage paper, Alpine scenery, persisted dashed lines and
+center-divider templates, and literal typing of `pbh` in Text mode. Native
+diagnostics use temporary libraries; live QA uses separate app identities and
+temporary note folders. No production notes are used as test fixtures.
+
+Local build and check logs are under `/private/tmp/inotes-v1-validation/`.
+
 ## Automated checks
 
 Run from the repository root:

@@ -21,12 +21,8 @@ public struct PageClipboardPayload: Codable, Equatable, Sendable {
     public static func decodeValidated(_ data: Data) throws -> PageClipboardPayload {
         guard data.count <= maximumBytes else { throw LibraryError.tooLarge }
         let value = try JSONDecoder().decode(Self.self, from: data)
-        guard value.strokes.count <= 10_000, value.textBoxes.count <= 10_000,
-              value.equations.count <= 10_000,
-              value.strokes.reduce(0, { $0 + $1.points.count }) <= 1_000_000 else { throw LibraryError.tooLarge }
-        guard value.strokes.allSatisfy({ stroke in
-            stroke.points.allSatisfy { $0.x.isFinite && $0.y.isFinite && abs($0.x) <= 100_000 && abs($0.y) <= 100_000 }
-        }) else { throw LibraryError.invalidData("Clipboard ink lies outside the supported page area.") }
+        guard value.textBoxes.count <= 10_000, value.equations.count <= 10_000 else { throw LibraryError.tooLarge }
+        try InkGeometryLimits.validate(value.strokes)
         var library = NoteLibrary()
         let workbook = try library.create(kind: .workbook, title: "Clipboard")
         let chapter = try library.create(kind: .chapter, title: "Clipboard", parentID: workbook)

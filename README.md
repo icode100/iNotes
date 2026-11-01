@@ -1,5 +1,7 @@
 # iNotes
 
+Version 1.0 introduces full-page writing, centered zoom, patterned straight lines, paper templates, vintage pages, and native scenic workspace themes.
+
 A small, native, open-source notebook for Apple silicon Macs, with a shared iPad app target. Built with SwiftUI, AppKit/UIKit, and PencilKit, with Sparkle for signed Mac updates and SwiftMath for offline equations. No Electron, cloud SDK, account, or telemetry.
 
 ## What works

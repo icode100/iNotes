@@ -16,6 +16,9 @@ struct UnifiedPageEditor: NSViewRepresentable {
     var lineWidth: Double = 2.5
     var paper: InkPaper = .dotted
     var theme: PageTheme = .light
+    var linePattern: LinePattern = .solid
+    var pageTemplate: PageTemplate = .none
+    var templateLinePattern: LinePattern = .solid
     var onPageChange: ((PageContent) -> Void)? = nil
     var onEquationEdit: ((NoteEquation) -> Void)? = nil
     var onTextChange: ((String, Data?) -> Void)? = nil
@@ -26,12 +29,14 @@ struct UnifiedPageEditor: NSViewRepresentable {
          textBoxes: Binding<[PageTextBox]> = .constant([]), equations: Binding<[NoteEquation]> = .constant([]),
          tool: InkTool = .pen, colorHex: String = "#314D43", lineWidth: Double = 2.5,
          paper: InkPaper = .dotted, theme: PageTheme = .light,
+         linePattern: LinePattern = .solid, pageTemplate: PageTemplate = .none, templateLinePattern: LinePattern = .solid,
          onTextChange: ((String, Data?) -> Void)? = nil, onInkChange: (([InkStroke], Data?) -> Void)? = nil,
          onInputChange: ((String) -> Void)? = nil, onPageChange: ((PageContent) -> Void)? = nil,
          onEquationEdit: ((NoteEquation) -> Void)? = nil) {
         _text = text; _rtfData = rtfData; _strokes = strokes; _pencilKitData = pencilKitData
         _textBoxes = textBoxes; _equations = equations; self.tool = tool; self.colorHex = colorHex
         self.lineWidth = lineWidth; self.paper = paper; self.theme = theme
+        self.linePattern = linePattern; self.pageTemplate = pageTemplate; self.templateLinePattern = templateLinePattern
         self.onTextChange = onTextChange; self.onInkChange = onInkChange; self.onInputChange = onInputChange
         self.onPageChange = onPageChange; self.onEquationEdit = onEquationEdit
     }
@@ -40,6 +45,7 @@ struct UnifiedPageEditor: NSViewRepresentable {
 
     func makeNSView(context: Context) -> NSScrollView {
         let scroll = NSScrollView()
+        scroll.contentView = CenteredPageClipView()
         scroll.hasVerticalScroller = true
         scroll.hasHorizontalScroller = true
         scroll.autohidesScrollers = true
@@ -113,6 +119,9 @@ struct UnifiedPageEditor: NSViewRepresentable {
         page.inkView.tool = tool == .text ? .pen : tool
         page.inkView.colorHex = colorHex
         page.inkView.lineWidth = max(0.5, min(30, lineWidth))
+        page.inkView.linePattern = linePattern
+        page.paperView.pageTemplate = pageTemplate
+        page.paperView.templateLinePattern = templateLinePattern
         if page.inkView.paper != paper { page.inkView.paper = paper; page.inkView.needsDisplay = true }
         if page.paperView.paper != paper { page.paperView.paper = paper; page.paperView.needsDisplay = true }
         RuledTextLayout.attach(to: page.textView, paper: paper, pageOriginY: page.textView.frame.minY)
@@ -175,13 +184,13 @@ struct UnifiedPageEditor: NSViewRepresentable {
 
 @MainActor
 enum UnifiedPageExport {
-    static func pdf(text: String, rtfData: Data?, strokes: [InkStroke], paper: InkPaper, theme: PageTheme = .light, textBoxes: [PageTextBox] = [], equations: [NoteEquation] = []) -> Data {
-        let page = makePage(text: text, rtfData: rtfData, strokes: strokes, paper: paper, theme: theme, textBoxes: textBoxes, equations: equations)
+    static func pdf(text: String, rtfData: Data?, strokes: [InkStroke], paper: InkPaper, theme: PageTheme = .light, pageTemplate: PageTemplate = .none, templateLinePattern: LinePattern = .solid, textBoxes: [PageTextBox] = [], equations: [NoteEquation] = []) -> Data {
+        let page = makePage(text: text, rtfData: rtfData, strokes: strokes, paper: paper, theme: theme, pageTemplate: pageTemplate, templateLinePattern: templateLinePattern, textBoxes: textBoxes, equations: equations)
         return page.dataWithPDF(inside: page.bounds)
     }
 
-    static func png(text: String, rtfData: Data?, strokes: [InkStroke], paper: InkPaper, theme: PageTheme = .light, textBoxes: [PageTextBox] = [], equations: [NoteEquation] = []) -> Data? {
-        let page = makePage(text: text, rtfData: rtfData, strokes: strokes, paper: paper, theme: theme, textBoxes: textBoxes, equations: equations)
+    static func png(text: String, rtfData: Data?, strokes: [InkStroke], paper: InkPaper, theme: PageTheme = .light, pageTemplate: PageTemplate = .none, templateLinePattern: LinePattern = .solid, textBoxes: [PageTextBox] = [], equations: [NoteEquation] = []) -> Data? {
+        let page = makePage(text: text, rtfData: rtfData, strokes: strokes, paper: paper, theme: theme, pageTemplate: pageTemplate, templateLinePattern: templateLinePattern, textBoxes: textBoxes, equations: equations)
         // AppKit caches at the current backing scale (normally 2x Retina).
         // Bound actual raster pixels before allocating a giant object page.
         let scale = NSScreen.main?.backingScaleFactor ?? 2
@@ -192,7 +201,7 @@ enum UnifiedPageExport {
         return bitmap.representation(using: .png, properties: [:])
     }
 
-    private static func makePage(text: String, rtfData: Data?, strokes: [InkStroke], paper: InkPaper, theme: PageTheme, textBoxes: [PageTextBox], equations: [NoteEquation]) -> UnifiedMacPageView {
+    private static func makePage(text: String, rtfData: Data?, strokes: [InkStroke], paper: InkPaper, theme: PageTheme, pageTemplate: PageTemplate, templateLinePattern: LinePattern, textBoxes: [PageTextBox], equations: [NoteEquation]) -> UnifiedMacPageView {
         let page = UnifiedMacPageView(frame: NSRect(origin: .zero, size: InkExport.paperSize))
         page.theme = theme
         let richText = RichTextEditor(text: .constant(text), rtfData: .constant(rtfData), theme: theme)
@@ -203,6 +212,8 @@ enum UnifiedPageExport {
         page.inkView.strokes = strokes
         page.inkView.paper = paper
         page.paperView.paper = paper
+        page.paperView.pageTemplate = pageTemplate
+        page.paperView.templateLinePattern = templateLinePattern
         page.inkView.isInputEnabled = false
         page.displayObjects(textBoxes: textBoxes, equations: equations, editable: false, onTextBoxChange: { _,_,_ in }, onEquationEdit: nil)
         page.resizePaperToContent()
@@ -385,9 +396,15 @@ final class UnifiedMacPageView: NSView {
         let inkHeight = inkView.strokes.lazy.flatMap(\.points).map(\.y).max().map { $0 + 80 } ?? 0
         let objectHeight = max(textBoxViews.values.map { $0.frame.maxY + 80 }.max() ?? 0,
                                equationViews.values.map { $0.frame.maxY + 80 }.max() ?? 0)
-        let height = max(InkExport.paperSize.height, textHeight, inkHeight, objectHeight)
+        // Page size is a resource boundary independent of archive validation.
+        // Offscreen export and restored native state must never allocate a
+        // document whose size is controlled by an extreme coordinate.
+        let finiteHeights = [textHeight, inkHeight, objectHeight].filter(\.isFinite)
+        let height = min(CGFloat(InkGeometryLimits.maximumPageDimension),
+                         max(InkExport.paperSize.height, finiteHeights.max() ?? 0))
         if abs(frame.height - height) > 1 { setFrameSize(NSSize(width: InkExport.paperSize.width, height: height)) }
         positionLayers()
+        enclosingScrollView?.contentView.scroll(to: enclosingScrollView?.contentView.bounds.origin ?? .zero)
     }
 
     private func positionLayers() {
@@ -400,14 +417,42 @@ final class UnifiedMacPageView: NSView {
     }
 }
 
+/// Center a smaller magnified document by moving the clip origin, preserving
+/// the page's coordinate space, responder chain and native cursor ownership.
+@MainActor
+final class CenteredPageClipView: NSClipView {
+    override func scroll(to point: NSPoint) {
+        // NSClipView.scroll(to:) does not call constrainBoundsRect itself.
+        // Programmatic page updates must obey the same centering as zooming.
+        super.scroll(to: constrainBoundsRect(NSRect(origin: point, size: bounds.size)).origin)
+    }
+
+    override func constrainBoundsRect(_ proposedBounds: NSRect) -> NSRect {
+        var constrained = super.constrainBoundsRect(proposedBounds)
+        guard let document = documentView else { return constrained }
+        if document.frame.width < proposedBounds.width {
+            constrained.origin.x = document.frame.midX - proposedBounds.width / 2
+        }
+        if document.frame.height < proposedBounds.height {
+            constrained.origin.y = document.frame.midY - proposedBounds.height / 2
+        }
+        return constrained
+    }
+}
+
 @MainActor
 final class UnifiedMacPaperView: NSView {
     var paper: InkPaper = .dotted
+    var pageTemplate: PageTemplate = .none { didSet { if oldValue != pageTemplate { needsDisplay = true } } }
+    var templateLinePattern: LinePattern = .solid { didSet { if oldValue != templateLinePattern { needsDisplay = true } } }
     var theme: PageTheme = .light {
         didSet { if theme != oldValue { needsDisplay = true } }
     }
     override var isFlipped: Bool { true }
     override var isOpaque: Bool { true }
-    override func draw(_ dirtyRect: NSRect) { InkRenderer.draw(strokes: [], paper: paper, in: dirtyRect.intersection(bounds), theme: theme) }
+    override func draw(_ dirtyRect: NSRect) {
+        InkRenderer.draw(strokes: [], paper: paper, in: dirtyRect.intersection(bounds), theme: theme,
+                         pageTemplate: pageTemplate, templateLinePattern: templateLinePattern, pageBounds: bounds)
+    }
 }
 #endif
