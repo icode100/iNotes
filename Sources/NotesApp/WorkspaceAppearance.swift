@@ -71,6 +71,9 @@ final class WorkspaceNavigationProbe: NSView {
     private var wasFullPage = false
     private var previousCollapsed: [Bool] = []
     private var collapseObservation: NSKeyValueObservation?
+    private var sidebarObservations: [NSKeyValueObservation] = []
+    private var splitResizeObserver: NSObjectProtocol?
+    private var geometryScheduled = false
     private var scheduled = false
     private var dismantled = false
     private weak var savedController: NSSplitViewController?
@@ -121,6 +124,10 @@ final class WorkspaceNavigationProbe: NSView {
 
     override func hitTest(_ point: NSPoint) -> NSView? { nil }
 
+    deinit {
+        if let splitResizeObserver { NotificationCenter.default.removeObserver(splitResizeObserver) }
+    }
+
     override func viewDidMoveToSuperview() {
         super.viewDidMoveToSuperview()
         scheduleSynchronization()
@@ -155,6 +162,21 @@ final class WorkspaceNavigationProbe: NSView {
         restoreNavigation()
     }
 
+    private func scheduleGeometryRefresh() {
+        guard !geometryScheduled, !dismantled else { return }
+        geometryScheduled = true
+        DispatchQueue.main.async { [weak self] in
+            guard let self else { return }
+            self.geometryScheduled = false
+            guard !self.dismantled, self.window != nil,
+                  let controller = self.savedController else { return }
+            // Native sidebar animations can resize ancestor columns without
+            // changing this underlay-sized probe's bounds. Measure after native
+            // resize events; never force layout or reapply pane sizing here.
+            self.updateLeadingInset(in: controller)
+        }
+    }
+
     private func synchronizeNavigation() {
         guard window != nil else { restoreNavigation(); return }
         guard let controller = enclosingNavigationController() else { return }
@@ -164,6 +186,17 @@ final class WorkspaceNavigationProbe: NSView {
             restoreNavigation()
             savedController = controller
             savedItems = navigationItems.map(ItemState.init)
+            splitResizeObserver = NotificationCenter.default.addObserver(
+                forName: NSSplitView.didResizeSubviewsNotification,
+                object: controller.splitView, queue: .main
+            ) { [weak self] _ in
+                MainActor.assumeIsolated { self?.scheduleGeometryRefresh() }
+            }
+            sidebarObservations = navigationItems.dropLast().map { item in
+                item.observe(\.isCollapsed, options: [.new]) { [weak self] _, _ in
+                    MainActor.assumeIsolated { self?.scheduleGeometryRefresh() }
+                }
+            }
             // Observe native divider collapses as well as toolbar toggles. The
             // model must follow a drag, otherwise the next SwiftUI update would
             // reopen the pane. AppKit split-item changes occur on the main thread.
@@ -273,6 +306,10 @@ final class WorkspaceNavigationProbe: NSView {
 
     private func restoreNavigation() {
         collapseObservation = nil
+        sidebarObservations = []
+        if let splitResizeObserver { NotificationCenter.default.removeObserver(splitResizeObserver) }
+        splitResizeObserver = nil
+        leadingInset = nil
         wasFullPage = false
         previousCollapsed = []
         expandedSheetsWidth = nil

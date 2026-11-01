@@ -97,6 +97,31 @@ Do not treat callback-level cursor assertions alone as proof of the displayed cu
 - Use real Mac UI checks for cursor-sensitive changes. Mouse/simulator checks do
   not establish physical tablet pressure, tilt, Pencil hover, or palm rejection.
 
+## Known regressions and testing traps
+
+- **Sidebar layout stayed stale until a page click (reported after v1.0.2).**
+  With the sheets pane hidden, the native sidebar could close while leaving a
+  sidebar-width blank gutter, or open over the heading/tools/page. The detail
+  hosting view extended underneath navigation, so the background probe's own
+  bounds/layout callback did not reliably change. Observe native split resize
+  events and sidebar collapse state; coalesce a geometry-only inset refresh.
+  Do not rely on another SwiftUI update, a page click, or a delayed fixed timer.
+  Keep geometry observation separate from pane sizing/collapse policy, and remove
+  observers when the controller changes or the probe is detached.
+- **Forced layout masked that sidebar bug.** The original workspace fixture
+  repeatedly called `layoutSubtreeIfNeeded()` while waiting, so it repaired the
+  UI in a way an idle user would not. The regression must invoke the real native
+  `toggleSidebar` action and wait only for normal run-loop/animation processing.
+  Assert viewport alignment after both hide and show, with sheets visible and
+  hidden, in Text and Pen modes. No forced layout, redraw, unrelated preference
+  change, or page click may occur between that action and its assertions.
+- **Native backing width is not visible pane width.** An underlay can include
+  the sidebar. Preserve the measured visible width across collapse/restore;
+  inspect actual unobscured page edges rather than checking view existence.
+- **Cursor callbacks alone gave a false pass in v0.2.1.** Retain the safeguards
+  above and distinguish actual displayed-cursor captures from native cursor
+  ownership assertions. Do not claim physical stylus testing from synthetic input.
+
 ## Themes, rendering, and footprint
 
 Keep ruled text aligned with paper guides; preserve solid/dashed/dotted lines,

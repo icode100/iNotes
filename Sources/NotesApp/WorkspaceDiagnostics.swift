@@ -225,9 +225,55 @@ enum WorkspaceDiagnostics {
             try check(unclipped, "\(transition) keeps both editor viewport edges visible without parent clipping")
             try check(stableInsets, "\(transition) aligns editor content with the measured unobscured detail edges")
         }
+
+        func checkPassiveSidebarCycle(sheetsVisible: Bool, tool: InkTool) throws {
+            let initialCollapsed = sidebarItem.isCollapsed
+            let savedCaret = editor.selectedRange()
+            let savedContent = store.selectedSheet?.pageContent
+            let savedText = editor.string
+            let savedZoom = scroll.magnification
+            let savedCursor = scroll.documentCursor
+            for collapsed in [!initialCollapsed, initialCollapsed] {
+                let transition = "passive native sidebar \(collapsed ? "hide" : "show") with sheets \(sheetsVisible ? "visible" : "hidden") in \(tool.rawValue)"
+                // Use the same animated AppKit action as the standard sidebar
+                // control. No model change or page click may repair its layout.
+                navigation.toggleSidebar(nil)
+                let deadline = Date(timeIntervalSinceNow: 0.8)
+                repeat {
+                    RunLoop.main.run(until: min(deadline, Date(timeIntervalSinceNow: 0.02)))
+                } while Date() < deadline
+                // Deliberately do NOT call settle(), layoutSubtreeIfNeeded(),
+                // adjustSubviews(), display(), or updateWindows() here. The old
+                // forced-layout fixture masked a stale leading inset until the
+                // user clicked the page after hiding the native sidebar.
+                try check(sidebarItem.isCollapsed == collapsed
+                          && presentation.sheetsVisible == sheetsVisible
+                          && sheetsItem.isCollapsed == !sheetsVisible,
+                          "\(transition) changes only the requested native sidebar state")
+                try checkDetailGeometry(transition)
+                try check(findPage(host.view) === page && scroll.documentView === page
+                          && page.textView === editor && editor.undoManager === undo && undo.canUndo,
+                          "\(transition) retains the native editor and typing undo history without a click")
+                try check(editor.selectedRange() == savedCaret && editor.string == savedText
+                          && store.selectedSheet?.pageContent == savedContent
+                          && abs(scroll.magnification - savedZoom) < 0.001,
+                          "\(transition) retains caret, exact page content, and zoom without a click")
+                if tool == .text {
+                    try check(page.activeTool == .text && editor.isEditable && editor.isSelectable
+                              && scroll.documentCursor === NSCursor.iBeam,
+                              "\(transition) retains native text editing and cursor ownership")
+                } else {
+                    try check(page.activeTool == tool && !editor.isEditable && !editor.isSelectable
+                              && scroll.documentCursor === savedCursor && page.activePageCursor === savedCursor
+                              && page.inputView(at: NSPoint(x: 100, y: 100), event: nil) === page.inkView,
+                              "\(transition) retains the pen cursor and ink routing without a click")
+                }
+            }
+        }
         try checkDetailGeometry("expanded451-point sheets")
         try check(presentation.headingVisible && presentation.sheetsVisible && !sheetsItem.isCollapsed,
                   "heading and native sheets pane begin independently visible")
+        try checkPassiveSidebarCycle(sheetsVisible: true, tool: .text)
 
         presentation.toggleHeading()
         settle()
@@ -252,6 +298,7 @@ enum WorkspaceDiagnostics {
         try checkDetailGeometry("hiding resized sheets")
         try check(scroll.bounds.width > normalWidth + 100,
                   "collapsing sheets gives their horizontal space to the same editor")
+        try checkPassiveSidebarCycle(sheetsVisible: false, tool: .text)
         presentation.toggleSheets()
         settle()
         try checkEditorSurvives("restoring only the sheets pane")
@@ -355,6 +402,14 @@ enum WorkspaceDiagnostics {
             try check(page.inputView(at: NSPoint(x: 100, y: 100), event: nil) === page.inkView,
                       "pen input still reaches ink over the text layer after full page \(fullPage)")
         }
+
+        for visible in [true, false] {
+            presentation.sheetsVisible = visible
+            settle() // Establish the fixture before the independent sidebar action.
+            try checkPassiveSidebarCycle(sheetsVisible: visible, tool: .pen)
+        }
+        presentation.sheetsVisible = true
+        settle()
 
         let contentBeforeScenery = store.selectedSheet?.pageContent
         for theme in [WorkspaceTheme.coast, .forest, .alpine] {

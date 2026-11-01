@@ -1,5 +1,51 @@
 # Validation
 
+## Sidebar reflow fix — local 1.0.3 candidate
+
+On 1 November 2026, live QA reproduced the reported v1.0.2 sidebar bug:
+with sheets hidden, closing the notebook sidebar left a 190-point blank gutter
+until another interaction triggered layout. The background probe did not reliably
+receive layout when its ancestor's native sidebar animated. The fix observes
+the split's resize notifications and sidebar collapse state, then coalesces a
+geometry-only inset refresh without forcing layout or replacing the editor.
+
+The new regression uses the native animated `toggleSidebar` action followed by
+passive run-loop waits. It neither forces layout nor clicks the page before
+asserting geometry. Against the old production code, it failed with the editor
+still at x=190 after both navigation panes closed. Against the fix, all eight
+hide/show transitions passed: sheets visible/hidden in Text/Pen modes, retaining
+editor identity, caret, page content, undo history, magnification, and cursor/input
+ownership. The earlier fixture's repeated `layoutSubtreeIfNeeded()` calls had
+masked the bug; `AGENTS.md` records this pitfall and the required regression method.
+
+The final ARM64 candidate (`VERSION=1.0.3 BUILD_NUMBER=1010`) passed:
+
+- 68 XCTest unit/integration tests, zero failures.
+- 260 editor, 251 workspace, 31 equation, 12 ruled-text, and 8 shortcut checks.
+- Storage/backup integration and 16 signed-updater configuration checks.
+- Read-only DMG verification, strict nested ad hoc signatures, ARM64/resources,
+  checksum, and mounted-app persistence smoke tests; the mount was removed.
+
+Live checks used a separate `io.inotes.layoutqa` app identity, the packaged
+production binary, temporary notes, Forest dark scenery, and Pen selected.
+Screenshots taken immediately after toolbar sidebar hide/show showed aligned
+heading/tools/page edges with sheets both hidden and visible, without any page
+click between the action and observation. Production notes and the installed app
+were untouched. Native cursor regressions passed; this pass did not repeat
+physical tablet/Pencil testing or actual system-cursor image capture. Production
+editor/input code is unchanged. All runtime checks ran on macOS 27.2 (26B123).
+
+This is a local candidate, not a published GitHub release. Build defaults remain
+at the last published version. Reproduce it with
+`VERSION=1.0.3 BUILD_NUMBER=1010 bash scripts/build-macos.sh`.
+The app contains 29,409,093 regular-file bytes; the DMG contains 24,614,139 bytes
+(23.47 MiB), SHA-256
+`4d4e779d2dd0f8b2cf76ac9ba37e4fe3af79e5c11517a6a8b12f1467721af601`.
+Temporary logs are under `/private/tmp/inotes-sidebar-validation/`, including
+`baseline-native.log`, `fixed-native.log`, `core-tests.log`, `release-build.log`,
+`dmg-verification.log`, and `packaged-native-checks.log`. No new security scan,
+notarization, iPad runtime test, or public updater publication is claimed.
+
 ## Version 1.0.2 sheet navigation validation
 
 The local ARM64 build 1009 passed all 68 core tests with both XCTest and the
