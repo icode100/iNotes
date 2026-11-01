@@ -24,8 +24,32 @@ probe; the native cursor regression checks passed.
 
 The app contains 29,101,205 file bytes (27.75 MiB); the DMG is 24,482,447 bytes
 (23.35 MiB). Build, native, simulator, package, and signature logs are under
-`/private/tmp/inotes-photo-validation/`. This is a local build, not a published
-GitHub release.
+`/private/tmp/inotes-photo-validation/`. These results describe the local build;
+the separately built public release was verified as follows.
+
+### 1.0.1 published release verification
+
+Published [v1.0.1](https://github.com/icode100/iNotes/releases/tag/v1.0.1) is build
+1008 from source commit `167cbfedc2ddcb870486bde5a88b0c0cc7ed11fc`. Both
+[Native checks](https://github.com/icode100/iNotes/actions/runs/41283315422) and
+[Signed macOS release](https://github.com/icode100/iNotes/actions/runs/41283724610)
+passed, including hosted iPad compilation and release signing-key cleanup.
+
+The independently downloaded public DMG matched its published SHA-256 checksum.
+CryptoKit verified the feed and archive Ed25519 signatures against the committed
+public key. The latest-release feed was byte-identical to the versioned feed and
+identified version 1.0.1/build 1008 with the correct download URL. Read-only
+mounted verification passed strict nested app signatures, ARM64 architecture,
+all six original image hashes, icon variants, resources, and store/backup checks.
+The public app passed 259 editor, 31 equation, 8 shortcut, 12 ruled-text, and
+74 workspace checks. The hosted SDK runs one fewer editor check than the local
+SDK. The app remains ad hoc signed and is not Apple notarized.
+
+The public DMG is 24,208,570 bytes (23.09 MiB), with SHA-256
+`8d56a6a3c5584f548d54d69ff3509562789e47e9a799f398ce9022b6d41c50c1`.
+Its app contains 28,811,269 regular-file bytes (27.48 MiB). Evidence is under
+`/private/tmp/inotes-photo-release/`; verification used temporary diagnostic
+libraries and did not modify the installed app or production notes.
 
 ## Version 1.0.0 validation
 
