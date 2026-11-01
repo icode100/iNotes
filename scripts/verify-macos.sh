@@ -1,7 +1,7 @@
 #!/bin/bash
 set -euo pipefail
 ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
-VERSION="${VERSION:-1.0.0}"
+VERSION="${VERSION:-1.0.1}"
 DMG="${1:-$ROOT/dist/iNotes-$VERSION-arm64.dmg}"
 if [[ ! -f "$DMG" ]]; then
   echo "DMG not found: $DMG" >&2
@@ -57,6 +57,26 @@ test "$(/usr/libexec/PlistBuddy -c 'Print :CFBundleIconName' "$APP/Contents/Info
 test -f "$APP/Contents/Resources/AppIcon.icns"
 test -f "$APP/Contents/Resources/Assets.car"
 test -s "$APP/Contents/Resources/SwiftMath-LICENSE"
+python3 - "$APP/Contents/Resources/iNotes_NotesApp.bundle/WorkspaceThemes" <<'PY'
+from pathlib import Path
+import hashlib, struct, sys
+themes = Path(sys.argv[1])
+expected = {
+    'coast-dark.png': '276fc058bc4f88d0f201845d0ba936105698ebe7806ec171d88b4c4f15b94747',
+    'coast-light.png': 'd56b4e9d1352eb38eae1fa1b225b397f523053c14e1cb7f8ecbe4ba00c35665c',
+    'forest-dark.png': 'e45913679006acd7b0b572cedd660af8cef8a42ee8469cb9a0a674cc7c7de46b',
+    'forest-light.png': '9a61ddc8866357de4807281c3061a08cad3b61328b413a66eb25888fe75d9304',
+    'alpine-dark.png': 'b9a6af3e1d3139b8ab5db5bb9ce6ab675c5594040252ac6a6d26bc48f2090928',
+    'alpine-light.png': '75ffd26d7701adbaebfad85280f7822ba7c202e9bdfffeae8c216d76cfabb79d',
+}
+assert {path.name for path in themes.iterdir()} == set(expected), 'Missing or unexpected workspace theme assets'
+for name, digest in expected.items():
+    data = (themes / name).read_bytes()
+    assert hashlib.sha256(data).hexdigest() == digest, f'Changed workspace artwork: {name}'
+    assert data[:8] == b'\x89PNG\r\n\x1a\n' and data[12:16] == b'IHDR', f'Invalid PNG: {name}'
+    assert struct.unpack('>II', data[16:24]) == (1672, 941), f'Unexpected image dimensions: {name}'
+print('Verified all six original light/dark workspace theme images and their exact SHA-256 hashes.')
+PY
 MATH_FONTS="$APP/Contents/Resources/SwiftMath_SwiftMath.bundle/mathFonts.bundle"
 test -s "$MATH_FONTS/latinmodern-math.otf"
 test -s "$MATH_FONTS/latinmodern-math.plist"

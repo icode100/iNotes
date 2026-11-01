@@ -2,6 +2,8 @@ import SwiftUI
 import NotesCore
 #if os(macOS)
 import AppKit
+#else
+import UIKit
 #endif
 
 /// Window-local presentation state. Hiding chrome never replaces the page editor.
@@ -189,42 +191,92 @@ enum WorkspaceTheme: String, CaseIterable, Identifiable {
     }
 }
 
-/// Small native paths provide scenery in both appearances without bitmap assets.
+/// Shared native-image cache keeps the six full-quality photographs out of the
+/// notebook model and avoids decoding another copy for each navigation pane.
+@MainActor
+enum WorkspaceArtwork {
+    #if os(macOS)
+    private static let cache = NSCache<NSString, NSImage>()
+    #else
+    private static let cache = NSCache<NSString, UIImage>()
+    #endif
+
+    private static let resources: Bundle? = {
+        // SwiftPM puts resources beside its executable. The distributable Mac
+        // app relocates that bundle into Contents/Resources; Xcode's iPad target
+        // copies WorkspaceThemes directly into its main bundle. Resolve these
+        // explicitly so a missing relocated bundle never triggers Bundle.module's
+        // fatal error or depends on a temporary build directory still existing.
+        let bases = [Bundle.main.resourceURL, Bundle.main.bundleURL,
+                     Bundle.main.executableURL?.deletingLastPathComponent()].compactMap { $0 }
+        for base in bases {
+            if let bundle = Bundle(url: base.appendingPathComponent("iNotes_NotesApp.bundle")),
+               bundle.url(forResource: "coast-light", withExtension: "png", subdirectory: "WorkspaceThemes") != nil {
+                return bundle
+            }
+        }
+        return Bundle.main
+    }()
+
+    static func url(theme: WorkspaceTheme, isDark: Bool) -> URL? {
+        guard theme != .classic else { return nil }
+        return resources?.url(forResource: "\(theme.rawValue)-\(isDark ? "dark" : "light")",
+                              withExtension: "png", subdirectory: "WorkspaceThemes")
+    }
+
+    static func image(theme: WorkspaceTheme, isDark: Bool) -> Image? {
+        guard let url = url(theme: theme, isDark: isDark) else { return nil }
+        let key = url.lastPathComponent as NSString
+        cache.countLimit = 2
+        cache.totalCostLimit = 20 * 1024 * 1024
+        #if os(macOS)
+        if let image = cache.object(forKey: key) { return Image(nsImage: image) }
+        guard let image = NSImage(contentsOf: url) else { return nil }
+        cache.setObject(image, forKey: key, cost: 1672 * 941 * 4)
+        return Image(nsImage: image)
+        #else
+        if let image = cache.object(forKey: key) { return Image(uiImage: image) }
+        guard let image = UIImage(contentsOfFile: url.path) else { return nil }
+        cache.setObject(image, forKey: key, cost: 1672 * 941 * 4)
+        return Image(uiImage: image)
+        #endif
+    }
+}
+
 struct WorkspaceScenery: View {
     @AppStorage("workspaceTheme") private var selectedTheme = "classic"
     @Environment(\.colorScheme) private var colorScheme
-    var theme: WorkspaceTheme { WorkspaceTheme(rawValue: selectedTheme) ?? .classic }
+    @Environment(\.colorSchemeContrast) private var contrast
+    private var theme: WorkspaceTheme { WorkspaceTheme(rawValue: selectedTheme) ?? .classic }
+
     var body: some View {
-        Canvas { context, size in
-            guard theme != .classic else { return }
-            let dark = colorScheme == .dark
-            context.fill(Path(CGRect(origin: .zero, size: size)), with: .color(theme.surface(isDark: dark)))
-            let h = min(size.height, 260)
-            for layer in 0..<3 {
-                let offset = Double(layer) * h * 0.13
-                var path = Path()
-                path.move(to: CGPoint(x: 0, y: h * 0.7 + offset))
-                switch theme {
-                case .alpine:
-                    path.addLine(to: CGPoint(x: size.width * 0.22, y: h * 0.28 + offset))
-                    path.addLine(to: CGPoint(x: size.width * 0.45, y: h * 0.65 + offset))
-                    path.addLine(to: CGPoint(x: size.width * 0.73, y: h * 0.12 + offset))
-                    path.addLine(to: CGPoint(x: size.width, y: h * 0.55 + offset))
-                case .forest:
-                    for tree in 0..<9 {
-                        let x = size.width * Double(tree) / 8
-                        path.addLine(to: CGPoint(x: x, y: h * 0.72 + offset))
-                        path.addLine(to: CGPoint(x: x + size.width / 16, y: h * (tree.isMultiple(of: 2) ? 0.3 : 0.45) + offset))
+        GeometryReader { geometry in
+            if theme != .classic {
+                let dark = colorScheme == .dark
+                let surface = theme.surface(isDark: dark)
+                // Keep landscape detail recognizable in narrow navigation panes,
+                // fading into a quiet surface below rather than stretching it.
+                let height = min(geometry.size.height, 420)
+                ZStack(alignment: .top) {
+                    surface
+                    if let artwork = WorkspaceArtwork.image(theme: theme, isDark: dark) {
+                        artwork.resizable().scaledToFill()
+                            .frame(width: geometry.size.width, height: height)
+                            .clipped()
+                            .overlay {
+                                (dark ? Color.black : Color.white)
+                                    .opacity(contrast == .increased ? (dark ? 0.72 : 0.88) : (dark ? 0.38 : 0.64))
+                            }
+                            .overlay {
+                                LinearGradient(stops: [.init(color: surface.opacity(0), location: 0.35),
+                                                       .init(color: surface.opacity(0.3), location: 0.7),
+                                                       .init(color: surface, location: 1)],
+                                               startPoint: .top, endPoint: .bottom)
+                            }
                     }
-                case .coast, .classic:
-                    path.addCurve(to: CGPoint(x: size.width, y: h * 0.55 + offset),
-                                  control1: CGPoint(x: size.width * 0.35, y: offset),
-                                  control2: CGPoint(x: size.width * 0.6, y: h * 1.2 + offset))
                 }
-                path.addLine(to: CGPoint(x: size.width, y: size.height))
-                path.addLine(to: CGPoint(x: 0, y: size.height))
-                path.closeSubpath()
-                context.fill(path, with: .color(theme.accent(isDark: dark).opacity(dark ? 0.065 : 0.055)))
+                .frame(width: geometry.size.width, height: geometry.size.height)
+                .clipped()
             }
         }
         .allowsHitTesting(false).accessibilityHidden(true)

@@ -18,6 +18,28 @@ enum WorkspaceDiagnostics {
             checks += 1
         }
 
+        // Exercise the installed resource lookup, not a source-tree path. This
+        // catches missing SwiftPM bundles and Xcode resource-phase omissions.
+        try check(WorkspaceArtwork.url(theme: .classic, isDark: false) == nil
+                  && WorkspaceArtwork.url(theme: .classic, isDark: true) == nil,
+                  "Classic does not load a photographic background")
+        for theme in [WorkspaceTheme.coast, .forest, .alpine] {
+            var variants: [Data] = []
+            for dark in [false, true] {
+                guard let url = WorkspaceArtwork.url(theme: theme, isDark: dark) else {
+                    throw Failure(description: "Missing bundled \(theme.rawValue) \(dark ? "dark" : "light") artwork")
+                }
+                let bytes = try Data(contentsOf: url)
+                let bitmap = NSBitmapImageRep(data: bytes)
+                try check(bitmap?.pixelsWide == 1672 && bitmap?.pixelsHigh == 941,
+                          "\(theme.rawValue) \(dark ? "dark" : "light") artwork decodes at its original resolution")
+                try check(WorkspaceArtwork.image(theme: theme, isDark: dark) != nil,
+                          "the workspace can load the bundled \(theme.rawValue) appearance")
+                variants.append(bytes)
+            }
+            try check(variants[0] != variants[1], "\(theme.rawValue) has distinct light and dark photographs")
+        }
+
         let directory = FileManager.default.temporaryDirectory.appendingPathComponent("iNotes-workspace-check-\(UUID())")
         let suite = "io.inotes.workspace-diagnostics.\(UUID())"
         guard let preferences = UserDefaults(suiteName: suite) else {
@@ -159,6 +181,28 @@ enum WorkspaceDiagnostics {
                       "pen input still reaches ink over the text layer after full page \(fullPage)")
         }
 
+        let contentBeforeScenery = store.selectedSheet?.pageContent
+        for theme in [WorkspaceTheme.coast, .forest, .alpine] {
+            preferences.set(theme.rawValue, forKey: "workspaceTheme")
+            for appearance in [ColorScheme.light, .dark] {
+                host.rootView = ContentView(presentation: presentation)
+                    .environmentObject(store)
+                    .environmentObject(inputDevice)
+                    .defaultAppStorage(preferences)
+                    .preferredColorScheme(appearance)
+                settle(0.25)
+                let activeTip = page.inkView.tipCursor()
+                try check(findPage(host.view) === page && page.textView === editor
+                          && store.selectedSheet?.pageContent == contentBeforeScenery
+                          && abs(scroll.magnification - 1.25) < 0.001,
+                          "\(theme.rawValue) \(appearance) preserves the editor, notes, and zoom")
+                try check(page.activeTool == .pen && !editor.isEditable && !editor.isSelectable
+                          && scroll.documentCursor === activeTip && page.activePageCursor === activeTip
+                          && page.inputView(at: NSPoint(x: 100, y: 100), event: nil) === page.inkView,
+                          "\(theme.rawValue) \(appearance) keeps pen cursor ownership and routes input to ink")
+            }
+        }
+
         // An offscreen NSHostingView need not publish SwiftUI's virtual AX
         // children until an external accessibility client engages the app.
         // Dispatch each button's real key equivalent through this window
@@ -198,7 +242,7 @@ enum WorkspaceDiagnostics {
         try check(store.selectedSheet == nil && !presentation.fullPage,
                   "losing sheet selection exits full page instead of stranding the empty workspace")
         try check(findPage(host.view) == nil, "empty selection removes the old sheet detail")
-        return "\(checks) workspace integration checks passed (full-page navigation, toolbar restoration, native editor identity, typing undo/redo, caret, zoom, pen cursor, Trash, and empty selection)."
+        return "\(checks) workspace integration checks passed (photographic resources, light/dark scenery, full-page navigation, toolbar restoration, native editor identity, typing undo/redo, caret, zoom, pen cursor, Trash, and empty selection)."
     }
 }
 #endif

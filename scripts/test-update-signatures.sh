@@ -2,7 +2,7 @@
 set -euo pipefail
 ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 cd "$ROOT"
-VERSION="${VERSION:-1.0.0}"
+VERSION="${VERSION:-1.0.1}"
 FEED="${1:-dist/update/appcast.xml}"
 ARCHIVE="${2:-dist/iNotes-$VERSION-arm64.dmg}"
 STAGE="$(mktemp -d /private/tmp/inotes-update-tests.XXXXXX)"

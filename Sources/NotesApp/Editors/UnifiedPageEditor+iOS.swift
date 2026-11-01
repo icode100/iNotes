@@ -653,6 +653,7 @@ struct UnifiedPageEditor: UIViewRepresentable {
             }
             var result: [String: Any]
             do {
+                checks += try runWorkspaceArtworkDiagnostics()
                 canvas.becomeFirstResponder()
                 guard let manager = canvas.undoManager else { throw CocoaError(.featureUnsupported) }
                 let groupsByEvent = manager.groupsByEvent
@@ -703,6 +704,36 @@ struct UnifiedPageEditor: UIViewRepresentable {
                 try JSONSerialization.data(withJSONObject: result, options: [.prettyPrinted, .sortedKeys]).write(to: resultURL, options: .atomic)
                 print("iNotes iPad diagnostics: \(result)")
             } catch { print("Could not write iPad diagnostics: \(error)") }
+        }
+
+        private func runWorkspaceArtworkDiagnostics() throws -> Int {
+            var checks = 0
+            func require(_ condition: @autoclosure () -> Bool, _ message: String) throws {
+                if !condition() { throw NSError(domain: "iNotes.WorkspaceArtworkDiagnostics", code: 1,
+                                               userInfo: [NSLocalizedDescriptionKey: message]) }
+                checks += 1
+            }
+            try require(WorkspaceArtwork.url(theme: .classic, isDark: false) == nil
+                        && WorkspaceArtwork.url(theme: .classic, isDark: true) == nil,
+                        "Classic must not load photographic artwork")
+            for theme in [WorkspaceTheme.coast, .forest, .alpine] {
+                var variants: [Data] = []
+                for dark in [false, true] {
+                    guard let url = WorkspaceArtwork.url(theme: theme, isDark: dark) else {
+                        throw NSError(domain: "iNotes.WorkspaceArtworkDiagnostics", code: 1,
+                                      userInfo: [NSLocalizedDescriptionKey: "Missing bundled \(theme.rawValue) \(dark ? "dark" : "light") artwork"])
+                    }
+                    let bytes = try Data(contentsOf: url)
+                    let image = UIImage(data: bytes)
+                    try require(image?.cgImage?.width == 1672 && image?.cgImage?.height == 941,
+                                "The original \(theme.rawValue) photograph must decode from the iPad bundle")
+                    try require(WorkspaceArtwork.image(theme: theme, isDark: dark) != nil,
+                                "The iPad workspace must load its \(theme.rawValue) appearance")
+                    variants.append(bytes)
+                }
+                try require(variants[0] != variants[1], "\(theme.rawValue) must have distinct light and dark photographs")
+            }
+            return checks
         }
 
         private func runV1Diagnostics() throws -> Int {

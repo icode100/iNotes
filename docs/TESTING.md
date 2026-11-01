@@ -1,5 +1,32 @@
 # Validation
 
+## Version 1.0.1 photographic themes validation
+
+The local ARM64 build 1008 passed all 63 XCTest unit/integration tests, 260 native
+editor checks, 74 workspace checks, 31 equation checks, 12 ruled-text checks,
+8 shortcut checks, and storage/backup/updater integration diagnostics. The new
+workspace checks decode all six photographs and switch between every scenery
+and appearance while retaining page content, native editor identity, zoom, and
+pen cursor ownership. Production cursor/event handling is unchanged.
+
+The iPad ARM64 simulator build passed 164 native checks on an isolated iPad Pro
+M5 simulator. All six bundled PNGs matched the supplied originals byte for byte
+in both the iPad app and mounted Mac DMG. The DMG also passed strict signatures,
+architecture, resources, smoke tests, signed-feed/archive verification, and all
+five update-signature cases.
+
+Live Mac UI inspection switched Coast, Forest, and Alpine through both Light
+and Dark using the Appearance menu in an isolated QA copy of the final app.
+Each supplied photograph appeared in the navigation panes and heading, with
+legible foreground text and unchanged vintage paper and note content. This
+pass did not repeat physical tablet/Pencil testing or the system-cursor capture
+probe; the native cursor regression checks passed.
+
+The app contains 29,101,205 file bytes (27.75 MiB); the DMG is 24,482,447 bytes
+(23.35 MiB). Build, native, simulator, package, and signature logs are under
+`/private/tmp/inotes-photo-validation/`. This is a local build, not a published
+GitHub release.
+
 ## Version 1.0.0 validation
 
 The local ARM64 release candidate passed 63 XCTest unit/integration tests and

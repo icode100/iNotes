@@ -4,8 +4,8 @@ set -euo pipefail
 # Direct distribution for Apple silicon, with a native signed Sparkle updater.
 ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 cd "$ROOT"
-VERSION="${VERSION:-1.0.0}"
-BUILD_NUMBER="${BUILD_NUMBER:-1007}"
+VERSION="${VERSION:-1.0.1}"
+BUILD_NUMBER="${BUILD_NUMBER:-1008}"
 SIGNING_IDENTITY="${SIGNING_IDENTITY:--}"
 export UPDATE_FEED_URL="${UPDATE_FEED_URL-https://github.com/icode100/iNotes/releases/latest/download/appcast.xml}"
 if [[ ! ${UPDATE_PUBLIC_ED_KEY+x} && -f Resources/UpdatePublicEDKey.txt ]]; then
@@ -59,6 +59,7 @@ APP="$STAGE/iNotes.app"
 mkdir -p "$APP/Contents/MacOS" "$APP/Contents/Resources"
 cp "$BIN_DIR/iNotes" "$APP/Contents/MacOS/iNotes"
 cp LICENSE "$APP/Contents/Resources/LICENSE"
+ditto "$BIN_DIR/iNotes_NotesApp.bundle" "$APP/Contents/Resources/iNotes_NotesApp.bundle"
 ditto "$BIN_DIR/SwiftMath_SwiftMath.bundle" "$APP/Contents/Resources/SwiftMath_SwiftMath.bundle"
 bash scripts/trim-math-fonts.sh "$APP/Contents/Resources/SwiftMath_SwiftMath.bundle"
 cp "$SCRATCH/checkouts/SwiftMath/LICENSE" "$APP/Contents/Resources/SwiftMath-LICENSE"

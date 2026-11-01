@@ -1,6 +1,6 @@
 # iNotes
 
-Version 1.0 introduces full-page writing, centered zoom, patterned straight lines, paper templates, vintage pages, and native scenic workspace themes.
+Version 1.0 introduces full-page writing, centered zoom, patterned straight lines, paper templates, vintage pages, and scenic workspace themes. Version 1.0.1 uses the supplied Coast, Forest, and Alpine photographs with matching light/dark variants.
 
 A small, native, open-source notebook for Apple silicon Macs, with a shared iPad app target. Built with SwiftUI, AppKit/UIKit, and PencilKit, with Sparkle for signed Mac updates and SwiftMath for offline equations. No Electron, cloud SDK, account, or telemetry.
 
@@ -55,7 +55,7 @@ Requires an Apple silicon Mac and macOS 14+. Building the installer requires ful
 open dist/iNotes.app
 ```
 
-The default local installer is `dist/iNotes-1.0.0-arm64.dmg` (version 1.0.0, build 1007). Downloaded public builds are also ad hoc signed: **they are not Apple notarized**, so macOS may report that Apple could not verify iNotes is free of malware.
+The default local installer is `dist/iNotes-1.0.1-arm64.dmg` (version 1.0.1, build 1008). Downloaded public builds are also ad hoc signed: **they are not Apple notarized**, so macOS may report that Apple could not verify iNotes is free of malware.
 
 If you trust the download from the [official releases](https://github.com/icode100/iNotes/releases), follow Apple's [per-app first-open procedure](https://support.apple.com/en-us/102445):
 

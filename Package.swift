@@ -21,6 +21,7 @@ let package = Package(
                 .product(name: "SwiftMath", package: "SwiftMath"),
                 .product(name: "Sparkle", package: "Sparkle", condition: .when(platforms: [.macOS]))
             ],
+            resources: [.copy("Resources/WorkspaceThemes")],
             linkerSettings: [
                 .unsafeFlags(["-Xlinker", "-rpath", "-Xlinker", "@executable_path/../Frameworks"], .when(platforms: [.macOS]))
             ]
