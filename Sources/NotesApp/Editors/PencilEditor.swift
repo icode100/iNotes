@@ -13,6 +13,53 @@ private typealias InkPlatformColor = UIColor
 /// remains in the sheet so iPad retains textures, transparency and advanced tools.
 @MainActor
 enum PortableInkConverter {
+    /// PencilKit owns live Pencil input. At the end of a newly drawn stroke,
+    /// apply the selected nib floor without discarding native metadata or
+    /// replacing the stroke's identity. Existing/loaded paths are not passed here.
+    static func applyingMinimumWidth(_ minimum: CGFloat, to stroke: PKStroke) -> PKStroke? {
+        guard minimum.isFinite, minimum > 0, minimum <= InkGeometryLimits.maximumRenderedWidth else { return nil }
+        let t = stroke.transform
+        // Smallest singular value preserves the floor after a nonuniform native
+        // transform, while the overwhelmingly common new-stroke transform is 1.
+        let trace = t.a * t.a + t.b * t.b + t.c * t.c + t.d * t.d
+        let determinant = t.a * t.d - t.b * t.c
+        let scale = sqrt(max(0, (trace - sqrt(max(0, trace * trace - 4 * determinant * determinant))) / 2))
+        guard scale.isFinite, scale > 0 else { return nil }
+        let localMinimum = minimum / scale
+        guard localMinimum <= InkGeometryLimits.maximumRenderedWidth else { return nil }
+        var changed = false
+        let points = stroke.path.map { point -> PKStrokePoint in
+            let shortSide = min(point.size.width, point.size.height)
+            guard shortSide.isFinite, shortSide < localMinimum else { return point }
+            changed = true
+            let factor = shortSide > 0 ? localMinimum / shortSide : 1
+            let size = CGSize(width: max(localMinimum, point.size.width * factor),
+                              height: max(localMinimum, point.size.height * factor))
+            #if compiler(>=6.4)
+            if #available(iOS 27, macOS 27, *) {
+                return PKStrokePoint(location: point.location, timeOffset: point.timeOffset, size: size,
+                                     opacity: point.opacity, force: point.force, azimuth: point.azimuth, altitude: point.altitude,
+                                     secondaryScale: point.secondaryScale, threshold: point.threshold, lateralJitter: point.lateralJitter)
+            }
+            #endif
+            #if compiler(>=6.2)
+            if #available(iOS 26, macOS 26, *) {
+                return PKStrokePoint(location: point.location, timeOffset: point.timeOffset, size: size,
+                                     opacity: point.opacity, force: point.force, azimuth: point.azimuth, altitude: point.altitude,
+                                     secondaryScale: point.secondaryScale, threshold: point.threshold)
+            }
+            #endif
+            return PKStrokePoint(location: point.location, timeOffset: point.timeOffset, size: size,
+                                 opacity: point.opacity, force: point.force, azimuth: point.azimuth, altitude: point.altitude,
+                                 secondaryScale: point.secondaryScale)
+        }
+        guard changed, points.allSatisfy({ $0.size.width.isFinite && $0.size.height.isFinite
+            && $0.size.width <= InkGeometryLimits.maximumRenderedWidth && $0.size.height <= InkGeometryLimits.maximumRenderedWidth }) else { return nil }
+        var result = stroke
+        result.path = PKStrokePath(controlPoints: points, creationDate: stroke.path.creationDate)
+        return result
+    }
+
     /// Both archives and the clipboard cross this boundary before native ink is
     /// rendered or distance-sampled. The JSON byte limit alone cannot bound
     /// transformed geometry or the work required to convert native paths.
@@ -90,7 +137,7 @@ enum PortableInkConverter {
                 let points = fragment.enumerated().compactMap { index, point -> PKStrokePoint? in
                     guard point.x.isFinite, point.y.isFinite, point.pressure.isFinite else { return nil }
                     let pressure = max(0, min(1, point.pressure))
-                    let width = max(0.5, min(100, stroke.width)) * stroke.style.widthMultiplier * (0.35 + 0.65 * pressure)
+                    let width = stroke.renderedWidth(at: point)
                     return PKStrokePoint(location: CGPoint(x: point.x, y: point.y), timeOffset: Double(index) / 120,
                                          size: CGSize(width: width, height: width), opacity: 1, force: pressure,
                                          azimuth: 0, altitude: .pi / 2)
@@ -125,8 +172,10 @@ enum PortableInkConverter {
             var position = 0.0
             func point(_ along: Double) -> InkPoint {
                 let t = along / distance
-                return InkPoint(x: a.x + (b.x - a.x) * t, y: a.y + (b.y - a.y) * t,
-                                pressure: a.pressure + (b.pressure - a.pressure) * t)
+                    let nativeWidth = a.renderedWidth != nil || b.renderedWidth != nil
+                        ? stroke.renderedWidth(at: a) + (stroke.renderedWidth(at: b) - stroke.renderedWidth(at: a)) * t : nil
+                    return InkPoint(x: a.x + (b.x - a.x) * t, y: a.y + (b.y - a.y) * t,
+                                    pressure: a.pressure + (b.pressure - a.pressure) * t, renderedWidth: nativeWidth)
             }
             while position < distance {
                 let visible = phase < lengths[0]
@@ -162,7 +211,6 @@ enum PortableInkConverter {
             for range in ranges {
                 var points: [InkPoint] = []
                 var accumulatedWidth = 0.0
-                var pressureFactor = 0.0
                 // Using visible ranges prevents partially erased ink from returning on Mac.
                 for sample in stroke.path.interpolatedPoints(in: range, by: .distance(1.5)) {
                     guard sampleCount < InkGeometryLimits.maximumPointCount else { throw LibraryError.tooLarge }
@@ -173,14 +221,19 @@ enum PortableInkConverter {
                         throw LibraryError.invalidData("Sampled ink lies outside the supported page area.")
                     }
                     sampleCount += 1
-                    let pressure = sample.force.isFinite ? max(0, min(1, Double(sample.force))) : 1
-                    points.append(InkPoint(x: location.x, y: location.y, pressure: pressure))
-                    accumulatedWidth += Double(max(sample.size.width, sample.size.height) * scale)
-                    pressureFactor += 0.35 + 0.65 * pressure
+                    // PKStrokePoint.force == 1 means *average*, not maximum
+                    // force. Archived paths have no maximumPossibleForce, so
+                    // retain sampled geometry rather than clamp stronger force.
+                    let width = max(0.001, Double(max(sample.size.width, sample.size.height) * scale))
+                    guard width.isFinite, width <= InkGeometryLimits.maximumRenderedWidth else {
+                        throw LibraryError.invalidData("Native ink has an unsupported rendered width.")
+                    }
+                    points.append(InkPoint(x: location.x, y: location.y, renderedWidth: width))
+                    accumulatedWidth += width
                 }
                 guard !points.isEmpty else { continue }
                 guard result.count < InkGeometryLimits.maximumStrokeCount else { throw LibraryError.tooLarge }
-                let width = pressureFactor > 0 ? accumulatedWidth / pressureFactor / style.widthMultiplier : 2.5
+                let width = accumulatedWidth / Double(points.count) / style.widthMultiplier
                 result.append(InkStroke(points: points, colorHex: hex(stroke.ink.color), width: max(0.5, min(100, width)), style: style))
             }
         }

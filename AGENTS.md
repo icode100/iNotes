@@ -86,13 +86,45 @@ Do not treat callback-level cursor assertions alone as proof of the displayed cu
   Check width and zoom changes as well as switching from Text to ink.
 - Plain tool letters are text while a text field/editor has focus. Keep the modified
   tool shortcuts working without stealing note, search, title, or equation input.
+- New pressure-sensitive Mac strokes use the selected tool/nib base as a minimum
+  and grow up to 2× that base. Mouse/unknown pressure means base, not maximum.
+  Preserve normalized zero and fractional pressure; the tablet's advertised
+  16,000-level range is not a reason to quantize samples. Marker/highlighter keep
+  their wider tool bases but must vary locally, without repeated-alpha seams.
+  On tablet-tagged mouse events, `NSEvent.pressure` may expose only 8-bit steps
+  while `CGEvent.tabletEventPointPressure` retains finer samples. Prefer the
+  tablet field only when a tablet record is present; preserve a genuine zero,
+  and fall back for drivers/events without that record. Ordinary mouse pressure
+  must not masquerade as stylus pressure. Test both native tablet-point events
+  and tablet-tagged mouse events; a synthetic factory is not physical hardware.
+- Preserve legacy stroke response when new pressure behavior is added. Decoding
+  absent pressure fields must not restyle existing notes. Native PencilKit force
+  1 means average force, not the normalized maximum: retain its rendered point
+  widths for portable conversion and validate those widths at archive/clipboard
+  boundaries. Selection, translation, erasure and exports must respect them.
+- The user chose native live PencilKit drawing on iPad, with the selected minimum
+  applied only to completed new strokes. Do not rewrite existing/imported ink or
+  discard native path metadata, masks, transforms, identity, or undo behavior.
+  Test late completion and redo persistence; do not call synthetic paths physical
+  Apple Pencil validation or promise a live PencilKit minimum-width guarantee.
+  Defensively support late final ink after an end callback; this ordering is
+  tested synthetically, not established by physical Pencil capture. Keep the pending new
+  path context bounded and clear it for sheet replacement, undo, paste, duplicate,
+  or a new gesture. A cancelled/no-op gesture must release deferred appearance
+  changes; a late path needs both canonical-color persistence and reprojection
+  to the current display theme. Test the actual canvas color as well as saved ink.
+  Async main-queue tests must yield the main actor; nested run-loop pumping inside
+  a main-queue callback cannot reliably run another queued main-queue callback.
 - Theme changes and chrome toggles must preserve the native editor instance,
-  text/ink content, selection/caret, undo history, zoom, and input routing.
+  text/ink content, selection/caret, zoom, and input routing. Mac changes retain
+  undo history. Existing iPad ink-theme reprojection recreates stroke IDs and
+  deliberately clears native ink undo history to avoid targeting stale IDs;
+  do not claim otherwise. Pressure correction alone must retain identity/history.
 - Verify resized/collapsed panes using the actual visible editor viewport. A view
   existing in the hierarchy does not prove it is unobscured by another pane.
 - Newer macOS column backing views can extend underneath the sidebar. Preserve
-  the measured navigation inset and visible-width restoration in
-  `WorkspaceNavigationProbe`; backing-view width is not necessarily pane width.
+  the native nonoverlapping-column policy and older-layout measured inset fallback
+  in `WorkspaceNavigationProbe`; backing-view width is not necessarily pane width.
   The sheet-number badge must pass pointer input through to the page.
 - Use real Mac UI checks for cursor-sensitive changes. Mouse/simulator checks do
   not establish physical tablet pressure, tilt, Pencil hover, or palm rejection.
@@ -120,7 +152,46 @@ Do not treat callback-level cursor assertions alone as proof of the displayed cu
   inspect actual unobscured page edges rather than checking view existence.
 - **Cursor callbacks alone gave a false pass in v0.2.1.** Retain the safeguards
   above and distinguish actual displayed-cursor captures from native cursor
-  ownership assertions. Do not claim physical stylus testing from synthetic input.
+  ownership assertions. A native hover probe must verify that its app is actually
+  the top window at the pointer, not merely marked key/active. `NSView.hitTest`
+  expects superview coordinates, even for flipped hosting views. An obscuring
+  chat window can make system-cursor captures misleading. Do not claim physical
+  stylus testing from synthetic input.
+- **Sheet changes reopened panes and shifted the workspace.** A SwiftUI `Group`
+  forwarded the navigation-probe background into `SheetDetail.id(sheet.id)`.
+  Changing sheets therefore dismantled the probe and restored initially open
+  native panes. Keep the probe on the stable outer `ZStack`; preserve a separate
+  sheet-ID boundary for the editor. Removing that ID without resetting its
+  coordinator/undo manager can apply one sheet's undo history to another sheet.
+  Clearing selection must not override independently hidden pane preferences.
+- **Correct final geometry did not prove smooth motion.** Calling
+  `layoutSubtreeIfNeeded()` and repositioning a divider during native expansion
+  forced the workspace to its destination early and caused a backward bounce.
+  Let AppKit own pane animation; restore a saved width only after completion and
+  only if it differs. Skip intermediate width capture, avoid repeated policy
+  assignments, guard interrupted completions, and respect Reduce Motion.
+  On macOS 26+, disable underlay layout for both middle and detail items together,
+  preserving/restoring their native policies. Detail-only opt-out was insufficient.
+  While native columns animate, a target navigation frame can precede the moving
+  detail frame; do not mistake that for overlap and add SwiftUI padding, which
+  cancels the rendered movement. Use one owner for column geometry.
+  Keep the measured inset fallback for older or overlapping layouts.
+  Regression tests must sample sheet-switch geometry and native collapse events
+  throughout the transition, exercise rapid reversals and detachment, and use
+  presentation-layer samples for animation rather than mistaking target model
+  frames for rendered frames. Record when presentation samples are unavailable.
+- **Interrupted pane animation can overwrite restored state.** A plain
+  `isCollapsed` assignment, a zero-duration replacement, or temporarily disabling
+  the default collapse animation alone does not reliably cancel a native group
+  that has been queued but not started. Isolated probes passed while the full
+  optimized app still failed. Keep teardown restoration alive only through the
+  outstanding native completions, with controller ownership and reentrancy guards;
+  an old owner must never override a replacement owner's latest intent. Verify
+  same-main-turn detach, restoration throughout the pending transaction, original
+  pane policies/widths, and replacement ownership in the full release harness.
+  Do not substitute a fixed delay or weaken the regression to final geometry alone.
+  Keep pre-full-page state through a rapid exit/re-entry, then discard it once
+  exit completes so a later sheets transition cannot restore a stale sidebar.
 
 ## Themes, rendering, and footprint
 

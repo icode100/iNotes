@@ -98,6 +98,12 @@ enum WorkspaceDiagnostics {
             } while Date() < deadline
             host.view.layoutSubtreeIfNeeded()
         }
+        func waitPassively(until condition: () -> Bool, timeout: TimeInterval = 1) {
+            let deadline = Date(timeIntervalSinceNow: timeout)
+            repeat {
+                RunLoop.main.run(until: min(deadline, Date(timeIntervalSinceNow: 0.016)))
+            } while !condition() && Date() < deadline
+        }
         func findPage(_ view: NSView) -> UnifiedMacPageView? {
             if let page = view as? UnifiedMacPageView, page.window === window,
                !page.isHiddenOrHasHiddenAncestor, page.bounds.width > 100 { return page }
@@ -290,7 +296,7 @@ enum WorkspaceDiagnostics {
                   "restoring the heading restores its previous layout height")
 
         presentation.toggleSheets()
-        settle()
+        waitPassively { sheetsItem.isCollapsed && scroll.bounds.width > normalWidth + 100 }
         try checkEditorSurvives("hiding only the sheets pane")
         try check(!presentation.sheetsVisible && sheetsItem.isCollapsed && presentation.headingVisible
                   && sidebarItem.isCollapsed == sidebarWasCollapsed,
@@ -300,7 +306,7 @@ enum WorkspaceDiagnostics {
                   "collapsing sheets gives their horizontal space to the same editor")
         try checkPassiveSidebarCycle(sheetsVisible: false, tool: .text)
         presentation.toggleSheets()
-        settle()
+        waitPassively { !sheetsItem.isCollapsed && abs(scroll.bounds.width - normalWidth) < 5 }
         try checkEditorSurvives("restoring only the sheets pane")
         try checkDetailGeometry("restoring resized sheets")
         geometryHistory.append("Workspace restored viewport width=\(scroll.bounds.width) expected=\(normalWidth)")
@@ -531,6 +537,489 @@ enum WorkspaceDiagnostics {
         try check(store.selectedSheet == nil && !presentation.fullPage,
                   "losing sheet selection exits full page instead of stranding the empty workspace")
         try check(findPage(host.view) == nil, "empty selection removes the old sheet detail")
+
+        // Start a separate two-sheet fixture after the original editor's checks.
+        // A sheet's editor may change identity; window-level navigation must not.
+        preferences.set("text", forKey: "inkTool")
+        preferences.set("classic", forKey: "workspaceTheme")
+        presentation.fullPage = false
+        presentation.headingVisible = true
+        presentation.toolsVisible = true
+        store.create(.workbook, title: "Switch regression", parent: nil)
+        let switchWorkbook = try require(store.folderID, "switch fixture workbook")
+        store.create(.chapter, title: "Shared chapter", parent: switchWorkbook)
+        let switchChapter = try require(store.folderID, "switch fixture chapter")
+        store.create(.sheet, title: "First", parent: switchChapter)
+        let firstSheet = try require(store.sheetID, "first switch fixture sheet")
+        store.update(firstSheet) { $0.body = "Switch fixture A" }
+        store.create(.sheet, title: "Second", parent: switchChapter)
+        let secondSheet = try require(store.sheetID, "second switch fixture sheet")
+        store.update(secondSheet) { $0.body = "Switch fixture B" }
+        store.sheetID = firstSheet
+        settle()
+
+        func require<T>(_ value: T?, _ label: String) throws -> T {
+            guard let value else { throw Failure(description: "Missing \(label)") }
+            return value
+        }
+        func probes(in view: NSView) -> [WorkspaceNavigationProbe] {
+            let own = (view as? WorkspaceNavigationProbe).map { $0.window === window ? [$0] : [] } ?? []
+            return own + view.subviews.flatMap { probes(in: $0) }
+        }
+        func switchFrames(_ activePage: UnifiedMacPageView) -> [NSRect]? {
+            guard let activeScroll = activePage.enclosingScrollView,
+                  let activeDetail = navigation.splitViewItems.last?.viewController.view else { return nil }
+            let detailRect = activeDetail.convert(activeDetail.bounds, to: host.view)
+            let viewport = activeScroll.convert(activeScroll.bounds, to: host.view)
+            // SwiftUI header/tools are virtual accessibility elements offscreen.
+            // Their shared native region above the viewport must remain steady.
+            let chrome = NSRect(x: viewport.minX, y: detailRect.minY, width: viewport.width,
+                                height: max(0, viewport.minY - detailRect.minY))
+            return [detailRect, chrome, viewport]
+        }
+        func typeFixture(_ suffix: String, in activePage: UnifiedMacPageView) throws {
+            let activeEditor = activePage.textView
+            let history = try require(activeEditor.undoManager, "switch fixture undo manager")
+            try check(window.makeFirstResponder(activeEditor), "switch fixture text accepts keyboard focus")
+            activeEditor.setSelectedRange(NSRange(location: (activeEditor.string as NSString).length, length: 0))
+            activeEditor.breakUndoCoalescing()
+            history.beginUndoGrouping()
+            activeEditor.insertText(suffix, replacementRange: activeEditor.selectedRange())
+            activeEditor.breakUndoCoalescing()
+            history.endUndoGrouping()
+            settle() // Editing is fixture setup, never part of the passive switch wait.
+        }
+
+        for mode in ["sidebar hidden", "both panes hidden", "full page"] {
+            presentation.fullPage = false
+            presentation.sheetsVisible = true
+            sidebarItem.isCollapsed = true
+            store.sheetID = firstSheet
+            settle()
+            let expandedWidth = sheetsItem.viewController.view.convert(sheetsItem.viewController.view.bounds, to: split).width
+            if mode == "both panes hidden" { presentation.sheetsVisible = false }
+            if mode == "full page" { presentation.fullPage = true }
+            settle()
+            let firstPage = try require(findPage(host.view), "first mounted switch page")
+            try typeFixture(" a", in: firstPage)
+            let firstHistory = try require(firstPage.textView.undoManager, "first sheet undo")
+            let expectedFirstText = firstPage.textView.string
+            let baselineProbes = probes(in: host.view)
+            try check(baselineProbes.count == 1, "\(mode) starts with one navigation probe")
+            let stableProbe = try require(baselineProbes.first, "stable navigation probe")
+            let expectedFrames = try require(switchFrames(firstPage), "switch fixture geometry")
+            let expectedCollapsed = [sidebarItem.isCollapsed, sheetsItem.isCollapsed]
+            let expectedPresentation = [presentation.fullPage, presentation.sheetsVisible,
+                                        presentation.headingVisible, presentation.toolsVisible]
+
+            func switchPassively(to target: UUID, text: String) throws -> UnifiedMacPageView {
+                var collapseChanges: [String] = []
+                let observations = [sidebarItem, sheetsItem].enumerated().map { index, item in
+                    item.observe(\.isCollapsed, options: [.new]) { item, _ in
+                        MainActor.assumeIsolated {
+                            collapseChanges.append("pane\(index)=\(item.isCollapsed)")
+                        }
+                    }
+                }
+                defer { observations.forEach { $0.invalidate() } }
+                var stableIdentity = true, maximumFrameDrift: CGFloat = 0, samples = 0
+                let deadline = Date(timeIntervalSinceNow: 0.6)
+                store.sheetID = target
+                repeat {
+                    RunLoop.main.run(until: min(deadline, Date(timeIntervalSinceNow: 0.016)))
+                    let currentProbes = probes(in: host.view)
+                    stableIdentity = stableIdentity && currentProbes.count == 1 && currentProbes.first === stableProbe
+                    if let activePage = findPage(host.view), let frames = switchFrames(activePage) {
+                        samples += 1
+                        for (actual, expected) in zip(frames, expectedFrames) {
+                            maximumFrameDrift = max(maximumFrameDrift, [abs(actual.minX - expected.minX),
+                                abs(actual.minY - expected.minY), abs(actual.width - expected.width),
+                                abs(actual.height - expected.height)].max() ?? 0)
+                        }
+                    }
+                } while Date() < deadline
+                // No forced layout/display, focus changes, or page clicks above.
+                geometryHistory.append("Sheet switch [\(mode)] target=\(target) samples=\(samples) probeStable=\(stableIdentity) frameDrift=\(maximumFrameDrift) nativeCollapseChanges=\(collapseChanges)")
+                try check(stableIdentity, "\(mode) sheet switch retains one window-level navigation probe throughout")
+                try check(collapseChanges.isEmpty && [sidebarItem.isCollapsed, sheetsItem.isCollapsed] == expectedCollapsed,
+                          "\(mode) sheet switch never transiently reopens either native pane")
+                try check([presentation.fullPage, presentation.sheetsVisible, presentation.headingVisible,
+                           presentation.toolsVisible] == expectedPresentation,
+                          "\(mode) sheet switch preserves independent chrome preferences")
+                try check(samples > 1 && maximumFrameDrift <= 2,
+                          "\(mode) sheet switch keeps detail, heading/tools region, and viewport steady throughout")
+                let activePage = try require(findPage(host.view), "selected switch page")
+                try check(activePage.textView.string == text && store.selectedSheet?.id == target
+                          && store.selectedSheet?.body == text,
+                          "\(mode) sheet switch displays and persists only the selected sheet's text")
+                try check(activePage.activeTool == .text && activePage.textView.isEditable
+                          && activePage.enclosingScrollView?.documentCursor === NSCursor.iBeam,
+                          "\(mode) sheet switch preserves the selected text tool and cursor")
+                return activePage
+            }
+
+            let secondText = try require(store.library.node(id: secondSheet)?.body, "second sheet text")
+            let secondPage = try switchPassively(to: secondSheet, text: secondText)
+            let secondHistory = try require(secondPage.textView.undoManager, "second sheet undo")
+            try check(secondHistory !== firstHistory && !secondHistory.canUndo,
+                      "\(mode) the second sheet does not inherit the first sheet's undo actions")
+            try typeFixture(" b", in: secondPage)
+            secondHistory.undo()
+            settle()
+            try check(store.library.node(id: secondSheet)?.body == secondText
+                      && store.library.node(id: firstSheet)?.body == expectedFirstText,
+                      "\(mode) undo changes only the edited second sheet")
+            let returnedPage = try switchPassively(to: firstSheet, text: expectedFirstText)
+            try check(returnedPage.textView.undoManager !== secondHistory && returnedPage.textView.undoManager?.canUndo == false,
+                      "\(mode) returning to the first sheet cannot undo a second-sheet edit")
+            presentation.fullPage = false
+            presentation.sheetsVisible = true
+            settle()
+            let restoredWidth = sheetsItem.viewController.view.convert(sheetsItem.viewController.view.bounds, to: split).width
+            try check(abs(restoredWidth - expandedWidth) < 5,
+                      "\(mode) sheet changes preserve the retained sheets-pane width")
+        }
+
+        preferences.set("pen", forKey: "inkTool")
+        presentation.fullPage = false
+        presentation.sheetsVisible = true
+        presentation.headingVisible = true
+        presentation.toolsVisible = true
+        sidebarItem.isCollapsed = true
+        settle()
+        let motionPage = try require(findPage(host.view), "pane-motion page")
+        let motionScroll = try require(motionPage.enclosingScrollView, "pane-motion viewport")
+        let motionProbe = try require(probes(in: host.view).first, "pane-motion probe")
+        let motionContent = store.selectedSheet?.pageContent
+        let motionUndo = motionPage.textView.undoManager
+        let motionCursor = motionPage.inkView.tipCursor()
+        var missingMotionInterpolation: [String] = []
+
+        func samplePaneMotion(_ label: String, actions: [(TimeInterval, () -> Void)],
+                              sidebarHidden: Bool, sheetsVisible: Bool, fullPage: Bool,
+                              monotonic: Bool = false) throws {
+            let start = Date(), deadline = Date(timeIntervalSinceNow: 0.8)
+            var actionIndex = 0, samples = 0, stableIdentity = true, boundedViewport = true
+            var presentationX: [CGFloat] = []
+            func sample() {
+                samples += 1
+                let currentProbes = probes(in: host.view)
+                stableIdentity = stableIdentity && currentProbes.count == 1 && currentProbes.first === motionProbe
+                    && findPage(host.view) === motionPage
+                let viewport = motionScroll.convert(motionScroll.bounds, to: host.view)
+                let splitRect = split.convert(split.bounds, to: host.view)
+                boundedViewport = boundedViewport && viewport.minX.isFinite && viewport.maxX.isFinite
+                    && viewport.width > 100 && viewport.minX >= splitRect.minX - 2
+                    && viewport.maxX <= splitRect.maxX + 2
+                // Model frames may immediately take their destination while
+                // AppKit animates presentation layers. Never mistake that for
+                // a visible jump or require display work in an offscreen fixture.
+                if let layer = motionScroll.layer?.presentation(),
+                   let rootLayer = host.view.layer?.presentation() {
+                    presentationX.append(layer.convert(layer.bounds, to: rootLayer).minX)
+                }
+            }
+            sample()
+            repeat {
+                let elapsed = Date().timeIntervalSince(start)
+                while actionIndex < actions.count, elapsed >= actions[actionIndex].0 {
+                    actions[actionIndex].1()
+                    actionIndex += 1
+                }
+                RunLoop.main.run(until: min(deadline, Date(timeIntervalSinceNow: 0.016)))
+                sample()
+            } while Date() < deadline
+            let finalViewport = motionScroll.convert(motionScroll.bounds, to: host.view)
+            let detailRect = navigation.splitViewItems.last!.viewController.view.convert(
+                navigation.splitViewItems.last!.viewController.view.bounds, to: host.view)
+            let splitRect = split.convert(split.bounds, to: host.view)
+            let navigationRight = navigation.splitViewItems.dropLast().filter { !$0.isCollapsed }
+                .map { $0.viewController.view.convert($0.viewController.view.bounds, to: host.view).maxX }
+                .max() ?? splitRect.minX
+            var backtrack: CGFloat = 0
+            var intermediatePositions: Set<CGFloat> = []
+            if monotonic, let first = presentationX.first, let last = presentationX.last, abs(last - first) > 5 {
+                let direction: CGFloat = last > first ? 1 : -1
+                for (previous, current) in zip(presentationX, presentationX.dropFirst()) {
+                    backtrack = max(backtrack, -(current - previous) * direction)
+                }
+                let span = abs(last - first), lower = min(first, last), upper = max(first, last)
+                intermediatePositions = Set(presentationX.filter {
+                    $0 > lower + span * 0.1 && $0 < upper - span * 0.1
+                }.map { ($0 * 10).rounded() / 10 })
+            }
+            let requiresInterpolation = monotonic && presentationX.count >= 3
+                && !NSWorkspace.shared.accessibilityDisplayShouldReduceMotion
+            geometryHistory.append("Pane motion [\(label)] nativeSamples=\(samples) presentationSamples=\(presentationX.count) presentationBacktrack=\(backtrack) intermediatePositions=\(intermediatePositions.count) finalViewport=\(NSStringFromRect(finalViewport)) positions=\(presentationX)")
+            try check(actionIndex == actions.count && samples > 2 && stableIdentity,
+                      "\(label) processes every requested action without replacing chrome or editor")
+            try check(boundedViewport && abs(finalViewport.minX - max(detailRect.minX, navigationRight)) < 2
+                      && abs(finalViewport.maxX - detailRect.maxX) < 2,
+                      "\(label) keeps sampled viewports bounded and settles without clipping or a blank gutter")
+            try check(sidebarItem.isCollapsed == sidebarHidden && sheetsItem.isCollapsed == !sheetsVisible
+                      && presentation.sheetsVisible == sheetsVisible && presentation.fullPage == fullPage,
+                      "\(label) honors the latest pane intent after interrupted animations finish")
+            try check(backtrack <= 2.5, "\(label) has no backward bounce in available presentation-layer samples")
+            if requiresInterpolation && intermediatePositions.count < 2 { missingMotionInterpolation.append(label) }
+            try check(store.selectedSheet?.pageContent == motionContent && motionPage.textView.undoManager === motionUndo
+                      && motionPage.activeTool == .pen && !motionPage.textView.isEditable
+                      && motionScroll.documentCursor === motionCursor && motionPage.activePageCursor === motionCursor,
+                      "\(label) retains page content, undo isolation, and the pen cursor")
+        }
+
+        try samplePaneMotion("animated sheets hide", actions: [(0, { presentation.toggleSheets() })],
+                             sidebarHidden: true, sheetsVisible: false, fullPage: false, monotonic: true)
+        try samplePaneMotion("animated sheets show", actions: [(0, { presentation.toggleSheets() })],
+                             sidebarHidden: true, sheetsVisible: true, fullPage: false, monotonic: true)
+        try samplePaneMotion("rapid sheets reversal", actions: [
+            (0, { presentation.toggleSheets() }), (0.06, { presentation.toggleSheets() }),
+            (0.12, { presentation.toggleSheets() })],
+            sidebarHidden: true, sheetsVisible: false, fullPage: false)
+        presentation.headingVisible = false
+        presentation.toolsVisible = false
+        sidebarItem.isCollapsed = false
+        settle() // Establish independently hidden sheets/header/tools before the rapid sequence.
+        try samplePaneMotion("rapid full-page reversal", actions: [
+            (0, { presentation.fullPage.toggle() }), (0.06, { presentation.fullPage.toggle() }),
+            (0.12, { presentation.fullPage.toggle() }), (0.18, { presentation.fullPage.toggle() })],
+            sidebarHidden: false, sheetsVisible: false, fullPage: false)
+        try check(!presentation.headingVisible && !presentation.toolsVisible,
+                  "rapid full-page reversal preserves independently hidden heading and tools")
+
+        // Finish an earlier full-page session with the sidebar visible. A
+        // subsequent sheets animation must not reuse that session's snapshot
+        // after the user independently hides the sidebar.
+        presentation.sheetsVisible = true
+        presentation.fullPage = true
+        settle()
+        presentation.fullPage = false
+        settle()
+        sidebarItem.isCollapsed = true
+        settle() // Setup ends here; the mixed transitions below are passive.
+        try check(sidebarItem.isCollapsed && !sheetsItem.isCollapsed && !presentation.fullPage,
+                  "mixed-transition fixture starts with a newly hidden sidebar after an older full-page session")
+        var mixedTransitionReopenedSidebar = false
+        let mixedSidebarObservation = sidebarItem.observe(\.isCollapsed, options: [.new]) { item, _ in
+            MainActor.assumeIsolated {
+                if !item.isCollapsed { mixedTransitionReopenedSidebar = true }
+            }
+        }
+        defer { mixedSidebarObservation.invalidate() }
+        try samplePaneMotion("full page entered during a later sheets animation", actions: [
+            (0, { presentation.toggleSheets() }),
+            (0.06, { presentation.fullPage = true }),
+            (0.38, { presentation.fullPage = false })],
+            sidebarHidden: true, sheetsVisible: false, fullPage: false)
+        mixedSidebarObservation.invalidate()
+        try check(!mixedTransitionReopenedSidebar,
+                  "entering and leaving full page during a later sheets animation never reopens the independently hidden sidebar")
+
+        sidebarItem.isCollapsed = true
+        presentation.fullPage = true
+        settle()
+        var emptySelectionCollapseChanges: [String] = []
+        let emptySelectionObservers = [sidebarItem, sheetsItem].enumerated().map { index, item in
+            item.observe(\.isCollapsed, options: [.new]) { item, _ in
+                MainActor.assumeIsolated { emptySelectionCollapseChanges.append("pane\(index)=\(item.isCollapsed)") }
+            }
+        }
+        store.sheetID = nil
+        let emptyDeadline = Date(timeIntervalSinceNow: 0.6)
+        repeat { RunLoop.main.run(until: min(emptyDeadline, Date(timeIntervalSinceNow: 0.016))) } while Date() < emptyDeadline
+        emptySelectionObservers.forEach { $0.invalidate() }
+        geometryHistory.append("Empty selection hidden-pane transitions=\(emptySelectionCollapseChanges)")
+        try check(store.selectedSheet == nil && !presentation.fullPage && !presentation.sheetsVisible
+                  && sidebarItem.isCollapsed && sheetsItem.isCollapsed && emptySelectionCollapseChanges.isEmpty,
+                  "nil selection exits full page without even transiently reopening independently hidden panes")
+        try check(probes(in: host.view).count == 1 && probes(in: host.view).first === motionProbe
+                  && !presentation.headingVisible && !presentation.toolsVisible,
+                  "nil selection preserves the navigation owner and independent header/tool preferences")
+
+        // Detachment can happen while AppKit is still animating. Use a fresh
+        // native split controller so this lifecycle check has no notebook data.
+        struct NativePaneSnapshot: Equatable {
+            let collapsed: Bool, canCollapse: Bool, collapseFromResize: Bool, springLoaded: Bool
+            let collapseBehavior: NSSplitViewItem.CollapseBehavior
+            let minimum: CGFloat, maximum: CGFloat, preferred: CGFloat, automaticMaximum: CGFloat
+            let adjustsSafeArea: Bool?
+            init(_ item: NSSplitViewItem) {
+                collapsed = item.isCollapsed
+                canCollapse = item.canCollapse
+                collapseFromResize = item.canCollapseFromWindowResize
+                springLoaded = item.isSpringLoaded
+                collapseBehavior = item.collapseBehavior
+                minimum = item.minimumThickness
+                maximum = item.maximumThickness
+                preferred = item.preferredThicknessFraction
+                automaticMaximum = item.automaticMaximumThickness
+                if #available(macOS 26.0, *) { adjustsSafeArea = item.automaticallyAdjustsSafeAreaInsets }
+                else { adjustsSafeArea = nil }
+            }
+            func differences(from expected: NativePaneSnapshot) -> String {
+                var differences: [String] = []
+                func compare<T: Equatable>(_ name: String, _ old: T, _ actual: T) {
+                    if old != actual { differences.append("\(name): expected=\(old), actual=\(actual)") }
+                }
+                compare("collapsed", expected.collapsed, collapsed)
+                compare("canCollapse", expected.canCollapse, canCollapse)
+                compare("collapseFromResize", expected.collapseFromResize, collapseFromResize)
+                compare("springLoaded", expected.springLoaded, springLoaded)
+                compare("collapseBehavior", expected.collapseBehavior, collapseBehavior)
+                compare("minimum", expected.minimum, minimum)
+                compare("maximum", expected.maximum, maximum)
+                compare("preferred", expected.preferred, preferred)
+                compare("automaticMaximum", expected.automaticMaximum, automaticMaximum)
+                compare("adjustsSafeArea", expected.adjustsSafeArea, adjustsSafeArea)
+                return differences.isEmpty ? "none" : differences.joined(separator: "; ")
+            }
+        }
+        let detachedNavigation = NSSplitViewController()
+        detachedNavigation.splitView.isVertical = true
+        let detachedControllers = (0..<3).map { index -> NSViewController in
+            let controller = NSViewController()
+            controller.view = NSView(frame: NSRect(x: 0, y: 0, width: index == 2 ? 550 : 220, height: 600))
+            controller.view.wantsLayer = true
+            return controller
+        }
+        let detachedItems = [NSSplitViewItem(sidebarWithViewController: detachedControllers[0]),
+                             NSSplitViewItem(contentListWithViewController: detachedControllers[1]),
+                             NSSplitViewItem(viewController: detachedControllers[2])]
+        detachedItems[0].minimumThickness = 140
+        detachedItems[0].maximumThickness = 280
+        detachedItems[1].minimumThickness = 170
+        detachedItems[1].maximumThickness = 400
+        detachedItems[2].minimumThickness = 300
+        detachedItems.forEach { detachedNavigation.addSplitViewItem($0) }
+        let detachedWindow = NSWindow(contentRect: NSRect(x: -8000, y: -6000, width: 1000, height: 600),
+                                      styleMask: [.titled, .resizable], backing: .buffered, defer: false)
+        detachedWindow.isReleasedWhenClosed = false
+        detachedWindow.contentViewController = detachedNavigation
+        detachedWindow.orderFront(nil)
+        detachedWindow.setFrame(NSRect(x: -8000, y: -6000, width: 1000, height: 600), display: false)
+        defer { detachedWindow.orderOut(nil); detachedWindow.close() }
+        detachedNavigation.view.layoutSubtreeIfNeeded() // Fixture setup only.
+        RunLoop.main.run(until: Date(timeIntervalSinceNow: 0.1))
+        let originalPaneStates = detachedItems.map(NativePaneSnapshot.init)
+        let originalPaneAnimations = detachedItems.map(\.animations)
+        let originalPaneFrames = detachedItems.map {
+            $0.viewController.view.convert($0.viewController.view.bounds, to: detachedNavigation.splitView)
+        }
+        let detachedProbe = WorkspaceNavigationProbe(frame: detachedControllers[2].view.bounds)
+        var detachedCallbacks = 0
+        detachedProbe.onSheetsVisibilityChange = { _ in detachedCallbacks += 1 }
+        detachedProbe.onLeadingInsetChange = { _ in detachedCallbacks += 1 }
+        detachedControllers[2].view.addSubview(detachedProbe)
+        RunLoop.main.run(until: Date(timeIntervalSinceNow: 0.1))
+        try check(detachedItems[1].minimumThickness == 120,
+                  "detachment fixture mounts the real navigation probe before starting its transition")
+        detachedProbe.fullPage = true
+        detachedProbe.scheduleSynchronization()
+        // Queue detachment on the same main turn, after synchronization but
+        // before AppKit's deferred animation transaction has necessarily begun.
+        // A timer-based delay can let it start first and hide this teardown race.
+        var detachedDuringTransition = false
+        var collapseStarted = false
+        DispatchQueue.main.async {
+            collapseStarted = detachedItems.dropLast().allSatisfy(\.isCollapsed)
+            detachedProbe.dismantle()
+            detachedProbe.removeFromSuperview()
+            detachedDuringTransition = true
+        }
+        let collapseStartDeadline = Date(timeIntervalSinceNow: 0.3)
+        repeat {
+            RunLoop.main.run(until: min(collapseStartDeadline, Date(timeIntervalSinceNow: 0.008)))
+        } while !detachedDuringTransition && Date() < collapseStartDeadline
+        try check(detachedDuringTransition && collapseStarted,
+                  "detachment fixture removes the probe on the same turn as native full-page collapse")
+        let callbacksAtDetachment = detachedCallbacks
+        let immediatePaneStates = detachedItems.map(NativePaneSnapshot.init)
+        var firstDivergentPaneStates: [NativePaneSnapshot]? = immediatePaneStates == originalPaneStates ? nil : immediatePaneStates
+        var restoredThroughout = immediatePaneStates == originalPaneStates
+        let detachedDeadline = Date(timeIntervalSinceNow: 0.6)
+        repeat {
+            RunLoop.main.run(until: min(detachedDeadline, Date(timeIntervalSinceNow: 0.016)))
+            let current = detachedItems.map(NativePaneSnapshot.init)
+            if current != originalPaneStates && firstDivergentPaneStates == nil { firstDivergentPaneStates = current }
+            restoredThroughout = restoredThroughout && current == originalPaneStates
+        } while Date() < detachedDeadline
+        let finalPaneFrames = detachedItems.map {
+            $0.viewController.view.convert($0.viewController.view.bounds, to: detachedNavigation.splitView)
+        }
+        let maximumDetachedFrameDrift = zip(originalPaneFrames, finalPaneFrames).map { original, final in
+            max(abs(original.minX - final.minX), abs(original.width - final.width))
+        }.max() ?? 0
+        geometryHistory.append("Detached probe restored=\(restoredThroughout) lateCallbacks=\(detachedCallbacks - callbacksAtDetachment) frameDrift=\(maximumDetachedFrameDrift) reduceMotion=\(NSWorkspace.shared.accessibilityDisplayShouldReduceMotion)")
+        let finalPaneStates = detachedItems.map(NativePaneSnapshot.init)
+        for index in detachedItems.indices {
+            geometryHistory.append("Detached pane\(index) immediate=[\(immediatePaneStates[index].differences(from: originalPaneStates[index]))] firstDivergence=[\(firstDivergentPaneStates?[index].differences(from: originalPaneStates[index]) ?? "none")] final=[\(finalPaneStates[index].differences(from: originalPaneStates[index]))] originalFrame=\(NSStringFromRect(originalPaneFrames[index])) finalFrame=\(NSStringFromRect(finalPaneFrames[index]))")
+        }
+        // Report both transition and detachment observations in the same run,
+        // even when interpolation fails before the detached fixture executes.
+        try check(missingMotionInterpolation.isEmpty,
+                  "simple pane toggles render intermediate positions instead of jumping: \(missingMotionInterpolation)")
+        try check(restoredThroughout,
+                  "detaching during collapse restores and retains every original native pane policy and state")
+        try check(detachedCallbacks == callbacksAtDetachment,
+                  "a detached navigation probe publishes no delayed geometry or visibility callbacks")
+        try check(zip(detachedItems, originalPaneAnimations).allSatisfy { item, animations in
+            NSDictionary(dictionary: item.animations).isEqual(to: animations)
+        }, "detachment restores each native item's original animation policy for future navigation owners")
+        try check(maximumDetachedFrameDrift <= 2 && finalPaneFrames.allSatisfy { $0.width >= 100 },
+                  "the old collapse animation cannot hide or resize restored columns after probe detachment")
+
+        // A new SwiftUI owner may attach before the old AppKit transaction has
+        // completed. Its latest intent must not become a stale native callback.
+        for successorFullPage in [false, true] {
+            let outgoing = WorkspaceNavigationProbe(frame: detachedControllers[2].view.bounds)
+            detachedControllers[2].view.addSubview(outgoing)
+            RunLoop.main.run(until: Date(timeIntervalSinceNow: 0.1))
+            let successor = WorkspaceNavigationProbe(frame: detachedControllers[2].view.bounds)
+            successor.fullPage = successorFullPage
+            successor.sheetsVisible = true
+            var successorVisibilityChanges: [Bool] = []
+            successor.onSheetsVisibilityChange = { [weak successor] visible in
+                successorVisibilityChanges.append(visible)
+                successor?.sheetsVisible = visible
+            }
+            outgoing.fullPage = true
+            outgoing.scheduleSynchronization()
+            var replaced = false
+            DispatchQueue.main.async {
+                if successorFullPage {
+                    // Exercise SwiftUI's possible attach-before-dismantle order.
+                    // Give the successor a main turn to attempt ownership first.
+                    detachedControllers[2].view.addSubview(successor)
+                    DispatchQueue.main.async {
+                        outgoing.dismantle()
+                        outgoing.removeFromSuperview()
+                        replaced = true
+                    }
+                } else {
+                    outgoing.dismantle()
+                    outgoing.removeFromSuperview()
+                    detachedControllers[2].view.addSubview(successor)
+                    replaced = true
+                }
+            }
+            let replacementDeadline = Date(timeIntervalSinceNow: 0.8)
+            repeat {
+                RunLoop.main.run(until: min(replacementDeadline, Date(timeIntervalSinceNow: 0.016)))
+            } while Date() < replacementDeadline
+            geometryHistory.append("Replacement probe fullPage=\(successorFullPage) collapsed=\(detachedItems.map(\.isCollapsed)) visibilityCallbacks=\(successorVisibilityChanges)")
+            try check(replaced && successor.fullPage == successorFullPage && successor.sheetsVisible
+                      && detachedItems.dropLast().allSatisfy { $0.isCollapsed == successorFullPage },
+                      "the replacement navigation owner keeps its requested panes after every outgoing animation finishes")
+            try check(successorVisibilityChanges.isEmpty,
+                      "an outgoing collapse is never published as the replacement owner's sheets preference")
+            successor.dismantle()
+            successor.removeFromSuperview()
+            let successorDetachDeadline = Date(timeIntervalSinceNow: 0.4)
+            repeat {
+                RunLoop.main.run(until: min(successorDetachDeadline, Date(timeIntervalSinceNow: 0.016)))
+            } while Date() < successorDetachDeadline
+            try check(detachedItems.map(NativePaneSnapshot.init) == originalPaneStates,
+                      "detaching a replacement owner restores the original native pane policies and state")
+        }
         return "\(checks) workspace integration checks passed (photographic resources, light/dark scenery, independent heading and sheets pane, native collapse observation, narrow-window and floating restores, full-page navigation, toolbar restoration, native editor identity, typing undo/redo, caret, zoom, pen cursor, Trash, and empty selection)."
     }
 }

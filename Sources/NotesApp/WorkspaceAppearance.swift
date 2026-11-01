@@ -2,6 +2,7 @@ import SwiftUI
 import NotesCore
 #if os(macOS)
 import AppKit
+import QuartzCore
 #else
 import UIKit
 #endif
@@ -68,6 +69,8 @@ final class WorkspaceNavigationProbe: NSView {
     private var expandedSheetsWidth: CGFloat?
     private var restoreExpandedSheetsWidth = false
     private var applying = false
+    private var transitionInProgress = false
+    private var transitionGeneration = 0
     private var wasFullPage = false
     private var previousCollapsed: [Bool] = []
     private var collapseObservation: NSKeyValueObservation?
@@ -78,6 +81,9 @@ final class WorkspaceNavigationProbe: NSView {
     private var dismantled = false
     private weak var savedController: NSSplitViewController?
     private var savedItems: [ItemState] = []
+    private var savedDetail: ItemState?
+    private var restoration: NavigationRestoration?
+    private static let restorationOwners = NSMapTable<NSSplitViewController, NavigationRestoration>.weakToStrongObjects()
 
     private struct ItemState {
         let item: NSSplitViewItem
@@ -90,6 +96,7 @@ final class WorkspaceNavigationProbe: NSView {
         let maximumThickness: CGFloat
         let preferredThicknessFraction: CGFloat
         let automaticMaximumThickness: CGFloat
+        let adjustsSafeArea: Bool?
 
         init(_ item: NSSplitViewItem) {
             self.item = item
@@ -102,6 +109,8 @@ final class WorkspaceNavigationProbe: NSView {
             maximumThickness = item.maximumThickness
             preferredThicknessFraction = item.preferredThicknessFraction
             automaticMaximumThickness = item.automaticMaximumThickness
+            if #available(macOS 26.0, *) { adjustsSafeArea = item.automaticallyAdjustsSafeAreaInsets }
+            else { adjustsSafeArea = nil }
         }
 
         func restorePolicy() {
@@ -114,11 +123,112 @@ final class WorkspaceNavigationProbe: NSView {
             item.canCollapseFromWindowResize = collapseFromResize
             item.isSpringLoaded = springLoaded
             item.collapseBehavior = collapseBehavior
+            if #available(macOS 26.0, *), let adjustsSafeArea {
+                item.automaticallyAdjustsSafeAreaInsets = adjustsSafeArea
+            }
         }
 
         func restore() {
+            // A zero-duration replacement alone cannot stop a collapse whose
+            // AppKit transaction has been queued but has not started yet. Block
+            // the default collapse animation while restoring, then give the
+            // original animation policy back to the next navigation owner.
+            let originalAnimations = item.animations
+            item.animations["collapsed"] = NSNull()
+            defer { item.animations = originalAnimations }
             restorePolicy()
-            item.isCollapsed = collapsed
+            NSAnimationContext.runAnimationGroup { context in
+                context.duration = 0
+                item.animator().isCollapsed = collapsed
+            }
+        }
+    }
+
+    /// AppKit may start a queued collapse after the probe has been removed.
+    /// Keep native restoration alive until its outstanding transactions finish,
+    /// independently of the SwiftUI view, without publishing presentation state.
+    @MainActor
+    private final class NavigationRestoration {
+        private weak var controller: NSSplitViewController?
+        private let items: [ItemState]
+        private let detail: ItemState?
+        private var pending = 0
+        private var detached = false
+        private var restoring = false
+        private var observations: [NSKeyValueObservation] = []
+        private var afterRestoration: (() -> Void)?
+
+        init(controller: NSSplitViewController, items: [ItemState], detail: ItemState?) {
+            self.controller = controller
+            self.items = items
+            self.detail = detail
+            WorkspaceNavigationProbe.restorationOwners.object(forKey: controller)?.relinquish()
+            WorkspaceNavigationProbe.restorationOwners.setObject(self, forKey: controller)
+        }
+
+        private var ownsController: Bool {
+            guard let controller else { return false }
+            return WorkspaceNavigationProbe.restorationOwners.object(forKey: controller) === self
+        }
+
+        func beginTransition() { pending += 1 }
+
+        func waitForRestoration(_ continuation: @escaping () -> Void) -> Bool {
+            guard ownsController else { return false }
+            // One controller has one current probe. Keep only its latest
+            // request; the continuation weakly owns the replacement view.
+            // SwiftUI may attach the replacement before dismantling this owner.
+            afterRestoration = continuation
+            return true
+        }
+
+        func completeTransition() {
+            pending = max(0, pending - 1)
+            guard detached, ownsController else { return }
+            restore()
+            if pending == 0 {
+                controller?.splitView.layoutSubtreeIfNeeded()
+                finishRestoration()
+            }
+        }
+
+        func detach() {
+            detached = true
+            if pending > 0 {
+                observations = items.map { state in
+                    state.item.observe(\.isCollapsed, options: [.new]) { [weak self] item, _ in
+                        MainActor.assumeIsolated {
+                            guard let self, !self.restoring, self.ownsController,
+                                  item.isCollapsed != state.collapsed else { return }
+                            self.restore()
+                        }
+                    }
+                }
+            }
+            restore()
+            if pending == 0 { finishRestoration() }
+        }
+
+        private func finishRestoration() {
+            relinquish()
+            let continuation = afterRestoration
+            afterRestoration = nil
+            continuation?()
+        }
+
+        private func restore() {
+            guard ownsController, !restoring else { return }
+            restoring = true
+            defer { restoring = false }
+            detail?.restorePolicy()
+            for state in items { state.restore() }
+        }
+
+        private func relinquish() {
+            observations = []
+            if let controller, ownsController {
+                WorkspaceNavigationProbe.restorationOwners.removeObject(forKey: controller)
+            }
         }
     }
 
@@ -182,10 +292,18 @@ final class WorkspaceNavigationProbe: NSView {
         guard let controller = enclosingNavigationController() else { return }
         let navigationItems = Array(controller.splitViewItems.dropLast())
         guard navigationItems.count >= 2 else { return }
+        if let previous = Self.restorationOwners.object(forKey: controller), previous !== restoration,
+           previous.waitForRestoration({ [weak self] in self?.scheduleSynchronization() }) {
+            // Do not observe an old transaction as a user's divider change or
+            // snapshot its intermediate state for a new navigation owner.
+            return
+        }
         if savedController !== controller || savedItems.map({ ObjectIdentifier($0.item) }) != navigationItems.map(ObjectIdentifier.init) {
             restoreNavigation()
             savedController = controller
             savedItems = navigationItems.map(ItemState.init)
+            savedDetail = controller.splitViewItems.last.map(ItemState.init)
+            restoration = NavigationRestoration(controller: controller, items: savedItems, detail: savedDetail)
             splitResizeObserver = NotificationCenter.default.addObserver(
                 forName: NSSplitView.didResizeSubviewsNotification,
                 object: controller.splitView, queue: .main
@@ -202,7 +320,8 @@ final class WorkspaceNavigationProbe: NSView {
             // reopen the pane. AppKit split-item changes occur on the main thread.
             collapseObservation = navigationItems.last?.observe(\.isCollapsed, options: [.new]) { [weak self] item, _ in
                 MainActor.assumeIsolated {
-                    guard let self, !self.applying, !self.fullPage, !self.dismantled else { return }
+                    guard let self, !self.applying, !self.transitionInProgress,
+                          !self.fullPage, !self.dismantled else { return }
                     let visible = !item.isCollapsed
                     self.sheetsVisible = visible
                     if visible { self.restoreExpandedSheetsWidth = true }
@@ -216,26 +335,74 @@ final class WorkspaceNavigationProbe: NSView {
         }
         applying = true
         defer { applying = false }
+        // Let the native split view own column geometry and its animation.
+        // Underlay frames require delayed SwiftUI padding updates which can
+        // visibly lag behind a sidebar transition when the middle pane is shut.
+        if #available(macOS 26.0, *) {
+            for item in controller.splitViewItems.dropFirst() where item.automaticallyAdjustsSafeAreaInsets {
+                item.automaticallyAdjustsSafeAreaInsets = false
+            }
+        }
         guard let sheets = navigationItems.last else { return }
-        sheets.canCollapse = true
-        sheets.canCollapseFromWindowResize = false
-        sheets.minimumThickness = 120
-        sheets.maximumThickness = 480
-        sheets.collapseBehavior = .preferResizingSiblingsWithFixedSplitView
+        if !sheets.canCollapse { sheets.canCollapse = true }
+        if sheets.canCollapseFromWindowResize { sheets.canCollapseFromWindowResize = false }
+        if sheets.minimumThickness != 120 { sheets.minimumThickness = 120 }
+        if sheets.maximumThickness != 480 { sheets.maximumThickness = 480 }
+        if sheets.collapseBehavior != .preferResizingSiblingsWithFixedSplitView {
+            sheets.collapseBehavior = .preferResizingSiblingsWithFixedSplitView
+        }
         // Hosting bounds can include the sidebar underlay on newer macOS.
         // Remember the visible list width, not that larger backing-view width.
-        if !sheets.isCollapsed && !wasFullPage && !restoreExpandedSheetsWidth {
+        if !sheets.isCollapsed && !wasFullPage && !restoreExpandedSheetsWidth && !transitionInProgress {
             let rect = sheets.viewController.view.convert(sheets.viewController.view.bounds, to: controller.splitView)
             expandedSheetsWidth = max(120, min(480, rect.maxX - sheetsLeadingEdge(in: controller)))
         }
+        let changesPresentation = wasFullPage != fullPage || (!fullPage && sheets.isCollapsed == sheetsVisible)
+        let wasTransitioning = transitionInProgress
+        if changesPresentation {
+            transitionGeneration += 1
+            let generation = transitionGeneration
+            transitionInProgress = true
+            NSAnimationContext.beginGrouping()
+            let animation = NSAnimationContext.current
+            animation.duration = NSWorkspace.shared.accessibilityDisplayShouldReduceMotion ? 0 : 0.22
+            animation.timingFunction = CAMediaTimingFunction(name: .easeInEaseOut)
+            animation.allowsImplicitAnimation = true
+            let restoration = restoration
+            restoration?.beginTransition()
+            animation.completionHandler = { [weak self] in
+                MainActor.assumeIsolated {
+                    restoration?.completeTransition()
+                    guard let self, !self.dismantled, self.transitionGeneration == generation else { return }
+                    self.transitionInProgress = false
+                    // Retain this snapshot only through an interrupted exit.
+                    // A later sheets animation must not reuse an older session.
+                    if !self.fullPage { self.previousCollapsed = [] }
+                    self.scheduleSynchronization()
+                }
+            }
+        }
+        defer { if changesPresentation { NSAnimationContext.endGrouping() } }
+        func collapse(_ item: NSSplitViewItem, _ collapsed: Bool) {
+            // Even an equal model value may have an older animation pending.
+            // The newest explicit transition must replace that animation.
+            if changesPresentation { item.animator().isCollapsed = collapsed }
+            else if item.isCollapsed != collapsed { item.isCollapsed = collapsed }
+        }
         if fullPage {
-            if !wasFullPage { previousCollapsed = navigationItems.map(\.isCollapsed) }
+            // A quick exit/re-entry must retain the pre-full-page layout, not
+            // snapshot columns still finishing the interrupted restore animation.
+            if !wasFullPage && (!wasTransitioning || previousCollapsed.isEmpty) {
+                previousCollapsed = navigationItems.map(\.isCollapsed)
+            }
             for item in navigationItems {
-                item.canCollapse = true
-                item.canCollapseFromWindowResize = false
-                item.isSpringLoaded = false
-                item.collapseBehavior = .preferResizingSiblingsWithFixedSplitView
-                if !item.isCollapsed { item.isCollapsed = true }
+                if !item.canCollapse { item.canCollapse = true }
+                if item.canCollapseFromWindowResize { item.canCollapseFromWindowResize = false }
+                if item.isSpringLoaded { item.isSpringLoaded = false }
+                if item.collapseBehavior != .preferResizingSiblingsWithFixedSplitView {
+                    item.collapseBehavior = .preferResizingSiblingsWithFixedSplitView
+                }
+                collapse(item, true)
             }
         } else {
             if wasFullPage {
@@ -244,18 +411,27 @@ final class WorkspaceNavigationProbe: NSView {
                 for (index, state) in savedItems.dropLast().enumerated() {
                     state.restorePolicy()
                     if previousCollapsed.indices.contains(index) {
-                        state.item.isCollapsed = previousCollapsed[index]
+                        collapse(state.item, previousCollapsed[index])
                     }
                 }
             }
             if sheets.isCollapsed == sheetsVisible {
-                sheets.isCollapsed = !sheetsVisible
+                collapse(sheets, !sheetsVisible)
                 if sheetsVisible { restoreExpandedSheetsWidth = true }
             }
-            if sheetsVisible && restoreExpandedSheetsWidth, let expandedSheetsWidth {
+            // Do not force the destination layout while AppKit is expanding
+            // the item: that jumps to its final frame and cancels smooth motion.
+            // Check any remaining width correction only after native completion.
+            if sheetsVisible && restoreExpandedSheetsWidth && !transitionInProgress, let expandedSheetsWidth {
                 controller.splitView.layoutSubtreeIfNeeded()
-                controller.splitView.setPosition(sheetsLeadingEdge(in: controller) + expandedSheetsWidth,
-                                                 ofDividerAt: controller.splitViewItems.count - 2)
+                let targetEdge = sheetsLeadingEdge(in: controller) + expandedSheetsWidth
+                let currentEdge = sheets.viewController.view.convert(sheets.viewController.view.bounds,
+                                                                      to: controller.splitView).maxX
+                // Native expansion normally retains the width. Reassigning an
+                // unchanged divider target can restart its in-flight animation.
+                if abs(currentEdge - targetEdge) > 1 {
+                    controller.splitView.setPosition(targetEdge, ofDividerAt: controller.splitViewItems.count - 2)
+                }
                 restoreExpandedSheetsWidth = false
             }
         }
@@ -282,8 +458,15 @@ final class WorkspaceNavigationProbe: NSView {
         // Newer macOS can extend a column underneath the sidebar. When the
         // middle column is collapsed its successor receives no leading safe
         // area. Supply only the measured overlap; never move/recreate the editor.
-        let overlap = max(0, min(detailRect.width, navigationRight - detailRect.minX)
-                          - detailView.safeAreaInsets.left)
+        var nativeColumns = false
+        if #available(macOS 26.0, *) {
+            nativeColumns = controller.splitViewItems.dropFirst().allSatisfy { !$0.automaticallyAdjustsSafeAreaInsets }
+        }
+        // During expansion a visible pane's target frame can precede the
+        // moving detail frame. With native nonoverlapping columns that is the
+        // animation, not occlusion; compensating with padding cancels its motion.
+        let overlap = nativeColumns ? 0 : max(0, min(detailRect.width, navigationRight - detailRect.minX)
+                                              - detailView.safeAreaInsets.left)
         if let leadingInset, abs(overlap - leadingInset) <= 0.5 { return }
         leadingInset = overlap
         onLeadingInsetChange?(overlap)
@@ -305,6 +488,8 @@ final class WorkspaceNavigationProbe: NSView {
     }
 
     private func restoreNavigation() {
+        transitionGeneration += 1
+        transitionInProgress = false
         collapseObservation = nil
         sidebarObservations = []
         if let splitResizeObserver { NotificationCenter.default.removeObserver(splitResizeObserver) }
@@ -315,13 +500,15 @@ final class WorkspaceNavigationProbe: NSView {
         expandedSheetsWidth = nil
         restoreExpandedSheetsWidth = false
         guard !savedItems.isEmpty else { return }
-        let snapshots = savedItems
         savedItems = []
         savedController = nil
+        savedDetail = nil
         // AppKit retains each item's last expanded width while collapsed.
         // Restoring its sizing policy and collapsed state restores those widths
         // without modifying native view frames or the editor's ancestry.
-        for state in snapshots { state.restore() }
+        let detachedRestoration = restoration
+        restoration = nil
+        detachedRestoration?.detach()
     }
 }
 #endif

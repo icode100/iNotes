@@ -73,6 +73,17 @@ struct UnifiedPageEditor: UIViewRepresentable {
         private let picker = PKToolPicker()
         private var isLoading = false
         private var nativeToolActive = false
+        private var nativeStrokePrefix: [StrokeColorKey]?
+        private var nativeStrokeMinimumWidth: CGFloat?
+        private var nativeStrokeCanonicalInk: UIColor?
+        private var nativeStrokeDisplayInk: UIColor?
+        private var nativeStrokeSourceTheme: PageTheme?
+        private var pendingNativeThemeProjection = false
+        private var nativeCompletionAwaitingDrawing = false
+        private var nativeStrokeGeneration = 0
+        private var inkPersistenceScheduled = false
+        private var minimumWidthByNativeStroke: [StrokeColorKey: NativeStrokeFloor] = [:]
+        private var minimumWidthStrokeOrder: [StrokeColorKey] = []
         private var rejectedDrawing = false
         private var lastData: Data?
         private var lastStrokes: [InkStroke] = []
@@ -107,7 +118,10 @@ struct UnifiedPageEditor: UIViewRepresentable {
                             self.richTextCoordinator.textViewDidChange(view.page.textView)
                             view.resizePage()
                         }
-                        if manager === view.page.canvas.undoManager { self.persistInk(view.page.canvas) }
+                        if manager === view.page.canvas.undoManager {
+                            self.clearPendingNativeStroke()
+                            self.scheduleInkPersistence(view.page.canvas)
+                        }
                         for box in view.page.textBoxViews.values where manager === box.editor.undoManager { box.persistNativeUndo() }
                     }
                 })
@@ -138,6 +152,11 @@ struct UnifiedPageEditor: UIViewRepresentable {
                 self.render(content, on: view, theme: self.appliedTheme ?? self.parent.theme)
             }
             selection.onCommit = { [weak self] content in self?.publishPage(content) }
+            view.page.canvas.onNonDrawingEdit = { [weak self, weak view] in
+                guard let self, let view else { return }
+                self.clearPendingNativeStroke()
+                self.scheduleInkPersistence(view.page.canvas)
+            }
             expectedDrawingData = view.page.canvas.drawing.dataRepresentation()
             picker.addObserver(view.page.canvas)
             picker.addObserver(self)
@@ -172,7 +191,7 @@ struct UnifiedPageEditor: UIViewRepresentable {
         func update(_ view: UnifiedPageScrollView, enabled: Bool) {
             // A system appearance transition waits until the current Pencil
             // gesture completes, preserving in-flight native ink and pressure.
-            let theme = nativeToolActive ? (appliedTheme ?? parent.theme) : parent.theme
+            let theme = nativeToolActive || nativeCompletionAwaitingDrawing ? (appliedTheme ?? parent.theme) : parent.theme
             let incoming = PageContent(text: parent.text, rtfData: parent.rtfData, strokes: parent.strokes,
                                        pencilKitData: parent.pencilKitData, textBoxes: parent.textBoxes, equations: parent.equations)
             if !selection.hasPreview { selection.load(incoming) }
@@ -219,7 +238,7 @@ struct UnifiedPageEditor: UIViewRepresentable {
             } else if themeChanged {
                 let canonical = canonicalDrawing(from: view.page.canvas.drawing, theme: appliedTheme ?? .light)
                 rememberCanonicalColors(in: canonical)
-                show(canonicalDrawing: canonical, on: view.page.canvas, theme: theme)
+                show(canonicalDrawing: canonical, on: view.page.canvas, theme: theme, preservePendingNativeStroke: true)
             }
             if themeChanged {
                 // PencilKit assigns stroke identifiers when replacing a
@@ -286,7 +305,7 @@ struct UnifiedPageEditor: UIViewRepresentable {
             switch tool {
             case .text, .select, .lasso: break
             case .pen, .line: canvas.tool = PKInkingTool(.pen, color: color, width: width * InkStyle.pen.widthMultiplier)
-            case .pencil: canvas.tool = PKInkingTool(.pencil, color: color, width: width * InkStyle.pencil.widthMultiplier)
+            case .pencil: canvas.tool = PKInkingTool(.pencil, color: color, width: width)
             case .marker: canvas.tool = PKInkingTool(.marker, color: color, width: width * InkStyle.marker.widthMultiplier)
             case .highlighter: canvas.tool = PKInkingTool(.marker, color: color.withAlphaComponent(0.3), width: width * InkStyle.highlighter.widthMultiplier)
             case .eraser: canvas.tool = PKEraserTool(.vector)
@@ -317,6 +336,7 @@ struct UnifiedPageEditor: UIViewRepresentable {
 
         func detach(_ view: UnifiedPageScrollView) {
             nativeToolActive = false
+            finishNativeStroke(in: view.page.canvas)
             persistInk(view.page.canvas)
             picker.setVisible(false, forFirstResponder: view.page.canvas)
             picker.removeObserver(view.page.canvas)
@@ -325,10 +345,13 @@ struct UnifiedPageEditor: UIViewRepresentable {
             view.page.canvas.undoManager?.removeAllActions(withTarget: view.page.canvas)
             linePreview.removeFromSuperlayer()
             view.page.onPencil = nil
+            view.page.canvas.onNonDrawingEdit = nil
             selection.onRender = nil
             selection.onCommit = nil
             selection.page = nil
             view.onAttachment = nil
+            clearPendingNativeStroke()
+            self.view = nil
         }
 
         func viewForZooming(in scrollView: UIScrollView) -> UIView? { view?.page }
@@ -351,18 +374,153 @@ struct UnifiedPageEditor: UIViewRepresentable {
         }
 
         func canvasViewDidBeginUsingTool(_ canvasView: PKCanvasView) {
+            if !nativeToolActive { finishNativeStroke(in: canvasView) }
+            clearPendingNativeStroke()
             nativeToolActive = true
+            if let ink = canvasView.tool as? PKInkingTool {
+                nativeStrokePrefix = canvasView.drawing.strokes.map(StrokeColorKey.init)
+                nativeStrokeMinimumWidth = ink.width
+                nativeStrokeSourceTheme = appliedTheme ?? parent.theme
+                nativeStrokeDisplayInk = ink.color
+                if let configuredDisplayInk, let configuredCanonicalInk, ink.color.hasSameRGB(as: configuredDisplayInk) {
+                    nativeStrokeCanonicalInk = configuredCanonicalInk
+                } else {
+                    nativeStrokeCanonicalInk = UIColor(noteHex: (appliedTheme ?? parent.theme).canonicalInkHex(ink.color.noteHex))
+                }
+            } else {
+                nativeStrokePrefix = nil
+                nativeStrokeMinimumWidth = nil
+            }
             parent.onInputChange?("Apple Pencil")
         }
 
         func canvasViewDrawingDidChange(_ canvasView: PKCanvasView) {
-            if !nativeToolActive { persistInk(canvasView) }
+            guard !isLoading else { return }
+            if !nativeToolActive {
+                finishNativeStroke(in: canvasView)
+                persistInk(canvasView)
+                applyDeferredTheme()
+            }
         }
 
         func canvasViewDidEndUsingTool(_ canvasView: PKCanvasView) {
             nativeToolActive = false
+            nativeCompletionAwaitingDrawing = nativeStrokePrefix != nil
+            finishNativeStroke(in: canvasView)
             persistInk(canvasView)
-            if appliedTheme != parent.theme, let view { update(view, enabled: view.isUserInteractionEnabled) }
+            let generation = nativeStrokeGeneration
+            DispatchQueue.main.async { [weak self, weak canvasView] in
+                guard let self, let canvasView, let view = self.view, view.page.canvas === canvasView,
+                      !self.nativeToolActive, self.nativeStrokeGeneration == generation else { return }
+                // PencilKit may deliver the final path after the tool-end
+                // callback. Keep a still-empty completion pending for its next
+                // drawing callback instead of discarding the stroke's floor.
+                self.finishNativeStroke(in: canvasView)
+                self.persistInk(canvasView)
+                // A cancelled/no-op gesture may never append a path. Release
+                // its theme hold after this main turn, but retain its prefix so
+                // a genuinely late final path still receives the correct floor.
+                self.nativeCompletionAwaitingDrawing = false
+                self.applyDeferredTheme()
+            }
+        }
+
+        private func applyDeferredTheme() {
+            guard !nativeToolActive, !nativeCompletionAwaitingDrawing,
+                  let view, view.page.canvas.undoManager?.isUndoing != true,
+                  view.page.canvas.undoManager?.isRedoing != true else { return }
+            if appliedTheme != parent.theme {
+                update(view, enabled: view.isUserInteractionEnabled)
+            } else if pendingNativeThemeProjection {
+                // A final native path may arrive after the no-op grace turn
+                // already changed the paper. Its saved ink is canonical, but
+                // its live color still belongs to the tool-begin theme.
+                let theme = appliedTheme ?? parent.theme
+                let canonical = canonicalDrawing(from: view.page.canvas.drawing, theme: theme)
+                rememberCanonicalColors(in: canonical)
+                show(canonicalDrawing: canonical, on: view.page.canvas, theme: theme)
+                // Match the normal theme transition: projected stroke IDs must
+                // not leave native undo actions targeting the old IDs.
+                view.page.canvas.undoManager?.removeAllActions()
+            }
+        }
+
+        /// Leave PencilKit's live prediction and force response untouched. Only
+        /// the new paths appended by this completed gesture receive a nib floor.
+        private func finishNativeStroke(in canvas: PKCanvasView) {
+            guard !nativeToolActive, let prefix = nativeStrokePrefix, let minimum = nativeStrokeMinimumWidth else { return }
+            guard minimum.isFinite, minimum > 0, canvas.drawing.strokes.count >= prefix.count,
+                  canvas.drawing.strokes.prefix(prefix.count).map(StrokeColorKey.init) == prefix else {
+                clearPendingNativeStroke()
+                return
+            }
+            guard canvas.drawing.strokes.count > prefix.count else { return }
+            defer { clearPendingNativeStroke() }
+            if let nativeStrokeSourceTheme, nativeStrokeSourceTheme != (appliedTheme ?? parent.theme) {
+                pendingNativeThemeProjection = true
+            }
+            for stroke in canvas.drawing.strokes.dropFirst(prefix.count) {
+                let key = StrokeColorKey(stroke)
+                if let nativeStrokeDisplayInk, let nativeStrokeCanonicalInk,
+                   stroke.ink.color.hasSameRGB(as: nativeStrokeDisplayInk) {
+                    canonicalColorsByPath[key] = nativeStrokeCanonicalInk.withAlphaComponent(stroke.ink.color.cgColor.alpha)
+                }
+                if minimumWidthByNativeStroke[key] == nil {
+                    minimumWidthStrokeOrder.append(key)
+                }
+                minimumWidthByNativeStroke[key] = NativeStrokeFloor(minimum: minimum, transform: stroke.transform)
+            }
+            let excess = minimumWidthStrokeOrder.count - InkGeometryLimits.maximumStrokeCount
+            if excess > 0 {
+                for key in minimumWidthStrokeOrder.prefix(excess) { minimumWidthByNativeStroke.removeValue(forKey: key) }
+                minimumWidthStrokeOrder.removeFirst(excess)
+            }
+            applyKnownMinimumWidths(on: canvas)
+        }
+
+        private func clearPendingNativeStroke() {
+            nativeStrokePrefix = nil
+            nativeStrokeMinimumWidth = nil
+            nativeStrokeCanonicalInk = nil
+            nativeStrokeDisplayInk = nil
+            nativeStrokeSourceTheme = nil
+            nativeCompletionAwaitingDrawing = false
+            nativeStrokeGeneration &+= 1
+        }
+
+        private func scheduleInkPersistence(_ canvas: PKCanvasView) {
+            guard !inkPersistenceScheduled else { return }
+            inkPersistenceScheduled = true
+            DispatchQueue.main.async { [weak self, weak canvas] in
+                guard let self else { return }
+                self.inkPersistenceScheduled = false
+                guard let canvas, self.view?.page.canvas === canvas else { return }
+                self.finishNativeStroke(in: canvas)
+                self.persistInk(canvas)
+                self.applyDeferredTheme()
+            }
+        }
+
+        /// Native redo may restore its original pre-floor path. Remember only
+        /// this editor session's newly drawn paths; imported and legacy paths
+        /// never enter this cache and therefore retain their original geometry.
+        private func applyKnownMinimumWidths(on canvas: PKCanvasView) {
+            guard !nativeToolActive, !isLoading, !minimumWidthByNativeStroke.isEmpty else { return }
+            var changed = false
+            let strokes = canvas.drawing.strokes.map { stroke -> PKStroke in
+                guard let floor = minimumWidthByNativeStroke[StrokeColorKey(stroke)], floor.matches(stroke.transform),
+                      let corrected = PortableInkConverter.applyingMinimumWidth(floor.minimum, to: stroke) else { return stroke }
+                changed = true
+                return corrected
+            }
+            guard changed else { return }
+            let manager = canvas.undoManager
+            let wasRegistering = manager?.isUndoRegistrationEnabled == true
+            if wasRegistering { manager?.disableUndoRegistration() }
+            isLoading = true
+            canvas.drawing = PKDrawing(strokes: strokes)
+            isLoading = false
+            if wasRegistering { manager?.enableUndoRegistration() }
         }
 
         @objc private func handleLineGesture(_ gesture: PencilLineGestureRecognizer) {
@@ -376,7 +534,7 @@ struct UnifiedPageEditor: UIViewRepresentable {
                 let ink = view.page.canvas.tool as? PKInkingTool
                 linePreview.strokeColor = (ink?.color ?? UIColor(noteHex: parent.colorHex)).cgColor
                 let selectedWidth = Double(ink?.width ?? CGFloat(parent.lineWidth))
-                let pressureFactor = 0.35 + 0.65 * (start.pressure + end.pressure) / 2
+                let pressureFactor = InkPressure.widthMultiplier((start.pressure + end.pressure) / 2, response: .baseWidth)
                 linePreview.lineWidth = CGFloat(selectedWidth * pressureFactor)
                 linePreview.lineDashPattern = parent.linePattern == .solid ? nil : parent.linePattern.dashLengths(width: selectedWidth).map { NSNumber(value: $0) }
                 linePreview.path = path
@@ -395,7 +553,7 @@ struct UnifiedPageEditor: UIViewRepresentable {
             let selectedWidth = selectedInk.map { Double($0.width) } ?? parent.lineWidth
             let width = max(0.5, min(100, selectedWidth))
             let portable = InkStroke(points: [start, end], colorHex: (selectedInk?.color ?? UIColor(noteHex: parent.colorHex)).noteHex,
-                                     width: width, style: .pen, linePattern: parent.linePattern)
+                                     width: width, style: .pen, linePattern: parent.linePattern, pressureResponse: .baseWidth)
             do {
                 let addition = try PortableInkConverter.validatedDrawing(nil, fallback: [portable])
                 let combined = PKDrawing(strokes: canvas.drawing.strokes + addition.strokes)
@@ -409,6 +567,10 @@ struct UnifiedPageEditor: UIViewRepresentable {
         /// Line gestures never enter PencilKit's freehand undo history. Their
         /// complete before/after snapshots form one undoable document operation.
         private func replaceDrawing(_ drawing: PKDrawing, in canvas: PKCanvasView, registerUndo: Bool) {
+            if !nativeToolActive {
+                pendingNativeThemeProjection = false
+                clearPendingNativeStroke()
+            }
             if registerUndo, let manager = canvas.undoManager {
                 let before = canvas.drawing
                 let needsGroup = manager.groupingLevel == 0
@@ -426,10 +588,15 @@ struct UnifiedPageEditor: UIViewRepresentable {
         }
 
         private func persistInk(_ canvas: PKCanvasView) {
-            guard !isLoading, !rejectedDrawing else { return }
+            guard !isLoading, !nativeToolActive, !rejectedDrawing else { return }
+            guard canvas.undoManager?.isUndoing != true, canvas.undoManager?.isRedoing != true else {
+                scheduleInkPersistence(canvas)
+                return
+            }
             #if DEBUG
             guard !isRunningDiagnostics else { return }
             #endif
+            applyKnownMinimumWidths(on: canvas)
             let displayedData = canvas.drawing.dataRepresentation()
             guard displayedData != expectedDrawingData else { return }
             let canonical = canonicalDrawing(from: canvas.drawing, theme: appliedTheme ?? parent.theme)
@@ -485,6 +652,8 @@ struct UnifiedPageEditor: UIViewRepresentable {
         }
 
         private func loadDrawing(_ content: PageContent, in view: UnifiedPageScrollView) -> PKDrawing {
+            pendingNativeThemeProjection = false
+            clearPendingNativeStroke()
             do {
                 let drawing = try PortableInkConverter.validatedDrawing(content.pencilKitData, fallback: content.strokes)
                 rejectedDrawing = false
@@ -557,12 +726,27 @@ struct UnifiedPageEditor: UIViewRepresentable {
             }
         }
 
+        private struct NativeStrokeFloor {
+            let minimum: CGFloat
+            let transform: CGAffineTransform
+
+            func matches(_ value: CGAffineTransform) -> Bool {
+                // Moving ink retains its nib. Deliberately scaling or rotating
+                // existing ink is a separate edit and must not be rewritten.
+                value.a == transform.a && value.b == transform.b
+                    && value.c == transform.c && value.d == transform.d
+            }
+        }
+
         private func rememberCanonicalColors(in drawing: PKDrawing) {
             canonicalColorsByPath.removeAll(keepingCapacity: true)
             for stroke in drawing.strokes { canonicalColorsByPath[StrokeColorKey(stroke)] = stroke.ink.color }
         }
 
-        private func show(canonicalDrawing: PKDrawing, on canvas: PKCanvasView, theme: PageTheme) {
+        private func show(canonicalDrawing: PKDrawing, on canvas: PKCanvasView, theme: PageTheme,
+                          preservePendingNativeStroke: Bool = false) {
+            pendingNativeThemeProjection = false
+            if !preservePendingNativeStroke { clearPendingNativeStroke() }
             let displayed = canonicalDrawing.strokes.map { stroke -> PKStroke in
                 let color = UIColor(noteHex: theme.resolvedInkHex(stroke.ink.color.noteHex))
                     .withAlphaComponent(stroke.ink.color.cgColor.alpha)
@@ -615,9 +799,14 @@ struct UnifiedPageEditor: UIViewRepresentable {
             for stroke in drawing.strokes {
                 var converted = try PortableInkConverter.validatedStrokes(from: PKDrawing(strokes: [stroke]))
                 if stroke.path.count == 2, stroke.mask == nil, stroke.ink.inkType == .pen, converted.count == 1 {
-                    converted[0].points = [stroke.path[0], stroke.path[1]].map { point in
+                    let scale = sqrt(abs(stroke.transform.a * stroke.transform.d - stroke.transform.b * stroke.transform.c))
+                    converted[0].points = try [stroke.path[0], stroke.path[1]].map { point in
                         let location = point.location.applying(stroke.transform)
-                        return InkPoint(x: location.x, y: location.y, pressure: Double(max(0, min(1, point.force))))
+                        let width = max(0.001, Double(max(point.size.width, point.size.height) * scale))
+                        guard width.isFinite, width <= InkGeometryLimits.maximumRenderedWidth else {
+                            throw LibraryError.invalidData("Native ink has an unsupported rendered width.")
+                        }
+                        return InkPoint(x: location.x, y: location.y, renderedWidth: width)
                     }
                 }
                 let additionCount = converted.reduce(0) { $0 + $1.points.count }
@@ -633,10 +822,10 @@ struct UnifiedPageEditor: UIViewRepresentable {
         private func scheduleDiagnosticsIfRequested() {
             guard !didRunDiagnostics, ProcessInfo.processInfo.environment["INOTES_IOS_EDITOR_DIAGNOSTICS"] == "1" else { return }
             didRunDiagnostics = true
-            DispatchQueue.main.async { [weak self] in self?.runLineDiagnostics() }
+            Task { @MainActor [weak self] in await self?.runLineDiagnostics() }
         }
 
-        private func runLineDiagnostics() {
+        private func runLineDiagnostics() async {
             guard let view else { return }
             let canvas = view.page.canvas
             let original = canvas.drawing
@@ -692,7 +881,8 @@ struct UnifiedPageEditor: UIViewRepresentable {
                 checks += try runToolShortcutDiagnostics()
                 checks += try runInputRoutingDiagnostics()
                 checks += try runNativeTypingUndoDiagnostics()
-                result = ["passed": true, "checks": checks, "message": "iPad straight lines, themes, ruled text baselines, canonical ink, mixed text/ink/equation selection, native metadata, clipboard duplication, and atomic undo/redo passed"]
+                checks += try await runPressureDiagnostics()
+                result = ["passed": true, "checks": checks, "message": "iPad straight lines, pressure floors and precision, themes, ruled text baselines, canonical ink, mixed text/ink/equation selection, native metadata, clipboard duplication, and atomic undo/redo passed"]
             } catch { result = ["passed": false, "checks": checks, "message": error.localizedDescription] }
             isLoading = true
             canvas.drawing = original
@@ -1282,6 +1472,256 @@ struct UnifiedPageEditor: UIViewRepresentable {
                         "Typing fixtures must leave the original page and rich-text bytes unchanged")
             return checks
         }
+
+        /// Synthetic native paths exercise completion/persistence/undo; they do
+        /// not claim physical Apple Pencil force, tilt or latency verification.
+        private func runPressureDiagnostics() async throws -> Int {
+            guard let originalView = view, let originalWindow = originalView.window, let scene = originalWindow.windowScene else {
+                throw CocoaError(.featureUnsupported)
+            }
+            var checks = 0
+            func require(_ condition: @autoclosure () -> Bool, _ message: String) throws {
+                if !condition() { throw NSError(domain: "iNotes.iPadPressureDiagnostics", code: 1,
+                                               userInfo: [NSLocalizedDescriptionKey: message]) }
+                checks += 1
+            }
+            func nextMainTurn() async {
+                // A nested RunLoop inside a main-queue callback cannot drain
+                // the next main-queue block. Suspend the diagnostic task so the
+                // production completion/undo persistence actually gets its turn.
+                await withCheckedContinuation { (continuation: CheckedContinuation<Void, Never>) in
+                    DispatchQueue.main.async { continuation.resume() }
+                }
+            }
+            let host = UIViewController()
+            let window = UIWindow(windowScene: scene)
+            window.frame = scene.coordinateSpace.bounds
+            window.rootViewController = host
+            window.windowLevel = originalWindow.windowLevel + 1
+            window.makeKeyAndVisible()
+            defer {
+                window.isHidden = true
+                window.rootViewController = nil
+                originalWindow.makeKey()
+                focus(parent.tool, in: originalView)
+            }
+            let legacy = InkStroke(points: [InkPoint(x: 20, y: 30, pressure: 0.1), InkPoint(x: 80, y: 30, pressure: 0.1)], width: 2)
+            var savedStrokes = [legacy]
+            var savedData: Data? = PortableInkConverter.drawing(from: savedStrokes).dataRepresentation()
+            var writes = 0
+            let fixtureEditor = UnifiedPageEditor(text: .constant(""), rtfData: .constant(nil),
+                strokes: Binding(get: { savedStrokes }, set: { savedStrokes = $0 }),
+                pencilKitData: Binding(get: { savedData }, set: { savedData = $0 }),
+                tool: .pen, lineWidth: 5, theme: .light,
+                onInkChange: { strokes, data in savedStrokes = strokes; savedData = data; writes += 1 })
+            let coordinator = Coordinator(fixtureEditor)
+            coordinator.didRunDiagnostics = true
+            let fixture = UnifiedPageScrollView(frame: CGRect(x: 20, y: 20, width: 700, height: 700))
+            coordinator.attach(fixture)
+            coordinator.update(fixture, enabled: true)
+            host.view.addSubview(fixture)
+            let canvas = fixture.page.canvas
+            canvas.becomeFirstResponder()
+            guard let manager = canvas.undoManager,
+                  manager !== originalView.page.canvas.undoManager else { throw CocoaError(.featureUnsupported) }
+            let groupsByEvent = manager.groupsByEvent
+            manager.groupsByEvent = false
+            manager.removeAllActions()
+            defer {
+                coordinator.detach(fixture)
+                manager.removeAllActions()
+                manager.groupsByEvent = groupsByEvent
+                fixture.removeFromSuperview()
+            }
+            let baseline = canvas.drawing
+            let originalWidth = baseline.strokes[0].path[0].size.width
+            let points = [
+                PKStrokePoint(location: CGPoint(x: 120, y: 120), timeOffset: 0, size: CGSize(width: 1, height: 1),
+                              opacity: 0.8, force: 0.2, azimuth: 0.3, altitude: 1.1, secondaryScale: 0.7),
+                PKStrokePoint(location: CGPoint(x: 240, y: 150), timeOffset: 0.2, size: CGSize(width: 7, height: 7),
+                              opacity: 0.9, force: 2.5, azimuth: 0.6, altitude: 1.2, secondaryScale: 0.8)
+            ]
+            let native = PKStroke(ink: PKInk(.pen, color: .black),
+                                  path: PKStrokePath(controlPoints: points, creationDate: Date(timeIntervalSince1970: 1_234)),
+                                  transform: CGAffineTransform(translationX: 3, y: 4))
+            canvas.tool = PKInkingTool(.pen, color: .black, width: 5)
+            coordinator.canvasViewDidBeginUsingTool(canvas)
+            coordinator.replaceDrawing(PKDrawing(strokes: baseline.strokes + [native]), in: canvas, registerUndo: true)
+            coordinator.applyKnownMinimumWidths(on: canvas)
+            try require(canvas.drawing.strokes.last?.path[0].size.width == 1 && writes == 0,
+                        "An active Pencil gesture must retain native live geometry without intermediate saves")
+            let beforeFloor = canvas.drawing.strokes[1]
+            coordinator.canvasViewDidEndUsingTool(canvas)
+            let completed = canvas.drawing.strokes[1]
+            try require(completed.path[0].size.width == 5 && completed.path[1].size.width == 7,
+                        "Only thinner points in a completed new Pencil stroke must grow to its selected nib")
+            try require(canvas.drawing.strokes[0].path[0].size.width == originalWidth,
+                        "Finishing new ink must not enlarge an existing legacy stroke")
+            // Compare stored paths across the actual mutation boundary. Native
+            // path construction may quantize standalone PKStrokePoint values.
+            let beforeMetadata = [beforeFloor.path[0].force, beforeFloor.path[1].force,
+                                  beforeFloor.path[0].opacity, beforeFloor.path[0].azimuth,
+                                  beforeFloor.path[0].altitude, beforeFloor.path[0].secondaryScale]
+            let afterMetadata = [completed.path[0].force, completed.path[1].force,
+                                 completed.path[0].opacity, completed.path[0].azimuth,
+                                 completed.path[0].altitude, completed.path[0].secondaryScale]
+            // The public size-changing point constructor re-encodes these two
+            // fields. A stored-path probe measured 0.0000239688 radians of
+            // altitude drift and 0.0000000119209 secondary-scale drift. Bound
+            // those native quantization steps; force/opacity/azimuth stay exact.
+            let exactMetadata = Array(afterMetadata.prefix(4)) == Array(beforeMetadata.prefix(4))
+            let altitudePreserved = abs(completed.path[0].altitude - beforeFloor.path[0].altitude) <= 0.00005
+            let secondaryScalePreserved = abs(completed.path[0].secondaryScale - beforeFloor.path[0].secondaryScale) <= 0.0000001
+            try require(exactMetadata && altitudePreserved && secondaryScalePreserved,
+                        "Nib flooring must preserve stored force, opacity, angle and point metadata: before=\(beforeMetadata), after=\(afterMetadata)")
+            #if compiler(>=6.2)
+            if #available(iOS 26, *) {
+                try require(completed.path[0].threshold == beforeFloor.path[0].threshold,
+                            "Nib flooring must preserve the native rendering threshold exactly")
+            }
+            #endif
+            #if compiler(>=6.4)
+            if #available(iOS 27, *) {
+                try require(completed.path[0].lateralJitter == beforeFloor.path[0].lateralJitter,
+                            "Nib flooring must preserve native lateral jitter exactly")
+            }
+            #endif
+            try require(completed.path.creationDate == beforeFloor.path.creationDate && completed.transform == beforeFloor.transform
+                        && completed.randomSeed == beforeFloor.randomSeed && completed.path[1].timeOffset == beforeFloor.path[1].timeOffset,
+                        "Nib flooring must preserve native path chronology, transform and random seed")
+            #if compiler(>=6.4)
+            if #available(iOS 27, *) {
+                try require(completed.id == beforeFloor.id, "Nib flooring must preserve native stroke identity")
+            }
+            #endif
+            try require(writes == 1 && manager.canUndo, "One completed Pencil gesture must save once and retain its single undo operation")
+            try require(savedStrokes[1].points.count == 2 && savedStrokes[1].points[0].renderedWidth == 5
+                        && savedStrokes[1].points[1].renderedWidth == 7,
+                        "Two-point portable conversion must preserve actual native width above average force")
+            manager.undo()
+            await nextMainTurn()
+            try require(canvas.drawing.strokes.count == 1 && !manager.canUndo && manager.canRedo,
+                        "One undo must remove the new stroke without a second pressure-correction entry")
+            manager.redo()
+            await nextMainTurn()
+            let redone = canvas.drawing.strokes[1]
+            try require(redone.path[0].size.width == 5 && redone.path[1].size.width == 7,
+                        "Redo must restore the selected minimum even if its saved native path was thinner")
+            try require(redone.path[1].force == 2.5 && savedStrokes[1].points.last?.renderedWidth == 7,
+                        "Redo persistence must preserve force and portable pressure variation")
+            manager.removeAllActions()
+
+            var resized = native
+            resized.transform = native.transform.scaledBy(x: 0.5, y: 0.5)
+            coordinator.replaceDrawing(PKDrawing(strokes: [baseline.strokes[0], resized]), in: canvas, registerUndo: false)
+            try require(canvas.drawing.strokes[1].path[0].size.width == 1,
+                        "A deliberate later native scaling edit must not be enlarged by the redo floor cache")
+
+            // Imported paths never pass through a local native gesture and must
+            // keep their recorded appearance, even during later persistence.
+            var imported = native
+            imported.path = PKStrokePath(controlPoints: points, creationDate: Date(timeIntervalSince1970: 9_876))
+            coordinator.replaceDrawing(PKDrawing(strokes: canvas.drawing.strokes + [imported]), in: canvas, registerUndo: false)
+            try require(canvas.drawing.strokes.last?.path[0].size.width == 1,
+                        "An imported thin stroke must not inherit a locally drawn stroke's minimum")
+            canvas.tool = PKEraserTool(.vector)
+            coordinator.canvasViewDidBeginUsingTool(canvas)
+            coordinator.canvasViewDidEndUsingTool(canvas)
+            try require(canvas.drawing.strokes.last?.path[0].size.width == 1,
+                        "An eraser gesture must never apply the ink width floor to imported paths")
+
+            coordinator.configureTool(on: canvas, theme: .light, tool: .pencil)
+            try require((canvas.tool as? PKInkingTool)?.width == 5,
+                        "Pencil's configured base must not scale below the chosen nib")
+            coordinator.configureTool(on: canvas, theme: .light, tool: .line)
+            let lineStart = canvas.drawing.strokes.count
+            coordinator.commitLine(start: InkPoint(x: 300, y: 350, pressure: 0),
+                                   end: InkPoint(x: 500, y: 350, pressure: 1), in: canvas)
+            let line = canvas.drawing.strokes[lineStart]
+            try require(line.path[0].size.width == 5 && line.path[1].size.width == 10,
+                        "A custom Pencil line must use the selected nib as minimum and thicken with pressure")
+            let previous = InkPoint(x: 40, y: 50, pressure: 0.8)
+            let released = PencilLineGestureRecognizer.finalPoint(InkPoint(x: 44, y: 54, pressure: 0), previous: previous)
+            try require(released.x == 44 && released.y == 54 && released.pressure == 0.8,
+                        "Pencil lift must retain final position and last contact pressure")
+            let pressuredRelease = PencilLineGestureRecognizer.finalPoint(InkPoint(x: 44, y: 54, pressure: 0.6), previous: previous)
+            try require(pressuredRelease.pressure == 0.6, "A meaningful release pressure must remain authoritative")
+            let fine = InkPressure.normalized(force: 8_192.25, maximum: 16_384)
+            try require(fine > 0.5 && fine < 0.5 + 1.0 / 16_384,
+                        "Device pressure normalization must retain values finer than a nominal hardware level")
+
+            let beforeLateStroke = canvas.drawing
+            let beforeLateWrites = writes
+            // This custom light-paper color happens to equal a dark palette
+            // projection. Reversing it using the later theme would corrupt it.
+            let lateCanonicalColor = UIColor(noteHex: "#EDF1F5")
+            canvas.tool = PKInkingTool(.pen, color: lateCanonicalColor, width: 5)
+            coordinator.canvasViewDidBeginUsingTool(canvas)
+            coordinator.canvasViewDidEndUsingTool(canvas)
+            coordinator.parent.theme = .dark
+            coordinator.update(fixture, enabled: true)
+            try require(coordinator.appliedTheme == .light && fixture.page.paper.theme == .light
+                        && canvas.drawing.dataRepresentation() == beforeLateStroke.dataRepresentation(),
+                        "A theme change must defer across the completed gesture's first pending main turn")
+            await nextMainTurn()
+            try require(coordinator.nativeStrokePrefix != nil && writes == beforeLateWrites,
+                        "An empty tool-end must retain late-path context without saving old ink")
+            try require(!coordinator.nativeCompletionAwaitingDrawing && coordinator.appliedTheme == .dark
+                        && fixture.page.paper.theme == .dark,
+                        "A no-op or cancelled gesture must release its theme hold after one main turn: awaiting=\(coordinator.nativeCompletionAwaitingDrawing), active=\(coordinator.nativeToolActive), generation=\(coordinator.nativeStrokeGeneration), applied=\(String(describing: coordinator.appliedTheme)), paper=\(fixture.page.paper.theme)")
+            var lateStroke = native
+            lateStroke.path = PKStrokePath(controlPoints: points, creationDate: Date(timeIntervalSince1970: 12_345))
+            lateStroke.ink = PKInk(.pen, color: lateCanonicalColor)
+            canvas.drawing = PKDrawing(strokes: canvas.drawing.strokes + [lateStroke])
+            coordinator.canvasViewDrawingDidChange(canvas)
+            try require(canvas.drawing.strokes.last?.path[0].size.width == 5 && coordinator.nativeStrokePrefix == nil,
+                        "A later drawing callback must apply the pending gesture's selected nib floor")
+            try require(writes == beforeLateWrites + 1 && savedStrokes.last?.points.first?.renderedWidth == 5,
+                        "The late completed native path must save once with its corrected portable width")
+            try require(coordinator.appliedTheme == .dark && fixture.page.paper.theme == .dark,
+                        "A path arriving after the deferred theme change must retain the current page theme")
+            try require(savedStrokes.last?.colorHex == "#EDF1F5",
+                        "A path arriving after a theme change must preserve its tool-begin canonical ink")
+
+            coordinator.parent.theme = .light
+            coordinator.update(fixture, enabled: true)
+            let darkCanonicalHex = "#30343B"
+            canvas.tool = PKInkingTool(.pen, color: UIColor(noteHex: darkCanonicalHex), width: 5)
+            let beforeDarkLateWrites = writes
+            coordinator.canvasViewDidBeginUsingTool(canvas)
+            coordinator.canvasViewDidEndUsingTool(canvas)
+            coordinator.parent.theme = .dark
+            coordinator.update(fixture, enabled: true)
+            await nextMainTurn()
+            var darkLateStroke = native
+            darkLateStroke.path = PKStrokePath(controlPoints: points, creationDate: Date(timeIntervalSince1970: 23_456))
+            darkLateStroke.ink = PKInk(.pen, color: UIColor(noteHex: darkCanonicalHex))
+            canvas.drawing = PKDrawing(strokes: canvas.drawing.strokes + [darkLateStroke])
+            coordinator.canvasViewDrawingDidChange(canvas)
+            try require(canvas.drawing.strokes.last?.ink.color.noteHex == PageTheme.dark.resolvedInkHex(darkCanonicalHex),
+                        "A late light-theme native path must actually display light ink on the already-dark page")
+            try require(writes == beforeDarkLateWrites + 1 && savedStrokes.last?.colorHex == darkCanonicalHex
+                        && savedStrokes.last?.points.first?.renderedWidth == 5,
+                        "Late display reprojection must preserve the one canonical save and corrected geometry")
+
+            coordinator.canvasViewDidBeginUsingTool(canvas)
+            coordinator.canvasViewDidEndUsingTool(canvas)
+            try require(coordinator.nativeStrokePrefix != nil, "An empty gesture must initially retain late-path context")
+            // Exercise the same boundary ordinary native paste/duplicate use,
+            // without reading the user's clipboard. PKCanvasView does not
+            // implement optional item-provider paste; UIResponder's default
+            // asserts even for an empty array, so that is not a valid fixture.
+            canvas.prepareForNonDrawingEdit()
+            try require(coordinator.nativeStrokePrefix == nil,
+                        "The native non-drawing edit boundary must invalidate a pending no-op gesture before imported paths arrive")
+            var pasted = native
+            pasted.path = PKStrokePath(controlPoints: points, creationDate: Date(timeIntervalSince1970: 54_321))
+            canvas.drawing = PKDrawing(strokes: canvas.drawing.strokes + [pasted])
+            coordinator.canvasViewDrawingDidChange(canvas)
+            try require(canvas.drawing.strokes.last?.path[0].size.width == 1,
+                        "A native pasted path must retain its imported width after an earlier no-op gesture")
+            return checks
+        }
         #endif
     }
 }
@@ -1307,7 +1747,9 @@ private final class PencilLineGestureRecognizer: UIGestureRecognizer {
     }
 
     override func touchesEnded(_ touches: Set<UITouch>, with event: UIEvent) {
-        if let touch = touches.first { currentPoint = inkPoint(touch) }
+        if let touch = touches.first {
+            currentPoint = Self.finalPoint(inkPoint(touch), previous: currentPoint)
+        }
         state = .ended
     }
 
@@ -1317,8 +1759,14 @@ private final class PencilLineGestureRecognizer: UIGestureRecognizer {
 
     private func inkPoint(_ touch: UITouch) -> InkPoint {
         let point = touch.location(in: view)
-        let pressure = touch.maximumPossibleForce > 0 ? touch.force / touch.maximumPossibleForce : 1
-        return InkPoint(x: point.x, y: point.y, pressure: Double(max(0, min(1, pressure))))
+        let pressure = InkPressure.normalized(force: Double(touch.force), maximum: Double(touch.maximumPossibleForce))
+        return InkPoint(x: point.x, y: point.y, pressure: pressure)
+    }
+
+    static func finalPoint(_ point: InkPoint, previous: InkPoint?) -> InkPoint {
+        var result = point
+        if result.pressure == 0, let previous { result.pressure = previous.pressure }
+        return result
     }
 }
 
@@ -1402,10 +1850,31 @@ final class UnifiedPageScrollView: UIScrollView {
     }
 }
 
+/// Native clipboard commands can bypass the page selection coordinator. Mark
+/// their boundary so a cancelled Pencil gesture cannot claim pasted ink.
+@MainActor
+final class UnifiedInkCanvas: PKCanvasView {
+    var onNonDrawingEdit: (() -> Void)?
+
+    func prepareForNonDrawingEdit() {
+        onNonDrawingEdit?()
+    }
+
+    override func paste(_ sender: Any?) {
+        prepareForNonDrawingEdit()
+        super.paste(sender)
+    }
+
+    override func duplicate(_ sender: Any?) {
+        prepareForNonDrawingEdit()
+        super.duplicate(sender)
+    }
+}
+
 @MainActor
 final class UnifiedPencilPage: UIView {
     let paper = UnifiedPaperView()
-    let canvas = PKCanvasView()
+    let canvas = UnifiedInkCanvas()
     let textView = UITextView()
     let selectionView = IOSPageSelectionView()
     var textBoxViews: [UUID: IOSTextBoxView] = [:]

@@ -65,7 +65,10 @@ struct ContentView: View {
         } content: {
             sheetList.navigationSplitViewColumnWidth(min: 120, ideal: 260, max: 480)
         } detail: {
-            Group {
+            // A real, stable container owns navigation chrome. Group forwards
+            // its modifiers into the sheet-keyed child and would dismantle the
+            // native split observer every time selection changes.
+            ZStack {
                 if let sheet = store.selectedSheet {
                     SheetDetail(sheetID: sheet.id).id(sheet.id)
                 } else {
@@ -101,7 +104,7 @@ struct ContentView: View {
         }
         #endif
         .onChange(of: store.selectedSheet?.id) { _, selectedID in
-            if selectedID == nil { presentation.fullPage = false; presentation.sheetsVisible = true }
+            if selectedID == nil { presentation.fullPage = false }
         }
         #if os(macOS)
         .toolbar(presentation.fullPage ? .hidden : .visible, for: .windowToolbar)

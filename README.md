@@ -2,6 +2,12 @@
 
 Version 1.0.2 adds an independently resizable and collapsible sheets pane, sequential sheet numbers and creation dates, optional sheet titles, and a hideable header showing the nearest chapter or topic. Coast, Forest, and Alpine retain the supplied photographs with matching light/dark variants.
 
+The current source also fixes pane reopening during sheet changes and coordinates
+native pane animations. New pressure-sensitive Mac strokes grow from the selected
+tool's base width; iPad retains native Pencil drawing with a minimum-width correction
+when a new stroke finishes. These changes are a local 1.0.3 candidate, not yet part
+of the published 1.0.2 release. See [validation](docs/TESTING.md).
+
 A small, native, open-source notebook for Apple silicon Macs, with a shared iPad app target. Built with SwiftUI, AppKit/UIKit, and PencilKit, with Sparkle for signed Mac updates and SwiftMath for offline equations. No Electron, cloud SDK, account, or telemetry.
 
 ## What works
@@ -15,7 +21,9 @@ A small, native, open-source notebook for Apple silicon Macs, with a shared iPad
 - Straight-line pen tool for table borders, with near-horizontal/vertical snapping and Shift axis constraints on Mac.
 - Mac pen and pencil cursors show a nib dot sized for the selected width and page zoom. The highlighter uses a slanted chisel-tip cursor.
 - Pressure-aware pen-tablet input on Mac, including stylus proximity and hardware eraser events. Read-only HID presence detection excludes touchpads; the input indicator confirms actual pen activity. No global input capture or tablet SDK is required.
+- New Mac strokes use the chosen nib as a minimum and grow continuously up to twice the tool's base width as pressure increases. Marker and highlighter retain their wider tool-specific bases; pressure varies along the stroke instead of averaging the whole brush stroke. Mouse strokes stay at the base width. The app preserves the pressure precision supplied by the tablet driver; it does not round values to a fixed number of levels. Existing saved strokes retain their previous appearance.
 - Apple Pencil and native PencilKit tools on iPad, with palm rejection and actual Pencil touch detection. Basic ink paths and instrument styles transfer between Mac and iPad; native PencilKit data is retained. Grid, ruled, dotted, and blank paper save with each sheet.
+- On iPad, PencilKit controls live pressure and prediction. Completed new Pencil strokes receive the chosen native nib's minimum width while retaining force, tilt, texture metadata, and undo. Loaded/imported strokes are not enlarged. Portable conversion retains actual native point widths instead of treating average Pencil force as maximum pressure.
 - Ruled paper aligns typed baselines with its guides, including wrapped paragraphs, headings, and moved text boxes. The native layout follows whole ruled rows while preserving saved rich-text formatting and colors.
 - Light, dark, and system appearance for the shared page, readable ink colors, and prominent grids, rules, and dots. Switching appearance preserves original note colors. The single-pencil app icon includes native light and dark appearances.
 - Search across titles, text, positioned text boxes, equation source, and tags; favorite sheets; embedded file attachments.

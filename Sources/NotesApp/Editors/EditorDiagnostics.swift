@@ -139,6 +139,22 @@ enum EditorDiagnostics {
             }
             return event
         }
+        // Feed local tablet-tagged NSEvents directly to the view. No events are
+        // posted globally and this does not claim physical tablet verification.
+        func tabletEvent(_ type: NSEvent.EventType, x: CGFloat, y: CGFloat, pressure: Float) throws -> NSEvent {
+            guard let cgEvent = try event(type == .tabletPoint ? .leftMouseDragged : type, x: x, y: y, pressure: pressure).cgEvent else {
+                throw Failure(description: "Cannot construct local tablet event")
+            }
+            if type == .tabletPoint { cgEvent.type = .tabletPointer }
+            cgEvent.setIntegerValueField(.mouseEventSubtype, value: 1)
+            cgEvent.setIntegerValueField(.tabletEventDeviceID, value: 17)
+            cgEvent.setDoubleValueField(.tabletEventPointPressure, value: Double(pressure))
+            cgEvent.setDoubleValueField(.mouseEventPressure, value: Double(pressure))
+            guard let result = NSEvent(cgEvent: cgEvent), result.isPenPointEvent else {
+                throw Failure(description: "Local tablet event lost its tablet subtype")
+            }
+            return result
+        }
         let down = try event(.leftMouseDown, x: 100, y: 100, pressure: 0.2)
         let drag = try event(.leftMouseDragged, x: 180, y: 150, pressure: 0.8)
         let up = try event(.leftMouseUp, x: 180, y: 150, pressure: 0)
@@ -146,7 +162,9 @@ enum EditorDiagnostics {
         canvas.mouseDragged(with: drag)
         canvas.mouseUp(with: up)
         try check(committed.count == 1 && committed[0].points.count == 2, "mouse gesture saves one stroke")
-        try check(abs((committed.first?.points.last?.pressure ?? 0) - 0.8) < 0.001, "pressure is retained")
+        try check(committed[0].pressureResponse == .baseWidth && committed[0].points.allSatisfy { $0.pressure == 0 }
+                  && committed[0].points.allSatisfy { committed[0].renderedWidth(at: $0) == 2.5 },
+                  "ordinary mouse drawing stays at the selected base width despite synthesized mouse pressure")
         canvas.undo(nil)
         try check(committed.isEmpty && canvas.strokes.isEmpty, "drawing undo")
         canvas.redo(nil)
@@ -157,6 +175,50 @@ enum EditorDiagnostics {
         try check(committed.isEmpty, "stroke eraser")
         canvas.undo(nil)
         try check(committed.count == 1, "eraser undo")
+        let pressureCanvas = InkDocumentView(frame: canvas.frame)
+        pressureCanvas.tool = .pen; pressureCanvas.lineWidth = 6
+        let tabletDown = try tabletEvent(.leftMouseDown, x: 100, y: 200, pressure: 0)
+        let tabletMid = try tabletEvent(.leftMouseDragged, x: 200, y: 200, pressure: 0.25)
+        let tabletHard = try tabletEvent(.leftMouseDragged, x: 300, y: 200, pressure: 1)
+        pressureCanvas.mouseDown(with: tabletDown)
+        pressureCanvas.mouseDragged(with: tabletMid)
+        pressureCanvas.mouseDragged(with: tabletHard)
+        pressureCanvas.mouseUp(with: try tabletEvent(.leftMouseUp, x: 300, y: 200, pressure: 0))
+        let pressured = pressureCanvas.strokes[0]
+        try check(pressured.points.map(\.pressure) == [tabletDown, tabletMid, tabletHard].map(\.normalizedInkPressure),
+                  "tablet event pressure preserves the actual zero, fractional and maximum source samples")
+        try check(pressured.renderedWidth(at: pressured.points[0]) == 6
+                  && abs(pressured.renderedWidth(at: pressured.points[1]) - 7.5) < 0.001
+                  && pressured.renderedWidth(at: pressured.points[2]) == 12,
+                  "tablet pressure grows from the selected nib without thinning below it")
+        pressureCanvas.undo(nil); pressureCanvas.redo(nil)
+        try check(pressureCanvas.strokes == [pressured], "pressure response and all samples survive native drawing undo and redo")
+        let fineTabletDown = try tabletEvent(.leftMouseDown, x: 100, y: 240, pressure: 0.25)
+        let fineTabletDrag = try tabletEvent(.leftMouseDragged, x: 100, y: 240, pressure: 0.250061)
+        pressureCanvas.mouseDown(with: fineTabletDown)
+        pressureCanvas.mouseDragged(with: fineTabletDrag)
+        pressureCanvas.mouseUp(with: try tabletEvent(.leftMouseUp, x: 100, y: 240, pressure: 0))
+        try check(pressureCanvas.strokes.last?.points.count == 1
+                  && fineTabletDrag.normalizedInkPressure > fineTabletDown.normalizedInkPressure
+                  && pressureCanvas.strokes.last?.points[0].pressure == fineTabletDrag.normalizedInkPressure,
+                  "stationary tablet force refines the dot without losing hardware precision or accumulating duplicate positions")
+        pressureCanvas.mouseDown(with: try tabletEvent(.leftMouseDown, x: 100, y: 280, pressure: 0.1))
+        let standaloneTablet = try tabletEvent(.tabletPoint, x: 180, y: 280, pressure: 0.75321)
+        pressureCanvas.tabletPoint(with: standaloneTablet)
+        pressureCanvas.mouseUp(with: try tabletEvent(.leftMouseUp, x: 180, y: 280, pressure: 0))
+        try check(standaloneTablet.type == .tabletPoint && pressureCanvas.strokes.last?.points.last?.pressure == standaloneTablet.normalizedInkPressure,
+                  "standalone tablet-point events and tablet mouse subtypes share normalized pressure capture")
+        let zeroCG = tabletDown.cgEvent!
+        zeroCG.setDoubleValueField(.mouseEventPressure, value: 1)
+        let authoritativeZero = NSEvent(cgEvent: zeroCG)!
+        try check(authoritativeZero.safeInkPressure == 1 && authoritativeZero.normalizedInkPressure == 0,
+                  "a genuine tablet zero overrides a stale full mouse-pressure field")
+        let missingCG = try event(.leftMouseDragged, x: 100, y: 100, pressure: 0.8).cgEvent!
+        missingCG.setIntegerValueField(.mouseEventSubtype, value: 1)
+        let legacyTablet = NSEvent(cgEvent: missingCG)!
+        try check(legacyTablet.normalizedInkPressure == Double(legacyTablet.safeInkPressure ?? 0)
+                  && legacyTablet.normalizedInkPressure > 0,
+                  "a legacy mouse-emulating driver without tablet record fields retains its fallback pressure")
         guard let png = InkExport.png(strokes: committed), let bitmap = NSBitmapImageRep(data: png) else {
             throw Failure(description: "Cannot render PNG")
         }
@@ -185,6 +247,42 @@ enum EditorDiagnostics {
         let dot = PortableInkConverter.drawing(from: [InkStroke(points: [InkPoint(x: 20, y: 30)])])
         try check(!PortableInkConverter.strokes(from: dot).flatMap(\.points).isEmpty, "PencilKit single point ink survives conversion")
 
+        let nativePressurePoints = [0.3, 2.0, 4.0].enumerated().map { index, force in
+            PKStrokePoint(location: CGPoint(x: 100 + index * 100, y: 100), timeOffset: Double(index) / 120,
+                          size: CGSize(width: 3 + index * 3, height: 3 + index * 3), opacity: 0.8,
+                          force: force, azimuth: 0.4, altitude: 0.9, secondaryScale: 1.2)
+        }
+        let nativePressure = PKStroke(ink: PKInk(.pen, color: .black),
+                                     path: PKStrokePath(controlPoints: nativePressurePoints, creationDate: Date(timeIntervalSince1970: 123)),
+                                     transform: CGAffineTransform(translationX: 5, y: 7),
+                                     mask: NSBezierPath(rect: CGRect(x: 0, y: 0, width: 500, height: 500)), randomSeed: 42)
+        let nativePortable = try PortableInkConverter.validatedStrokes(from: PKDrawing(strokes: [nativePressure]))
+        let nativeWidths = nativePortable.flatMap(\.points).compactMap(\.renderedWidth)
+        try check((nativeWidths.max() ?? 0) - (nativeWidths.min() ?? 0) > 5,
+                  "native Pencil forces above average retain rendered thickness instead of saturating at force one")
+        let nativePortableReload = try JSONDecoder().decode([InkStroke].self, from: JSONEncoder().encode(nativePortable))
+        try check(nativePortableReload == nativePortable, "native rendered widths survive portable save and reload")
+        let nativeRebuilt = try PortableInkConverter.validatedDrawing(nil, fallback: nativePortableReload)
+        try check(abs((nativeRebuilt.strokes.first?.path.first?.size.width ?? 0) - (nativeWidths.first ?? 0)) < 0.001,
+                  "native width metadata controls the reconstructed PencilKit nib")
+        guard let flooredNative = PortableInkConverter.applyingMinimumWidth(5, to: nativePressure) else {
+            throw Failure(description: "Native pressure minimum did not adjust thin points")
+        }
+        try check(flooredNative.path[0].size.width == 5 && flooredNative.path[1].size.width == 6
+                  && flooredNative.path[2].size.width == 9 && nativePressure.path[0].size.width == 3,
+                  "completed native pressure floor only thickens points below the chosen minimum")
+        try check(flooredNative.randomSeed == nativePressure.randomSeed && flooredNative.transform == nativePressure.transform
+                  && flooredNative.path.creationDate == nativePressure.path.creationDate && flooredNative.mask?.bounds == nativePressure.mask?.bounds
+                  && flooredNative.path[0].force == nativePressure.path[0].force && flooredNative.path[0].opacity == nativePressure.path[0].opacity
+                  && flooredNative.path[0].azimuth == nativePressure.path[0].azimuth
+                  // Public point reconstruction re-quantizes tilt (~2.4e-5 rad)
+                  // and secondary scale (~1.2e-8), measured on stored native paths.
+                  && abs(flooredNative.path[0].altitude - nativePressure.path[0].altitude) < 0.00005
+                  && abs(flooredNative.path[0].secondaryScale - nativePressure.path[0].secondaryScale) < 0.0000001,
+                  "native pressure correction preserves transform, mask, seed, time, force, opacity and tilt")
+        try check(PortableInkConverter.applyingMinimumWidth(5, to: flooredNative) == nil,
+                  "native pressure floor is idempotent and avoids replacing unchanged drawings")
+
         for style in InkStyle.allCases {
             let styled = InkStroke(points: source.points, colorHex: source.colorHex, width: 5, style: style)
             let roundtrip = PortableInkConverter.strokes(from: PortableInkConverter.drawing(from: [styled]))
@@ -209,6 +307,21 @@ enum EditorDiagnostics {
         let highlightSegment = brightness(highlighterBitmap, x: 150, y: 100)
         try check(highlightCenter > 0.6 && highlightCenter < 0.9, "highlighter is translucent")
         try check(abs(highlightCenter - highlightSegment) < 0.04, "highlighter joins do not accumulate dark seams")
+        for style in InkStyle.allCases {
+            let localPressure = InkStroke(points: [InkPoint(x: 100, y: 140, pressure: 0), InkPoint(x: 160, y: 140, pressure: 0),
+                                                   InkPoint(x: 240, y: 140, pressure: 1), InkPoint(x: 300, y: 140, pressure: 1)],
+                                          colorHex: "#000000", width: 8, style: style, pressureResponse: .baseWidth)
+            guard let pressurePNG = InkExport.png(strokes: [localPressure], paper: .blank),
+                  let pressureBitmap = NSBitmapImageRep(data: pressurePNG) else { throw Failure(description: "Cannot rasterize pressure response") }
+            func thickness(at x: Int) -> Int { (65..<215).filter { brightness(pressureBitmap, x: x, y: $0) < 0.95 }.count }
+            let light = thickness(at: 125), hard = thickness(at: 275)
+            try check(light >= 8 && hard >= light * 17 / 10,
+                      "\(style.rawValue) raster grows locally under pressure and never shrinks below the selected nib")
+            if style == .highlighter {
+                try check(abs(brightness(pressureBitmap, x: 240, y: 140) - brightness(pressureBitmap, x: 275, y: 140)) < 0.04,
+                          "variable-pressure highlighter remains translucent without darker segment seams")
+            }
+        }
         let verticalRule = brightness(gridBitmap, x: 28, y: 50), horizontalRule = brightness(gridBitmap, x: 50, y: 28)
         try check(verticalRule < 0.995 && horizontalRule < 0.995,
                   "grid paper has vertical and horizontal ruling (\(verticalRule), \(horizontalRule))")
@@ -431,13 +544,21 @@ enum EditorDiagnostics {
         lineCanvas.mouseUp(with: try event(.leftMouseUp, x: 400, y: 245, pressure: 0))
         try check(committedLines.count == 1 && committedLines[0].points.count == 2 && committedLines[0].style == .pen,
                   "straight-line gesture discards wobble and stores two pen endpoints")
-        try check(abs(committedLines[0].points[1].pressure - 0.8) < 0.001, "straight line retains tablet endpoint pressure")
+        try check(committedLines[0].points.allSatisfy { $0.pressure == 0 }, "mouse straight lines keep a stable selected nib")
         try check(committedLines[0].points[0].x != committedLines[0].points[1].x && committedLines[0].points[0].y != committedLines[0].points[1].y,
                   "arbitrary line angles remain available")
         lineCanvas.undo(nil)
         try check(committedLines.isEmpty, "straight-line undo is one gesture")
         lineCanvas.redo(nil)
         try check(committedLines.count == 1 && committedLines[0].points.count == 2, "straight-line redo retains endpoints")
+        let tabletLine = InkDocumentView(frame: canvas.frame)
+        tabletLine.tool = .line; tabletLine.lineWidth = 4
+        tabletLine.mouseDown(with: try tabletEvent(.leftMouseDown, x: 100, y: 100, pressure: 0.2))
+        tabletLine.mouseDragged(with: try tabletEvent(.leftMouseDragged, x: 300, y: 100, pressure: 0.8))
+        tabletLine.mouseUp(with: try tabletEvent(.leftMouseUp, x: 300, y: 100, pressure: 0))
+        try check(abs(tabletLine.strokes[0].points[1].pressure - 0.8) < 0.001
+                  && tabletLine.strokes[0].points.allSatisfy { tabletLine.strokes[0].renderedWidth(at: $0) >= 4 },
+                  "tablet straight-line release retains contact pressure and never thins below its base")
         lineCanvas.mouseDown(with: down)
         lineCanvas.mouseDragged(with: try event(.leftMouseDragged, x: 400, y: 120, pressure: 0.7))
         lineCanvas.mouseUp(with: try event(.leftMouseUp, x: 400, y: 120, pressure: 0))

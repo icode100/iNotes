@@ -11,13 +11,50 @@ public struct InkPoint: Codable, Equatable, Sendable {
     public var x: Double
     public var y: Double
     public var pressure: Double
-    public init(x: Double, y: Double, pressure: Double = 1) {
-        self.x = x; self.y = y; self.pressure = pressure
+    /// Native PencilKit archives do not expose the device's maximum force.
+    /// Preserve their actual rendered diameter instead of guessing normalized
+    /// pressure. The original native payload retains force, tilt and texture.
+    public var renderedWidth: Double?
+    public init(x: Double, y: Double, pressure: Double = 1, renderedWidth: Double? = nil) {
+        self.x = x; self.y = y; self.pressure = pressure; self.renderedWidth = renderedWidth
+    }
+}
+
+public enum InkPressureResponse: String, Codable, Sendable {
+    /// Keep existing notebooks at the exact width used by earlier releases.
+    case legacy
+    /// The selected nib is the minimum; increasing pressure adds up to its width.
+    case baseWidth
+}
+
+public enum InkPressure {
+    /// Use the device's continuous range, without quantizing to a nominal count
+    /// of hardware levels. Mouse/unknown pressure stays at the selected nib.
+    public static func normalized(force: Double, maximum: Double = 1, isStylus: Bool = true) -> Double {
+        guard isStylus, force.isFinite, maximum.isFinite, maximum > 0 else { return 0 }
+        return max(0, min(1, force / maximum))
+    }
+
+    public static func widthMultiplier(_ pressure: Double, response: InkPressureResponse) -> Double {
+        let value = normalized(force: pressure)
+        switch response {
+        case .legacy: return pressure.isFinite ? 0.35 + 0.65 * value : 1
+        case .baseWidth: return 1 + value
+        }
     }
 }
 
 public enum InkStyle: String, Codable, CaseIterable, Sendable {
     case pen, pencil, marker, highlighter
+
+    public var widthMultiplier: Double {
+        switch self {
+        case .pen: 1
+        case .pencil: 0.8
+        case .marker: 1.8
+        case .highlighter: 4
+        }
+    }
 }
 
 public enum PaperStyle: String, Codable, CaseIterable, Sendable {
@@ -70,13 +107,28 @@ public struct InkStroke: Identifiable, Codable, Equatable, Sendable {
     public var width: Double
     public var style: InkStyle
     public var linePattern: LinePattern
+    public var pressureResponse: InkPressureResponse
     public init(id: UUID = UUID(), points: [InkPoint], colorHex: String = "#202020", width: Double = 2.5, style: InkStyle = .pen,
-                linePattern: LinePattern = .solid) {
+                linePattern: LinePattern = .solid, pressureResponse: InkPressureResponse = .legacy) {
         self.id = id; self.points = points; self.colorHex = colorHex; self.width = width; self.style = style
         self.linePattern = linePattern
+        self.pressureResponse = pressureResponse
     }
 
-    private enum CodingKeys: String, CodingKey { case id, points, colorHex, width, style, linePattern }
+    private enum CodingKeys: String, CodingKey { case id, points, colorHex, width, style, linePattern, pressureResponse }
+
+    public var baseRenderedWidth: Double {
+        let nib = width.isFinite ? max(0.5, min(100, width)) : 2.5
+        let scale = pressureResponse == .baseWidth ? max(1, style.widthMultiplier) : style.widthMultiplier
+        return nib * scale
+    }
+
+    public func renderedWidth(at point: InkPoint) -> Double {
+        if let value = point.renderedWidth, value.isFinite, value > 0, value <= InkGeometryLimits.maximumRenderedWidth { return value }
+        return baseRenderedWidth * InkPressure.widthMultiplier(point.pressure, response: pressureResponse)
+    }
+
+    public var maximumRenderedWidth: Double { points.reduce(baseRenderedWidth) { max($0, renderedWidth(at: $1)) } }
 
     public init(from decoder: Decoder) throws {
         let values = try decoder.container(keyedBy: CodingKeys.self)
@@ -87,6 +139,7 @@ public struct InkStroke: Identifiable, Codable, Equatable, Sendable {
         // Format v1 archives from the first release contain pen paths without a style field.
         style = try values.decodeIfPresent(InkStyle.self, forKey: .style) ?? .pen
         linePattern = try values.decodeIfPresent(LinePattern.self, forKey: .linePattern) ?? .solid
+        pressureResponse = try values.decodeIfPresent(InkPressureResponse.self, forKey: .pressureResponse) ?? .legacy
     }
 }
 

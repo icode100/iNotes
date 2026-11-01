@@ -83,13 +83,16 @@ public enum PageSelectionGeometry {
     public static func translated(_ stroke: InkStroke, dx: Double, dy: Double) -> InkStroke {
         guard dx.isFinite, dy.isFinite else { return stroke }
         var result = stroke
-        result.points = stroke.points.map { InkPoint(x: $0.x + dx, y: $0.y + dy, pressure: $0.pressure) }
+        result.points = stroke.points.map { point in
+            var translated = point
+            translated.x += dx; translated.y += dy
+            return translated
+        }
         return result
     }
 
     private static func radius(_ stroke: InkStroke) -> Double {
-        let multiplier: Double = stroke.style == .highlighter ? 4 : stroke.style == .marker ? 1.8 : stroke.style == .pencil ? 0.8 : 1
-        return max(0.5, min(100, stroke.width.isFinite ? stroke.width : 2.5)) * multiplier / 2
+        stroke.maximumRenderedWidth / 2
     }
 
     private static func valid(_ polygon: [InkPoint]) -> Bool {
