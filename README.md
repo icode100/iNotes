@@ -1,13 +1,12 @@
 # iNotes
 
-Version 1.0.2 adds an independently resizable and collapsible sheets pane, sequential sheet numbers and creation dates, optional sheet titles, and a hideable header showing the nearest chapter or topic. Coast, Forest, and Alpine retain the supplied photographs with matching light/dark variants.
+Version 1.0.3 fixes sidebar reflow and pane reopening during sheet changes, smooths
+native pane transitions, and adds millimetre nib presets with Fine as the default.
+Settings menus visibly check the current choice. Earlier writing behavior and the
+existing drawing cursors are retained; the withdrawn pressure experiment is not included.
 
-The current source also fixes pane reopening during sheet changes, coordinates
-native pane animations, and adds millimetre nib presets with Fine as the default.
-Settings menus visibly mark the current choice.
-These changes are a local 1.0.3 candidate, not yet part of the published 1.0.2
-release. The pressure experiment was withdrawn; earlier writing behavior remains.
-See [validation](docs/TESTING.md).
+Release preparation targets version 1.0.3, build 2010. See [release notes](docs/releases/1.0.3.md)
+and [validation](docs/TESTING.md) for local results and separately recorded public-build verification.
 
 A small, native, open-source notebook for Apple silicon Macs, with a shared iPad app target. Built with SwiftUI, AppKit/UIKit, and PencilKit, with Sparkle for signed Mac updates and SwiftMath for offline equations. No Electron, cloud SDK, account, or telemetry.
 
@@ -64,7 +63,7 @@ Requires an Apple silicon Mac and macOS 14+. Building the installer requires ful
 open dist/iNotes.app
 ```
 
-The default local installer is `dist/iNotes-1.0.2-arm64.dmg` (version 1.0.2, build 1009). Downloaded public builds are also ad hoc signed: **they are not Apple notarized**, so macOS may report that Apple could not verify iNotes is free of malware.
+The default local installer is `dist/iNotes-1.0.3-arm64.dmg` (version 1.0.3, build 2010). Downloaded public builds are also ad hoc signed: **they are not Apple notarized**, so macOS may report that Apple could not verify iNotes is free of malware.
 
 If you trust the download from the [official releases](https://github.com/icode100/iNotes/releases), follow Apple's [per-app first-open procedure](https://support.apple.com/en-us/102445):
 

@@ -265,7 +265,10 @@ Source pushes run `Native checks`; a `vX.Y.Z` tag runs the publishing workflow.
 Do not push a release tag merely to test packaging. Confirm publishing is authorized
 and checks are complete; verify the separately built public assets after release.
 Sparkle compares build numbers: choose a value greater than the latest published
-`CFBundleVersion`; hosted release builds use `1000 + GITHUB_RUN_NUMBER`.
+`CFBundleVersion`; hosted release builds use `2000 + GITHUB_RUN_NUMBER` from v1.0.3 onward.
+The old 1000-based counter would have produced build 1010 after local candidates
+1010–1012, preventing Sparkle from offering that release to those copies. Always
+check both the public feed and previously shared local builds before publication.
 
 Both feed and DMG use the existing Ed25519 identity. Never print, commit, attach,
 or place the seed in command arguments/logs. `.private/updates/ed25519.key` is

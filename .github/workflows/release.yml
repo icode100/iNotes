@@ -34,7 +34,9 @@ jobs:
           printf '%s\n' "$SPARKLE_PRIVATE_KEY" > "$RUNNER_TEMP/inotes-update-key"
           printf 'UPDATE_PRIVATE_KEY_FILE=%s\n' "$RUNNER_TEMP/inotes-update-key" >> "$GITHUB_ENV"
           printf 'VERSION=%s\n' "${GITHUB_REF_NAME#v}" >> "$GITHUB_ENV"
-          printf 'BUILD_NUMBER=%s\n' "$((1000 + GITHUB_RUN_NUMBER))" >> "$GITHUB_ENV"
+          # v1.0.3 must outrank the already shared local builds 1010–1012.
+          # Preserve this monotonic release sequence for future versions.
+          printf 'BUILD_NUMBER=%s\n' "$((2000 + GITHUB_RUN_NUMBER))" >> "$GITHUB_ENV"
       - name: Unit and integration tests
         run: bash scripts/test.sh
       - name: Build native ARM64 DMG
