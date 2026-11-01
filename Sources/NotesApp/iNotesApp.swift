@@ -40,6 +40,7 @@ struct iNotesApp: App {
                     print(try WorkspaceDiagnostics.run())
                 }
                 print(try StoreDiagnostics.run())
+                print(try StoreDiagnostics.runHierarchyChecks())
                 print(try BackupDiagnostics.run())
                 print("iNotes self-check passed: hierarchy, atomic save, reload, archive round-trip; \(ProcessInfo.processInfo.operatingSystemVersionString)")
                 exit(0)
@@ -87,6 +88,66 @@ struct iNotesApp: App {
 #if os(macOS)
 @MainActor
 enum StoreDiagnostics {
+    /// Exercise the real import-to-navigation path using a disposable library.
+    static func runHierarchyChecks() throws -> String {
+        let directory = FileManager.default.temporaryDirectory.appendingPathComponent("iNotes-hierarchy-check-\(UUID())")
+        let suite = "io.inotes.hierarchy-diagnostics.\(UUID())"
+        let preferences = UserDefaults(suiteName: suite)!
+        defer {
+            try? FileManager.default.removeItem(at: directory)
+            preferences.removePersistentDomain(forName: suite)
+        }
+        func require(_ condition: @autoclosure () -> Bool, _ reason: String) throws {
+            if !condition() { throw NSError(domain: "iNotes.HierarchyDiagnostics", code: 1, userInfo: [NSLocalizedDescriptionKey: reason]) }
+        }
+        let store = NotesStore(directory: directory, preferences: preferences)
+        guard let original = store.selectedSheet, let originalParent = original.parentID else { throw LibraryError.nodeNotFound }
+        store.update(original.id) { $0.body = "outside-needle" }
+        try require(store.flush(), "Initial legitimate note saves")
+        let priorNodes = store.library.nodes
+        let folders = (0..<127).map { _ in UUID() }
+        let date = Date(timeIntervalSince1970: 1_700_000_000)
+        var sheets = (1...49_000).map { number in
+            NoteNode(parentID: folders.last!, kind: .sheet, title: "", createdAt: date,
+                     updatedAt: date, order: number, sheetNumber: number)
+        }
+        sheets[0].body = "inside-needle"
+        sheets[0].isFavorite = true
+        sheets[0].strokes = [InkStroke(points: [InkPoint(x: 10, y: 20)], width: 0.8)]
+        let ancestors = folders.enumerated().map { index, id in
+            NoteNode(id: id, parentID: index == 0 ? nil : folders[index - 1],
+                     kind: index == 0 ? .workbook : index == 1 ? .chapter : .topic,
+                     title: "Folder", createdAt: date, updatedAt: date,
+                     lastSheetNumber: index == 126 ? sheets.count : 0)
+        }
+        let archive = try LibraryArchive.encode(NoteLibrary(nodes: sheets + ancestors))
+        let start = ProcessInfo.processInfo.systemUptime
+        store.importArchive(archive)
+        let importedIn = ProcessInfo.processInfo.systemUptime - start
+        try require(store.errorMessage == nil, "Near-limit archive imports successfully")
+        guard let root = store.folderID, let selected = store.selectedSheet else { throw LibraryError.nodeNotFound }
+        let queryStart = ProcessInfo.processInfo.systemUptime
+        let visible = store.visibleSheets
+        let queryIn = ProcessInfo.processInfo.systemUptime - queryStart
+        try require(queryIn < 5, "Near-limit folder selection remains bounded")
+        try require(visible.count == sheets.count && visible.first?.sheetNumber == 1 && visible.last?.sheetNumber == 49_000, "Untitled sheets keep their sequence and ordering")
+        try require(selected.title.isEmpty && selected.body == sheets[0].body && selected.strokes == sheets[0].strokes, "Import preserves title, text and ink")
+        let previousIDs = Set(priorNodes.map(\.id))
+        try require(store.library.nodes.filter { previousIDs.contains($0.id) } == priorNodes, "Import leaves previous notes unchanged")
+        store.search = "outside-needle"
+        try require(store.visibleSheets.map(\.id) == [original.id], "Search still spans folders")
+        store.search = ""; store.filter = .favorites; store.folderID = originalParent
+        try require(store.visibleSheets.map(\.id) == [selected.id], "Favorites still ignores the folder filter")
+        store.trash(selected.id); store.filter = .trash
+        try require(store.visibleSheets.map(\.id) == [selected.id], "Trash still ignores the folder filter")
+        store.restore(selected.id)
+        store.move(selected.id, to: originalParent)
+        store.chooseFolder(root)
+        try require(store.visibleSheets.count == sheets.count - 1, "Moving a sheet updates subtree membership immediately")
+        try require(store.flush(), "Near-limit imported library saves")
+        return "Hierarchy security checks passed: 49,127-node leaf-first import \(String(format: "%.3f", importedIn))s; folder query \(String(format: "%.3f", queryIn))s; original notes, untitled numbering, text/ink, search, Favorites, Trash and moves preserved"
+    }
+
     static func run() throws -> String {
         let directory = FileManager.default.temporaryDirectory.appendingPathComponent("iNotes-store-check-\(UUID())")
         let suite = "io.inotes.diagnostics.\(UUID())"

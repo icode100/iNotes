@@ -5,6 +5,53 @@ import Darwin
 import Glibc
 #endif
 
+/// Reads a regular file using one handle, consuming at most the limit plus one byte.
+/// The extra byte detects growth beyond the limit without loading the rest of the file.
+public enum BoundedFileReader {
+    public static func read(from url: URL, maximumBytes: Int) throws -> Data {
+        try read(from: url, maximumBytes: maximumBytes) { handle, count in
+            try handle.read(upToCount: count)
+        }
+    }
+
+    // The chunk operation is injectable so tests can change a real file after its
+    // metadata check, without a timing-dependent race against the filesystem.
+    static func read(from url: URL, maximumBytes: Int,
+                     readChunk: (FileHandle, Int) throws -> Data?) throws -> Data {
+        guard maximumBytes >= 0 else { throw LibraryError.invalidData("The file size limit must not be negative.") }
+        guard url.isFileURL else { throw CocoaError(.fileReadUnsupportedScheme) }
+        #if canImport(Darwin) || canImport(Glibc)
+        // Nonblocking open lets us inspect and reject a FIFO without waiting for a
+        // writer. fstat checks the opened file, not a path that can be replaced.
+        let descriptor = open(url.path, O_RDONLY | O_NONBLOCK | O_CLOEXEC)
+        guard descriptor >= 0 else { throw POSIXError(POSIXErrorCode(rawValue: errno) ?? .EIO) }
+        let handle = FileHandle(fileDescriptor: descriptor, closeOnDealloc: true)
+        defer { try? handle.close() }
+        var status = stat()
+        guard fstat(descriptor, &status) == 0 else { throw POSIXError(POSIXErrorCode(rawValue: errno) ?? .EIO) }
+        guard status.st_mode & mode_t(S_IFMT) == mode_t(S_IFREG) else {
+            throw LibraryError.invalidData("Choose a regular file.")
+        }
+        guard status.st_size <= Int64(maximumBytes) else { throw LibraryError.tooLarge }
+        #else
+        let values = try url.resourceValues(forKeys: [.fileSizeKey, .isRegularFileKey])
+        guard values.isRegularFile == true else { throw LibraryError.invalidData("Choose a regular file.") }
+        guard (values.fileSize ?? 0) <= maximumBytes else { throw LibraryError.tooLarge }
+        let handle = try FileHandle(forReadingFrom: url)
+        defer { try? handle.close() }
+        #endif
+
+        var data = Data()
+        while true {
+            let remaining = maximumBytes - data.count
+            let count = remaining >= 64 * 1024 ? 64 * 1024 : remaining + 1
+            guard let chunk = try readChunk(handle, count), !chunk.isEmpty else { return data }
+            guard chunk.count <= remaining else { throw LibraryError.tooLarge }
+            data.append(chunk)
+        }
+    }
+}
+
 public enum LibraryArchive {
     public static let maximumBytes = 64 * 1024 * 1024
 
@@ -38,17 +85,7 @@ public enum LibraryArchive {
     }
 
     public static func read(from url: URL) throws -> Data {
-        let size = try url.resourceValues(forKeys: [.fileSizeKey]).fileSize ?? 0
-        guard size <= maximumBytes else { throw LibraryError.tooLarge }
-        let handle = try FileHandle(forReadingFrom: url)
-        defer { try? handle.close() }
-        var data = Data()
-        // A second bounded read protects against a file growing after its metadata was checked.
-        while let chunk = try handle.read(upToCount: min(64 * 1024, maximumBytes + 1 - data.count)), !chunk.isEmpty {
-            data.append(chunk)
-            guard data.count <= maximumBytes else { throw LibraryError.tooLarge }
-        }
-        return data
+        try BoundedFileReader.read(from: url, maximumBytes: maximumBytes)
     }
 }
 

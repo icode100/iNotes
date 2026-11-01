@@ -82,6 +82,8 @@ final class NotesStore: ObservableObject {
     var visibleSheets: [NoteNode] {
         let hits: Set<UUID>? = search.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
             ? nil : Set(library.search(search, includingTrash: filter == .trash).map(\.id))
+        let scopedIDs = hits == nil && filter == .all
+            ? folderID.map { library.subtreeIDs(rootID: $0) } : nil
         return library.nodes.filter { node in
             guard node.kind == .sheet else { return false }
             switch filter {
@@ -90,8 +92,7 @@ final class NotesStore: ObservableObject {
             case .trash: guard node.isTrashed else { return false }
             }
             if let hits { return hits.contains(node.id) }
-            guard let folderID, filter == .all else { return true }
-            return isDescendant(node.id, of: folderID)
+            return scopedIDs?.contains(node.id) ?? true
         }.sorted { $0.order == $1.order ? $0.createdAt < $1.createdAt : $0.order < $1.order }
     }
 
@@ -246,7 +247,6 @@ final class NotesStore: ObservableObject {
             var roots: [UUID] = []
             if mutate({ roots = try $0.merge(incoming) }) {
                 chooseFolder(roots.first)
-                sheetID = visibleSheets.first?.id
             }
         } catch { errorMessage = "Could not import this backup. \(error.localizedDescription)" }
     }

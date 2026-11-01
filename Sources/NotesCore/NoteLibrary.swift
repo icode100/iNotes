@@ -33,6 +33,24 @@ public struct NoteLibrary: Codable, Equatable, Sendable {
 
     public var roots: [NoteNode] { children(of: nil) }
 
+    /// Includes the root and trashed descendants; callers apply their own view filters.
+    /// Build one adjacency index per query so accepted deep, leaf-first archives
+    /// cost O(nodes + edges), not a full-array search for each sheet's ancestors.
+    public func subtreeIDs(rootID: UUID) -> Set<UUID> {
+        var children: [UUID: [UUID]] = [:]
+        for node in nodes {
+            if let parent = node.parentID { children[parent, default: []].append(node.id) }
+        }
+        var result: Set<UUID> = [rootID]
+        var pending = [rootID]
+        while let parent = pending.popLast() {
+            for child in children[parent] ?? [] where result.insert(child).inserted {
+                pending.append(child)
+            }
+        }
+        return result
+    }
+
     public func path(to id: UUID) -> [NoteNode] {
         var path: [NoteNode] = [], cursor = node(id: id), visited = Set<UUID>()
         while let item = cursor, visited.insert(item.id).inserted {

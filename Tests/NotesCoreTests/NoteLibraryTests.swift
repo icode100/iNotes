@@ -38,6 +38,57 @@ final class NoteLibraryTests: XCTestCase {
         XCTAssertEqual(library.node(id: sheet)?.title, "新しいメモ 📝")
     }
 
+    func testSubtreeMembershipPreservesMovesTrashAndArrayOrder() throws {
+        var (library, workbook, chapter, topic, sheet) = try hierarchy()
+        let other = try library.create(kind: .chapter, title: "Other", parentID: workbook)
+        let outside = try library.create(kind: .sheet, parentID: other)
+        let before = library
+        XCTAssertEqual(library.subtreeIDs(rootID: topic), Set([topic, sheet]))
+        XCTAssertEqual(library, before)
+        try library.trash(id: sheet)
+        XCTAssertTrue(library.subtreeIDs(rootID: chapter).contains(sheet))
+        try library.restore(id: sheet)
+        try library.move(id: sheet, to: other)
+        XCTAssertFalse(library.subtreeIDs(rootID: chapter).contains(sheet))
+        XCTAssertEqual(library.subtreeIDs(rootID: other), Set([other, sheet, outside]))
+        let reversed = NoteLibrary(nodes: Array(library.nodes.reversed()))
+        XCTAssertEqual(reversed.subtreeIDs(rootID: workbook), library.subtreeIDs(rootID: workbook))
+        XCTAssertEqual(library.subtreeIDs(rootID: sheet), Set([sheet]))
+        let missing = UUID()
+        XCTAssertEqual(library.subtreeIDs(rootID: missing), Set([missing]))
+        // Defensive termination even for an invalid programmatically constructed graph.
+        let a = UUID(), b = UUID()
+        let cycle = NoteLibrary(nodes: [NoteNode(id: a, parentID: b, kind: .topic, title: "A"),
+                                       NoteNode(id: b, parentID: a, kind: .topic, title: "B")])
+        XCTAssertEqual(cycle.subtreeIDs(rootID: a), Set([a, b]))
+    }
+
+    func testNearLimitLeafFirstHierarchyHasBoundedSubtreeQuery() throws {
+        let folders = (0..<127).map { _ in UUID() }
+        let date = Date(timeIntervalSince1970: 1_700_000_000)
+        let sheets = (1...49_000).map { number in
+            NoteNode(parentID: folders.last!, kind: .sheet, title: "", createdAt: date,
+                     updatedAt: date, order: number, sheetNumber: number)
+        }
+        let ancestors = folders.enumerated().map { index, id in
+            NoteNode(id: id, parentID: index == 0 ? nil : folders[index - 1],
+                     kind: index == 0 ? .workbook : index == 1 ? .chapter : .topic,
+                     title: "Folder", createdAt: date, updatedAt: date,
+                     lastSheetNumber: index == 126 ? sheets.count : 0)
+        }
+        let library = NoteLibrary(nodes: sheets + ancestors)
+        let encoded = try LibraryArchive.encode(library)
+        let reopened = try LibraryArchive.decode(encoded)
+        let start = ProcessInfo.processInfo.systemUptime
+        let members = reopened.subtreeIDs(rootID: folders[0])
+        let elapsed = ProcessInfo.processInfo.systemUptime - start
+        XCTAssertEqual(members, Set(reopened.nodes.map(\.id)))
+        // A broad guard against reintroducing per-leaf full-array ancestry walks.
+        XCTAssertLessThan(elapsed, 5.0)
+        XCTAssertEqual(reopened.nodes.map(\.id), library.nodes.map(\.id))
+        print("Near-limit subtree: \(members.count) nodes, \(String(format: "%.3f", elapsed))s")
+    }
+
     func testUntitledSheetsPersistWithoutWeakeningFolderNames() throws {
         var (library, workbook, chapter, topic, sheet) = try hierarchy()
         let createdAt = try XCTUnwrap(library.node(id: sheet)?.createdAt)

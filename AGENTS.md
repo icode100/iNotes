@@ -70,6 +70,21 @@ Use availability guards for APIs newer than the deployment target.
 - Keep finite geometry checks and `InkGeometryLimits` shared across archives,
   clipboard input, model updates, and rendering. Patterned ink has an aggregate
   100,000-segment rendering budget; per-stroke checks alone are insufficient.
+- A valid archive can put 49,000 sheets before a 127-folder ancestor chain.
+  Folder-scoped sheet queries must build one adjacency index and membership set
+  (`subtreeIDs`), not run a full-array ancestor search per sheet. The existing
+  `descendants` helper also scans children repeatedly; it is not a safe substitute
+  for this hot path. Preserve sorting, global search/Favorites/Trash behavior, and
+  immediate membership changes after moves. Do not cache membership without
+  covering every library mutation and import.
+- Selected-file metadata is only a preflight check. `BoundedFileReader` must check
+  the opened descriptor and read in bounded chunks, consuming at most the caller's
+  limit plus one sentinel byte. Keep nonblocking open before rejecting nonregular
+  files so a substituted FIFO cannot hang; keep regular symlink targets supported.
+  Never restore `Data(contentsOf:)` for selected attachments or reopen the path
+  after descriptor validation. Preserve security-scoped access and candidate
+  validation before committing. The picker's 10 MiB and archive's 64 MiB limits
+  are different: existing archived attachments above 10 MiB remain supported.
 
 ## Critical editor and cursor invariants
 
@@ -223,6 +238,14 @@ at `965306f`. It reported one Low patterned-ink rendering-exhaustion issue; the
 release added the shared aggregate budget, a defensive renderer check, and regressions.
 That was static review plus regression testing, not a dependency CVE scan or a
 standing assurance that current code has no vulnerabilities.
+The 1 November 2026 standard scan at `00092ba` reviewed 78 tracked text/source/
+configuration files and inventoried 10 PNGs. It reported two Low resource-
+exhaustion issues: repeated ancestry scans on imported hierarchies and an
+attachment metadata-to-unbounded-read race. The follow-up adds indexed subtree
+membership and a shared descriptor-checked bounded reader, with adversarial and
+compatibility regressions. See the dated security-fix section of `docs/TESTING.md`
+for actual commands/results; do not apply that result to a later untested patch.
+These checks do not establish dependency-CVE coverage or absence of all defects.
 When a security scan is requested, use the named security workflow and report its
 actual scope, revision, findings, fixes, and verification limits. Never invent a pass.
 Treat imported archives, clipboard payloads, filenames, geometry, and equation source
@@ -265,7 +288,15 @@ Source pushes run `Native checks`; a `vX.Y.Z` tag runs the publishing workflow.
 Do not push a release tag merely to test packaging. Confirm publishing is authorized
 and checks are complete; verify the separately built public assets after release.
 Sparkle compares build numbers: choose a value greater than the latest published
-`CFBundleVersion`; hosted release builds use `2000 + GITHUB_RUN_NUMBER` from v1.0.3 onward.
+`CFBundleVersion`; hosted release builds now use `2001 + GITHUB_RUN_NUMBER`.
+Run 10 shipped build 2010; the manual same-version security rebuild reserves 2011,
+so the next new workflow run (11) must produce 2012. A workflow rerun does not
+advance `GITHUB_RUN_NUMBER`. Never reuse its build number for an updated binary.
+For a same-version rebuild, preserve the original tag and old installer, upload a
+distinct build-numbered DMG/checksum first, verify their public bytes, then replace
+the signed appcast last. Record the new source commit in the release notes;
+the original version tag still identifies the original build. Recheck the public
+feed and release counter before publishing and reserve any manual build slots.
 The old 1000-based counter would have produced build 1010 after local candidates
 1010–1012, preventing Sparkle from offering that release to those copies. Always
 check both the public feed and previously shared local builds before publication.

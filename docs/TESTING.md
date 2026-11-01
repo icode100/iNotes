@@ -1,5 +1,76 @@
 # Validation
 
+## Security fixes following v1.0.3 — 1 November 2026
+
+Base revision `00092ba27e1da89fec5aad861f35962bc49afd29`. Codex Security's
+standard scan `c3e91e99-3be2-492a-b271-db0eaeb986c3` covered all 78 tracked
+text/source/configuration files; 10 PNG assets were inventoried only. It reported
+two Low findings: `resource-exhaustion.import-hierarchy` (CWE-407) and
+`resource-exhaustion.attachment-unbounded-read` (CWE-367). The original scan was
+static; the follow-up fix-finding workflow used a fresh pre-patch investigator,
+parent source tracing, and one independent read-only candidate reviewer. The
+reviewer reported no concrete surviving bypass or compatibility regression.
+
+Folder queries now build a parent-to-children index and traverse each subtree
+once. Import no longer repeats the same sheet query. Attachment and archive
+reads share `BoundedFileReader`: one nonblocking descriptor, regular-file/size
+checks on that descriptor, 64 KiB chunks, and at most one byte beyond the caller's
+limit. The picker stays at 10 MiB; archives stay at 64 MiB and still accept
+individual embedded attachments larger than the picker limit. No archive schema,
+editor/cursor, pressure, navigation-animation, or dependency change was made.
+
+The source-frozen local candidate was tested in a disposable repository with
+temporary libraries on macOS 27.2 (26B123), Xcode 27.2 (27B52):
+
+| Gate / command | Observed result |
+| --- | --- |
+| `git diff --check`; Swift compilation in `bash scripts/test.sh` | Passed |
+| Security-trigger and compatibility tests within `scripts/test.sh` | 78 XCTest tests passed. Ten new methods cover near-limit leaf-first archives, subtree semantics, exact/empty files, dense/sparse oversize, growth after metadata, short reads, pathname replacement, FIFO/directory rejection, symlinks, and archived attachments above 10 MiB |
+| Command-line-tools standalone runner, compiled with `INOTES_STANDALONE_TESTS` | Same 78 methods passed, zero failures |
+| `bash scripts/build-macos.sh`; `bash scripts/verify-macos.sh` | Passed ARM64 packaging, strict ad hoc signatures, mounted-DMG checks, resource hashes and store/backup integration |
+| `dist/iNotes.app/Contents/MacOS/iNotes --smoke-test --editor-test` | Passed 260 editor, 399 workspace, 31 equation, 12 ruled-text and 8 shortcut checks, plus store/backup and 16 updater configuration checks |
+| `xcodebuild -project iNotes.xcodeproj -scheme iNotes-iPad -destination 'generic/platform=iOS Simulator' -derivedDataPath ../ipad-derived CODE_SIGNING_ALLOWED=NO build` | Passed shared-source iPad simulator compilation |
+| `bash scripts/generate-appcast.sh`; `bash scripts/test-update-signatures.sh` | Passed local feed/archive signature verification and all five valid/tampered/wrong-key cases |
+
+The new actual-store regression imported a valid 49,127-node archive (49,000
+leaf-first sheets and 127 ancestors) in 1.065 seconds and queried its folder in
+0.019 seconds in the packaged native harness. It checked preserved pre-existing
+notes, untitled numbering/order, text/ink, search, Favorites, Trash, moves and
+saving. The helper-only debug query took 0.021 seconds. These are observed local
+measurements, not a guarantee for every notebook or device. Growth tests change
+real files after the descriptor check and assert exactly 10 MiB + 1 bytes consumed
+before rejection; sparse growth to 1,000 MiB does not load the whole file.
+
+The initial restricted test run passed the new regressions but failed two existing
+backup tests because native `NSFileCoordinator` access was blocked. The complete
+suite passed with native macOS access; no assertion or backup code was weakened.
+Existing Swift concurrency/deprecated build-system warnings remain. The local
+navigation harness passed, but this does not resolve the separately reported
+hosted v1.0.3 CI navigation failure. No new physical tablet/Pencil, actual displayed
+system-cursor capture, older-OS, cloud-upload, dependency-CVE or notarization result
+is claimed. The original scan remains sealed; fix evidence is retained separately.
+
+Initial local QA artifact (version 1.0.3 / build 2010): 29,603,237 regular app-file
+bytes; DMG 24,628,282 bytes; SHA-256
+`3c7a399bebe5cc276773ee1682a9e0e488ce1aaea5661cef047e617f81513184`.
+This identifies the pre-publication test artifact, not the later higher-build
+same-version update requested by the user. Do not publish this build 2010 over
+an existing build 2010 or edit a signed feed to change its version.
+
+### Final same-version build 2011
+
+The final build keeps marketing version 1.0.3 and increases `CFBundleVersion` to
+2011. Its freshly built installer passed `verify-macos.sh`, the full native
+`--smoke-test --editor-test` suite (same counts above), iPad compilation, regenerated
+feed signing, and all five signature probes. Its actual-store near-limit import
+took 0.921 seconds and folder query 0.018 seconds. The build-numbered DMG is
+`iNotes-1.0.3-build2011-arm64.dmg`, 24,631,093 bytes, SHA-256
+`f7b77a9e42c3a9f253d7cc3dcdbbab1e1b56b7aba73ed8212f9fc00c6e342dfd`.
+This local binary is the publication candidate; verification of downloaded public
+assets is recorded separately after upload. Publication keeps the original tag
+and installer, with the signed appcast switched only after the new installer is
+publicly verified. The next hosted release run reserves build 2012.
+
 ## Millimetre nibs and navigation — local 1.0.3 candidate
 
 This candidate retains the navigation fixes, restores pre-experiment writing

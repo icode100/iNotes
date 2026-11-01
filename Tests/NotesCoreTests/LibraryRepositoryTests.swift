@@ -1,4 +1,9 @@
 import Foundation
+#if canImport(Darwin)
+import Darwin
+#elseif canImport(Glibc)
+import Glibc
+#endif
 #if !INOTES_STANDALONE_TESTS
 import XCTest
 #endif
@@ -7,6 +12,7 @@ import XCTest
 final class LibraryRepositoryTests: XCTestCase {
     private var directory: URL!
     private var url: URL { directory.appendingPathComponent("Library.json") }
+    private let attachmentMaximumBytes = 10 * 1024 * 1024
 
     override func setUpWithError() throws {
         directory = FileManager.default.temporaryDirectory.appendingPathComponent("iNotes-tests-\(UUID().uuidString)")
@@ -103,6 +109,147 @@ final class LibraryRepositoryTests: XCTestCase {
         try handle.close()
         XCTAssertThrowsError(try LibraryArchive.read(from: url)) { XCTAssertEqual($0 as? LibraryError, .tooLarge) }
         XCTAssertThrowsError(try LibraryRepository(url: url).load())
+    }
+
+    func testAttachmentBoundedReaderAcceptsEmptyAndExactLimitFiles() throws {
+        for bytes in [Data(), Data([0, 1, 127, 255]), Data(repeating: 0xA5, count: attachmentMaximumBytes)] {
+            try bytes.write(to: url)
+            XCTAssertEqual(try BoundedFileReader.read(from: url, maximumBytes: attachmentMaximumBytes), bytes)
+        }
+        try Data().write(to: url)
+        XCTAssertEqual(try BoundedFileReader.read(from: url, maximumBytes: 0), Data())
+    }
+
+    func testAttachmentBoundedReaderRejectsDenseAndSparseOversizeBeforeReading() throws {
+        try Data(repeating: 0xA5, count: attachmentMaximumBytes + 1).write(to: url)
+        for sparse in [false, true] {
+            if sparse {
+                let writer = try FileHandle(forWritingTo: url)
+                try writer.truncate(atOffset: UInt64(attachmentMaximumBytes) * 100)
+                try writer.close()
+            }
+            var reads = 0
+            XCTAssertThrowsError(try BoundedFileReader.read(from: url, maximumBytes: attachmentMaximumBytes) { handle, count in
+                reads += 1
+                return try handle.read(upToCount: count)
+            }) { XCTAssertEqual($0 as? LibraryError, .tooLarge) }
+            XCTAssertEqual(reads, 0)
+        }
+    }
+
+    func testAttachmentBoundedReaderStopsAtLimitPlusOneAfterAppend() throws {
+        try Data([0, 1, 2]).write(to: url)
+        let writer = try FileHandle(forWritingTo: url)
+        defer { try? writer.close() }
+        var bytesRead = 0
+        var requests: [Int] = []
+        XCTAssertThrowsError(try BoundedFileReader.read(from: url, maximumBytes: attachmentMaximumBytes) { handle, count in
+            requests.append(count)
+            let chunk = try handle.read(upToCount: count)
+            bytesRead += chunk?.count ?? 0
+            if requests.count == 1 {
+                try writer.seekToEnd()
+                try writer.write(contentsOf: Data(repeating: 0xA5, count: self.attachmentMaximumBytes))
+            }
+            return chunk
+        }) { XCTAssertEqual($0 as? LibraryError, .tooLarge) }
+        XCTAssertEqual(bytesRead, attachmentMaximumBytes + 1)
+        XCTAssertTrue(requests.allSatisfy { $0 > 0 && $0 <= 64 * 1024 })
+    }
+
+    func testAttachmentBoundedReaderStopsAtLimitPlusOneAfterSparseGrowth() throws {
+        try Data([0, 1, 2]).write(to: url)
+        let writer = try FileHandle(forWritingTo: url)
+        defer { try? writer.close() }
+        var bytesRead = 0
+        var reads = 0
+        XCTAssertThrowsError(try BoundedFileReader.read(from: url, maximumBytes: attachmentMaximumBytes) { handle, count in
+            reads += 1
+            let chunk = try handle.read(upToCount: count)
+            bytesRead += chunk?.count ?? 0
+            if reads == 1 {
+                try writer.truncate(atOffset: UInt64(self.attachmentMaximumBytes) * 100)
+            }
+            return chunk
+        }) { XCTAssertEqual($0 as? LibraryError, .tooLarge) }
+        XCTAssertEqual(bytesRead, attachmentMaximumBytes + 1)
+    }
+
+    func testBoundedReaderContinuesAfterShortReadsAndDetectsGrowth() throws {
+        let bytes = Data(0..<31)
+        try bytes.write(to: url)
+        XCTAssertEqual(try BoundedFileReader.read(from: url, maximumBytes: bytes.count) { handle, count in
+            try handle.read(upToCount: min(count, 3))
+        }, bytes)
+
+        try Data([0, 1]).write(to: url)
+        let writer = try FileHandle(forWritingTo: url)
+        defer { try? writer.close() }
+        var bytesRead = 0
+        var reads = 0
+        XCTAssertThrowsError(try BoundedFileReader.read(from: url, maximumBytes: bytes.count) { handle, count in
+            reads += 1
+            let chunk = try handle.read(upToCount: min(count, 3))
+            bytesRead += chunk?.count ?? 0
+            if reads == 1 {
+                try writer.seekToEnd()
+                try writer.write(contentsOf: bytes)
+            }
+            return chunk
+        }) { XCTAssertEqual($0 as? LibraryError, .tooLarge) }
+        XCTAssertEqual(bytesRead, bytes.count + 1)
+    }
+
+    func testBoundedReaderKeepsOpenedFileWhenPathIsReplaced() throws {
+        let bytes = Data(repeating: 0xA5, count: 128 * 1024)
+        try bytes.write(to: url)
+        var reads = 0
+        let actual = try BoundedFileReader.read(from: url, maximumBytes: attachmentMaximumBytes) { handle, count in
+            reads += 1
+            let chunk = try handle.read(upToCount: count)
+            if reads == 1 {
+                try FileManager.default.removeItem(at: self.url)
+                try Data().write(to: self.url)
+                let replacement = try FileHandle(forWritingTo: self.url)
+                try replacement.truncate(atOffset: UInt64(self.attachmentMaximumBytes + 1))
+                try replacement.close()
+            }
+            return chunk
+        }
+        XCTAssertEqual(actual, bytes)
+        XCTAssertThrowsError(try BoundedFileReader.read(from: url, maximumBytes: attachmentMaximumBytes)) {
+            XCTAssertEqual($0 as? LibraryError, .tooLarge)
+        }
+    }
+
+    func testBoundedReaderRejectsNonregularFilesAndAcceptsRegularSymlinks() throws {
+        XCTAssertThrowsError(try BoundedFileReader.read(from: directory, maximumBytes: attachmentMaximumBytes)) {
+            XCTAssertEqual($0 as? LibraryError, .invalidData("Choose a regular file."))
+        }
+        #if canImport(Darwin) || canImport(Glibc)
+        let fifo = directory.appendingPathComponent("input.pipe")
+        XCTAssertEqual(mkfifo(fifo.path, mode_t(0o600)), 0)
+        XCTAssertThrowsError(try BoundedFileReader.read(from: fifo, maximumBytes: attachmentMaximumBytes)) {
+            XCTAssertEqual($0 as? LibraryError, .invalidData("Choose a regular file."))
+        }
+        #endif
+        let bytes = Data([0, 1, 127, 255])
+        try bytes.write(to: url)
+        let link = directory.appendingPathComponent("attachment-link")
+        try FileManager.default.createSymbolicLink(at: link, withDestinationURL: url)
+        XCTAssertEqual(try BoundedFileReader.read(from: link, maximumBytes: attachmentMaximumBytes), bytes)
+    }
+
+    func testArchiveReadPreservesAttachmentsLargerThanPickerLimit() throws {
+        var library = NoteLibrary.sample()
+        var sheet = try XCTUnwrap(library.nodes.first { $0.kind == .sheet })
+        let attachment = NoteAttachment(filename: "large.bin", mediaType: "application/octet-stream",
+                                        data: Data(repeating: 0xA5, count: attachmentMaximumBytes + 1))
+        sheet.attachments.append(attachment)
+        try library.update(sheet)
+        try LibraryArchive.encode(library).write(to: url)
+        let imported = try LibraryArchive.decode(LibraryArchive.read(from: url))
+        XCTAssertEqual(imported.node(id: sheet.id)?.attachments, [attachment])
     }
 
     func testArchiveImportAndExportIntegration() throws {

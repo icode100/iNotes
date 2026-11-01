@@ -550,8 +550,7 @@ struct SheetDetail: View {
         guard values.isRegularFile == true, (values.fileSize ?? Int.max) <= 10 * 1024 * 1024 else {
             throw LibraryError.invalidData("Choose a file no larger than 10 MiB.")
         }
-        let data = try Data(contentsOf: url)
-        guard data.count <= 10 * 1024 * 1024 else { throw LibraryError.tooLarge }
+        let data = try BoundedFileReader.read(from: url, maximumBytes: 10 * 1024 * 1024)
         let attachment = NoteAttachment(filename: url.lastPathComponent, mediaType: values.contentType?.preferredMIMEType ?? "application/octet-stream", data: data)
         // Check the portable-library size before accepting bytes into the working copy.
         var candidate = store.library
