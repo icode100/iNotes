@@ -64,8 +64,17 @@ compatibility with this host's command line tools and managed workspace.
 
 By default the script applies a local ad hoc signature. This permits local
 development on Apple silicon but is **not** an Apple Developer ID signature or
-notarization. Gatekeeper behavior on other Macs must be tested with a notarized
-release; a development DMG must not be described as ready for public distribution.
+notarization. Current downloaded public builds use this ad hoc signature too;
+Gatekeeper may block their first launch because Apple has not checked them for
+malicious software. Install the app into Applications, attempt to open it, then,
+if you trust its source, use the per-app **Open Anyway** option in **System
+Settings → Privacy & Security**. The [README first-open steps](../README.md#run-on-mac)
+follow [Apple's guidance](https://support.apple.com/en-us/102445).
+
+Sparkle's Ed25519 feed/archive signatures establish release authenticity and
+integrity, independently of Gatekeeper. They do not confer Developer ID signing
+or Apple notarization. Developer ID signing, notarization, and Gatekeeper
+acceptance must be configured and verified separately.
 
 A maintainer with an Apple Developer ID certificate can build with:
 

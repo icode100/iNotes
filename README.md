@@ -53,7 +53,15 @@ Requires an Apple silicon Mac and macOS 14+. Building the installer requires ful
 open dist/iNotes.app
 ```
 
-The default installer is `dist/iNotes-0.2.2-arm64.dmg` (version 0.2.2, development build 6). Open it and drag iNotes into Applications. Local builds use ad hoc signing. Public distribution requires Developer ID signing and Apple notarization; see [build instructions](docs/BUILD.md).
+The default local installer is `dist/iNotes-0.2.2-arm64.dmg` (version 0.2.2, development build 6). Downloaded public builds are also ad hoc signed: **they are not Apple notarized**, so macOS may report that Apple could not verify iNotes is free of malware.
+
+If you trust the download from the [official releases](https://github.com/icode100/iNotes/releases), follow Apple's [per-app first-open procedure](https://support.apple.com/en-us/102445):
+
+1. Open the DMG, drag **iNotes** into **Applications**, and open that installed copy.
+2. If macOS blocks it, dismiss the warning and open **System Settings → Privacy & Security**. Find the iNotes warning under Security and click **Open Anyway**.
+3. Confirm **Open** when prompted and authenticate if requested. This creates an exception for this app.
+
+The updater's Ed25519 signatures verify release authenticity and integrity; they do not provide Apple Developer ID signing, notarization, or an Apple malware assessment. See [build instructions](docs/BUILD.md) for notarized distribution setup.
 
 ## iPad
 
