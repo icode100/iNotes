@@ -13,7 +13,7 @@ struct UnifiedPageEditor: NSViewRepresentable {
     @Binding var equations: [NoteEquation]
     var tool: InkTool = .pen
     var colorHex = "#314D43"
-    var lineWidth: Double = 2.5
+    var lineWidth: Double = InkNibPreset.defaultWidth(for: .pen)
     var paper: InkPaper = .dotted
     var theme: PageTheme = .light
     var linePattern: LinePattern = .solid
@@ -27,7 +27,7 @@ struct UnifiedPageEditor: NSViewRepresentable {
 
     init(text: Binding<String>, rtfData: Binding<Data?>, strokes: Binding<[InkStroke]>, pencilKitData: Binding<Data?>,
          textBoxes: Binding<[PageTextBox]> = .constant([]), equations: Binding<[NoteEquation]> = .constant([]),
-         tool: InkTool = .pen, colorHex: String = "#314D43", lineWidth: Double = 2.5,
+         tool: InkTool = .pen, colorHex: String = "#314D43", lineWidth: Double? = nil,
          paper: InkPaper = .dotted, theme: PageTheme = .light,
          linePattern: LinePattern = .solid, pageTemplate: PageTemplate = .none, templateLinePattern: LinePattern = .solid,
          onTextChange: ((String, Data?) -> Void)? = nil, onInkChange: (([InkStroke], Data?) -> Void)? = nil,
@@ -35,7 +35,7 @@ struct UnifiedPageEditor: NSViewRepresentable {
          onEquationEdit: ((NoteEquation) -> Void)? = nil) {
         _text = text; _rtfData = rtfData; _strokes = strokes; _pencilKitData = pencilKitData
         _textBoxes = textBoxes; _equations = equations; self.tool = tool; self.colorHex = colorHex
-        self.lineWidth = lineWidth; self.paper = paper; self.theme = theme
+        self.lineWidth = lineWidth ?? InkNibPreset.defaultWidth(for: tool); self.paper = paper; self.theme = theme
         self.linePattern = linePattern; self.pageTemplate = pageTemplate; self.templateLinePattern = templateLinePattern
         self.onTextChange = onTextChange; self.onInkChange = onInkChange; self.onInputChange = onInputChange
         self.onPageChange = onPageChange; self.onEquationEdit = onEquationEdit

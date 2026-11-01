@@ -81,19 +81,7 @@ struct StandaloneTestRunner {
         let backups = BackupArchiveTests()
         let presentation = PagePresentationTests()
         let inkValidation = InkValidationTests()
-        let inkPressure = InkPressureTests()
         let tests: [(String, XCTestCase, () throws -> Void)] = [
-            ("device force normalization", inkPressure, inkPressure.testDeviceForceNormalizesAcrossItsActualRange),
-            ("mouse and unavailable force use base nib", inkPressure, inkPressure.testMouseAndUnavailableForceRemainAtTheSelectedBase),
-            ("continuous pressure precision", inkPressure, inkPressure.testNearbyPressureValuesRemainContinuousWithoutHardwareLevelQuantization),
-            ("new pressure never shrinks chosen nib", inkPressure, inkPressure.testEveryNewNibUsesChosenWidthAsAMinimumAndPressureOnlyThickens),
-            ("legacy pressure JSON defaults", inkPressure, inkPressure.testLegacyJSONWithoutPressureFieldsKeepsItsOriginalAppearance),
-            ("legacy pressure archive appearance", inkPressure, inkPressure.testLegacyArchiveMissingNewFieldsPreservesEveryToolWidth),
-            ("pressure and native width archive clipboard roundtrip", inkPressure, inkPressure.testNewPressureAndNativeRenderedWidthsRoundTripThroughArchiveAndClipboard),
-            ("native rendered width accepted bounds", inkPressure, inkPressure.testValidNativeRenderedWidthBoundariesArePreserved),
-            ("invalid native width atomic rejection", inkPressure, inkPressure.testInvalidNativeRenderedWidthsRejectBeforeMutationOrImport),
-            ("selection preserves native width metadata", inkPressure, inkPressure.testSelectionTranslationPreservesPressureResponseAndNativeWidths),
-            ("selection hits visible pressure width", inkPressure, inkPressure.testSelectionHitsVisiblePressureAndNativeWidthEdges),
             ("legacy line and template defaults", presentation, presentation.testLegacyArchivesDefaultToSolidLinesWithoutTemplates),
             ("line and template archive import duplicate", presentation, presentation.testLineAndTemplateChoicesSurviveSaveImportAndDuplicate),
             ("line pattern clipboard and selection", presentation, presentation.testPatternSurvivesClipboardAndSelectionTranslation),

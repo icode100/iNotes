@@ -117,6 +117,45 @@ enum WorkspaceDiagnostics {
         }
         let editor = page.textView
         try check(page.activeTool == .text && editor.isEditable, "isolated workspace preferences reach the mounted editor")
+        let penFine = 0.45 * 72 / 25.4
+        try check(abs(page.inkView.lineWidth - penFine) < 0.000001, "fresh workspace uses the 0.45 mm Fine pen nib")
+        for tool in [InkTool.pen, .line, .pencil, .marker, .highlighter] {
+            preferences.set(InkNibPreset.broad.width(for: tool), forKey: "inkWidth")
+            preferences.set("#B14D55", forKey: "inkColor")
+            settle(0.1)
+            NotificationCenter.default.post(name: .noteToolShortcut, object: tool)
+            let fine = InkNibPreset.defaultWidth(for: tool)
+            waitPassively { page.activeTool == tool && abs(page.inkView.lineWidth - fine) < 0.000001 }
+            try check(page.activeTool == tool && abs(page.inkView.lineWidth - fine) < 0.000001
+                      && abs(preferences.double(forKey: "inkWidth") - fine) < 0.000001,
+                      "selecting \(tool.rawValue) resets a broad nib to that tool's Fine preset")
+            let expectedColor = tool == .line ? "#30343B" : tool == .highlighter ? "#E2B84D" : "#B14D55"
+            try check(page.inkView.colorHex == expectedColor && !editor.isEditable && !editor.isSelectable,
+                      "selecting \(tool.rawValue) preserves its original color policy and native ink routing")
+            let expectedMillimeters: [Double] = tool == .marker ? [0.5, 0.7, 1, 1.5] : [0.3, 0.45, 0.7, 1]
+            for (index, preset) in InkNibPreset.presets(for: tool).enumerated() {
+                let width = preset.width(for: tool)
+                preferences.set(width, forKey: "inkWidth")
+                waitPassively { abs(page.inkView.lineWidth - width) < 0.000001 }
+                try check(abs(page.inkView.lineWidth - width) < 0.000001 && findPage(host.view) === page,
+                          "\(tool.rawValue) \(preset.label(for: tool)) reaches the same native page without clamping")
+                if tool != .highlighter {
+                    let style = InkStyle(rawValue: tool.rawValue) ?? .pen
+                    let stroke = InkStroke(points: [InkPoint(x: 20, y: 20)], width: page.inkView.lineWidth, style: style)
+                    let actualMillimeters = (InkRenderer.bounds(of: stroke)?.width ?? 0) * 25.4 / 72
+                    try check(abs(actualMillimeters - expectedMillimeters[index]) < 0.000001,
+                              "\(tool.rawValue) \(preset.title) renders the requested nominal millimetres after its style multiplier")
+                }
+            }
+        }
+        let customWidth = 1.2345
+        preferences.set(customWidth, forKey: "inkWidth")
+        NotificationCenter.default.post(name: .noteToolShortcut, object: InkTool.text)
+        waitPassively { page.activeTool == .text && editor.isEditable && page.inkView.lineWidth == customWidth }
+        try check(page.activeTool == .text && editor.isEditable && page.inkView.lineWidth == customWidth,
+                  "returning to Text restores typing and preserves a custom nib value")
+        preferences.set(penFine, forKey: "inkWidth")
+        preferences.set("#30343B", forKey: "inkColor")
         try check(window.makeFirstResponder(editor), "workspace native text accepts keyboard focus")
         editor.setSelectedRange(NSRange(location: (editor.string as NSString).length, length: 0))
         editor.breakUndoCoalescing()

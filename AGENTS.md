@@ -86,40 +86,34 @@ Do not treat callback-level cursor assertions alone as proof of the displayed cu
   Check width and zoom changes as well as switching from Text to ink.
 - Plain tool letters are text while a text field/editor has focus. Keep the modified
   tool shortcuts working without stealing note, search, title, or equation input.
-- New pressure-sensitive Mac strokes use the selected tool/nib base as a minimum
-  and grow up to 2× that base. Mouse/unknown pressure means base, not maximum.
-  Preserve normalized zero and fractional pressure; the tablet's advertised
-  16,000-level range is not a reason to quantize samples. Marker/highlighter keep
-  their wider tool bases but must vary locally, without repeated-alpha seams.
-  On tablet-tagged mouse events, `NSEvent.pressure` may expose only 8-bit steps
-  while `CGEvent.tabletEventPointPressure` retains finer samples. Prefer the
-  tablet field only when a tablet record is present; preserve a genuine zero,
-  and fall back for drivers/events without that record. Ordinary mouse pressure
-  must not masquerade as stylus pressure. Test both native tablet-point events
-  and tablet-tagged mouse events; a synthetic factory is not physical hardware.
-- Preserve legacy stroke response when new pressure behavior is added. Decoding
-  absent pressure fields must not restyle existing notes. Native PencilKit force
-  1 means average force, not the normalized maximum: retain its rendered point
-  widths for portable conversion and validate those widths at archive/clipboard
-  boundaries. Selection, translation, erasure and exports must respect them.
-- The user chose native live PencilKit drawing on iPad, with the selected minimum
-  applied only to completed new strokes. Do not rewrite existing/imported ink or
-  discard native path metadata, masks, transforms, identity, or undo behavior.
-  Test late completion and redo persistence; do not call synthetic paths physical
-  Apple Pencil validation or promise a live PencilKit minimum-width guarantee.
-  Defensively support late final ink after an end callback; this ordering is
-  tested synthetically, not established by physical Pencil capture. Keep the pending new
-  path context bounded and clear it for sheet replacement, undo, paste, duplicate,
-  or a new gesture. A cancelled/no-op gesture must release deferred appearance
-  changes; a late path needs both canonical-color persistence and reprojection
-  to the current display theme. Test the actual canvas color as well as saved ink.
-  Async main-queue tests must yield the main actor; nested run-loop pumping inside
-  a main-queue callback cannot reliably run another queued main-queue callback.
+- The user withdrew the new pressure experiment on 1 November 2026. Preserve
+  the pre-experiment rendering and native PencilKit behavior; do not reintroduce
+  the added 1×–2× pressure boost, completed-stroke width floor, portable native-width
+  metadata, or pressure-sized cursor. Earlier tablet/PencilKit handling already
+  consumed pressure; restoring it is not a guarantee of pressure-free native ink.
+- Every writing-tool selection defaults to Fine. The latest requested nominal
+  presets are Extra Fine/Fine/Medium/Broad: Pen, Pencil, and Straight line use
+  0.3/0.45/0.7/1 mm; Brush (Marker) uses 0.5/0.7/1/1.5 mm. Highlighter retains its
+  existing width choices. Extra Fine was explicitly requested again after the
+  pressure experiment was withdrawn; it does not restore pressure enhancements.
+  Convert mm using 72/25.4 points per mm and divide by the existing tool multiplier
+  before storage; Mac rendering and native iPad configuration apply that multiplier.
+  Do not multiply the requested millimetres twice or rewrite saved stroke widths.
+  Preserve original tool color policies and explicitly supplied/custom widths.
+- Every single-choice settings menu needs a visible checkmark and selected
+  accessibility value: nib, paper, line style, template, template-line style,
+  appearance, page colors, and scenery. Existing non-preset nib preferences must
+  show as checked Custom, not silently snap to the closest named size. Verify
+  visible menu state after changing a choice, including light/dark/system modes.
+  macOS can strip `Label` images from a native menu: a checkmark SF Symbol is
+  not proof of a checked item. Use native `Toggle` menu state with one-way
+  selection semantics and verify the rendered menu; the current choice must
+  not be cleared by selecting it again.
 - Theme changes and chrome toggles must preserve the native editor instance,
   text/ink content, selection/caret, zoom, and input routing. Mac changes retain
   undo history. Existing iPad ink-theme reprojection recreates stroke IDs and
   deliberately clears native ink undo history to avoid targeting stale IDs;
-  do not claim otherwise. Pressure correction alone must retain identity/history.
+  do not claim otherwise.
 - Verify resized/collapsed panes using the actual visible editor viewport. A view
   existing in the hierarchy does not prove it is unobscured by another pane.
 - Newer macOS column backing views can extend underneath the sidebar. Preserve

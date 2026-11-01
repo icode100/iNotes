@@ -1,73 +1,54 @@
 # Validation
 
-## Pressure and navigation candidate — local 1.0.3
+## Millimetre nibs and navigation — local 1.0.3 candidate
 
-This candidate extends `f1ae7ef` with pressure-sensitive nib minimums and stable,
-animated navigation. It is a local build, not a new public release. Build defaults
-remain at the published v1.0.2; reproduce with
-`VERSION=1.0.3 BUILD_NUMBER=1010 bash scripts/build-macos.sh`.
+This candidate retains the navigation fixes, restores pre-experiment writing
+behavior, and makes Fine the default for each writing-tool selection. Requested
+nominal presets (Extra Fine/Fine/Medium/Broad) are 0.3/0.45/0.7/1 mm for Pen,
+Pencil, and Straight line, and 0.5/0.7/1/1.5 mm for Brush/Marker. Highlighter retains
+its earlier choices. Conversion uses 72/25.4 points per millimetre and compensates
+for existing style multipliers before storage; existing stroke archives are unchanged.
+Native PencilKit and earlier tablet handling remain as before. The canceled pressure
+boost, completed-stroke floor, native-width model fields, and pressure-sized cursor
+are absent. This is not a promise of pressure-free native PencilKit drawing.
 
-The final source-frozen ARM64 package (build 1010) passed on macOS 27.2 (26B123):
+Nib, paper, line style, template, template-line style, appearance, page-color,
+and scenery menus show explicit checkmarks and selected accessibility values.
+Previously saved non-preset nib widths are preserved as checked Custom values.
 
-- 79 XCTest unit/integration tests and 79 standalone-runner cases.
-- 279 editor, 351 workspace, 31 equation, 12 ruled-text, and 8 shortcut checks.
-- Storage/backup integration and 16 signed-update configuration checks.
-- Read-only mounted DMG, strict nested ad hoc signatures, ARM64 deployment/resources,
-  original scenery-image hashes, adaptive icons, and persistence smoke checks.
-- Signed appcast/archive verification and all five valid/tampered update cases.
-- ARM64 iPad simulator compilation and 197 native runtime checks.
+Final local build `1.0.3` / `1012` on macOS 27.2 (26B123) passed:
 
-The app has 29,648,837 regular-file bytes; the DMG has 24,659,795 bytes (23.52 MiB).
-DMG SHA-256: `59e226ddadfaf8a748a2c43d194e6fdcc3398d53ea744e5bc3412be46b8910ac`.
-Source inputs were frozen before packaging and matched the recorded manifest after
-all checks. Logs include `final-core-tests.log`, `final-release-build.log`,
-`final-native.log`, `final-dmg-verification.log`, `final-appcast.log`, and
-`final-update-signatures.log` under the navigation evidence directory below;
-`ipad-build.log`, `ipad-diagnostics.json`, and the standalone `core-tests.log`
-are in the pressure evidence directory. These are local results; CI and public
-release verification must be reported separately.
+- 68 XCTest unit/integration tests, zero failures.
+- 260 native editor, 399 workspace, 31 equation, 12 ruled-text, and 8 shortcut checks.
+  Workspace coverage includes each requested nib's actual nominal rendered width,
+  Fine on tool selection, custom-width preservation, and the navigation cases below.
+- Store/backup integration and 16 signed-updater configuration checks.
+- ARM64 iPad simulator compilation and all 164 existing native checks, using fresh
+  isolated notes. The dedicated simulator was shut down afterward.
+- Read-only DMG verification, strict nested ad hoc signatures, ARM64/resources,
+  original theme-image hashes, and mounted-app persistence checks.
+- Local appcast generation and five valid/tampered update-signature cases.
 
-### Pressure coverage
+Live Mac QA used a separate `io.inotes.nibqa` identity and temporary notes. The
+first menu implementation used checkmark images in `Label`; macOS omitted them
+from the rendered menu despite successful compilation. The final helper uses
+native `Toggle` menu state, and screenshots confirmed visible checks for Fine,
+Extra Fine after selection, dotted paper, solid line style, no template, solid
+template line, system appearance, matching page colors, and Classic scenery.
+Pen/Pencil menus showed 0.3/0.45/0.7/1 mm, and Brush showed 0.5/0.7/1/1.5 mm;
+switching tools restored their respective checked Fine preset. `AGENTS.md` records
+the native-menu trap. Native cursor regressions passed; this final pass does not
+claim a new physical Pencil/tablet test or a displayed-system-cursor capture.
 
-All 79 core tests passed with XCTest and the standalone runner. The Mac release
-binary passed 279 native editor checks, including tablet-tagged mouse events,
-standalone tablet-point events, real zero pressure, missing-record fallbacks,
-nearby high-precision samples, stationary-tip updates, constant mouse width,
-undo/redo, and legacy archive appearance. Pixel measurements of the rendered
-Pen/Pencil/Marker/Highlighter paths verify the selected minimum and a hard-pressure
-width at least 1.7 times the light-pressure width. Translucent strokes retain local
-width variation without repeated-alpha seams. New Mac strokes and custom Pencil lines map normalized
-stylus pressure continuously from 1× to 2× the tool's selected base width; native
-iPad freehand retains PencilKit's pressure response.
-
-An isolated native event bridge probe measured an input near 0.25 as
-`0.247058823705` through tablet-tagged mouse `NSEvent.pressure`, versus
-`0.249988555734` in the same event's CG tablet-pressure field. The implementation
-prefers that finer field when a tablet record is present, including a genuine
-zero, and retains the ordinary-pressure fallback for drivers without the record.
-This verifies software event precision, not all advertised hardware pressure levels.
-
-The iPad ARM64 simulator target built and passed 197 native checks. These cover
-completed-stroke minimums, native metadata, undo/redo, canonical/display colors,
-no-op gestures, late completion, paste/duplicate boundaries, selection, typing,
-and clipboard behavior. Live Apple Pencil drawing remains native PencilKit;
-the minimum is applied after completion, as agreed. The native force value 1
-means average force, so portable conversion retains sampled rendered widths
-instead of treating that force as a normalized maximum. Reconstructing native
-points showed framework rounding of about 0.000024 radians in altitude and
-0.000000012 in secondary scale in the probe; these are observed values, not
-guaranteed bounds. Diagnostics allow 0.00005 and 0.0000001 respectively. Other
-asserted metadata is preserved. Existing iPad theme reprojection recreates stroke
-identities and clears native ink undo history; pressure correction alone retains
-identity and history. Late-completion ordering is synthetically exercised as a
-defensive case, not claimed as an observed physical Pencil event sequence.
-
-The iPad test harness uses real async main-turn yields. Nested run-loop pumping
-inside a main-queue callback did not execute the queued completion reliably.
-An invalid empty provider-paste fixture also reached UIKit's unimplemented base
-method; the unsupported override and fixture were removed. The shared edit boundary used by native paste
-and duplicate remains covered; this does not execute their actual superclass dispatch. Only the dedicated QA simulator was
-used and shut down afterward.
+Reproduce packaging with
+`VERSION=1.0.3 BUILD_NUMBER=1012 bash scripts/build-macos.sh`.
+The app contains 29,583,429 regular-file bytes; the DMG contains 24,618,283 bytes
+(23.48 MiB), SHA-256
+`e3798d9ec557f91a610b5f6104159505f1bd35895911538542a9bc6bf2be5151`.
+Temporary logs and the source hash manifest are under
+`/private/tmp/inotes-nib-validation/`. This is a local candidate on the development
+branch; version defaults and the public release remain 1.0.2. No new security scan,
+Apple notarization, or public updater publication is claimed for this candidate.
 
 ### Navigation regression method
 
@@ -93,35 +74,23 @@ passing. The fix keeps restoration owned by the controller through outstanding
 native completions, then releases it. Successor probes wait for that restoration
 before claiming the controller. `AGENTS.md` records the ownership and fixture traps.
 
-### Live checks and limits
+## Withdrawn pressure trial — commit `085aab6`
 
-Separate QA app identities and temporary libraries were used throughout. Live Mac
-checks typed text with the Deco 640 connected, switched Text → Pen, and drew with
-an ordinary mouse over the same page. They also switched sheets with the sidebar
-hidden, independently hid/restored the sheets pane, and inspected aligned heading,
-toolbar, and paper edges without clicking the page to repair layout. Production
-notes and the installed app were not modified.
+This was a local experiment, not the current implementation or a public release.
+It added Mac pressure boosting, iPad completed-stroke width floors, and portable
+native-width metadata. Its 79 core, 279 editor, 351 workspace, and 197 iPad checks
+passed, as did [hosted Native checks](https://github.com/icode100/iNotes/actions/runs/41307360271).
+The user physically confirmed thickness changes and a dot cursor on the Deco 640,
+then explicitly withdrew the pressure feature and requested the previous writing
+behavior. The pressure implementation and its tests were reverted; navigation
+fixes were retained. Later requests reintroduced Extra Fine with exact millimetre
+presets, without restoring the pressure experiment. Do not reuse the withdrawn
+trial's counts or artifact checksum as current validation.
 
-The v0.2.2 input and cursor-ownership safeguards are retained. Native regression
-checks cover Text/ink switching, cursor shape/size, and pane transitions. A temporary
-system-cursor probe was inconclusive: its original window hit-test used the wrong
-coordinate space, and a window inventory later showed the chat window above the
-QA app at the pointer despite the QA app reporting active/key. Those cursor images
-are not a displayed-page cursor pass or proof of a regression.
-
-The user then brought the updated `iNotes Pressure QA` app forward and explicitly
-confirmed: “Stroke thickens and cursor is a dot.” The temporary QA library contains
-new `.baseWidth` Pen and Marker strokes with fractional pressure values, including
-a minimum observed Pen sample near 0.000122 and samples reaching 1. This is a
-physical check on the connected Deco 640, separate from the synthetic tests;
-it does not establish every advertised pressure level, other tablet drivers,
-physical Apple Pencil behavior, tilt/palm rejection, or older supported OS runtimes.
-
-Evidence is under `/private/tmp/inotes-navigation-validation/` and
-`/private/tmp/inotes-pressure-validation/`; temporary evidence is not committed
-or shipped. No new Codex Security scan, dependency CVE audit, notarization, or
-public updater publication is claimed. The earlier security scan below remains
-a historical record.
+A temporary hover probe initially produced misleading cursor captures: it used
+the wrong hit-test coordinate space and the chat window was above the QA app at
+the pointer. Those images did not establish a cursor regression. `AGENTS.md`
+retains this lesson alongside the v0.2.2 cursor invariants.
 
 ## Earlier sidebar reflow candidate — 1.0.3 at `f1ae7ef`
 

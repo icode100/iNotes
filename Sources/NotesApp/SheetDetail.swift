@@ -5,6 +5,79 @@ import NotesCore
 import AppKit
 #endif
 
+enum InkNibPreset: String, CaseIterable {
+    case extraFine, fine, medium, broad, highlighter
+
+    static let pointsPerMillimeter = 72.0 / 25.4
+
+    var title: String {
+        switch self {
+        case .extraFine: return "Extra Fine"
+        case .fine: return "Fine"
+        case .medium: return "Medium"
+        case .broad: return "Broad"
+        case .highlighter: return "Highlighter width"
+        }
+    }
+
+    static func presets(for tool: InkTool) -> [Self] {
+        tool == .highlighter ? [.fine, .medium, .broad, .highlighter] : [.extraFine, .fine, .medium, .broad]
+    }
+
+    static func defaultWidth(for tool: InkTool) -> Double { Self.fine.width(for: tool) }
+
+    func millimeters(for tool: InkTool) -> Double {
+        if tool == .highlighter {
+            return legacyHighlighterWidth * InkStyle.highlighter.widthMultiplier / Self.pointsPerMillimeter
+        }
+        switch self {
+        case .extraFine: return tool == .marker ? 0.5 : 0.3
+        case .fine: return tool == .marker ? 0.7 : 0.45
+        case .medium: return tool == .marker ? 1 : 0.7
+        case .broad: return tool == .marker ? 1.5 : 1
+        case .highlighter: return 4.5 * InkStyle.highlighter.widthMultiplier / Self.pointsPerMillimeter
+        }
+    }
+
+    /// Existing renderers and PencilKit configuration apply the style multiplier.
+    /// Store its inverse here so the nominal nib matches the chosen millimetres,
+    /// while retaining existing archive widths and pressure behavior unchanged.
+    func width(for tool: InkTool) -> Double {
+        if tool == .highlighter { return legacyHighlighterWidth }
+        return millimeters(for: tool) * Self.pointsPerMillimeter / Self.multiplier(for: tool)
+    }
+
+    func label(for tool: InkTool) -> String {
+        let millimeters = millimeters(for: tool)
+        let measurement = tool == .highlighter ? String(format: "%.2f", millimeters) : String(format: "%g", millimeters)
+        return "\(title) · \(measurement) mm"
+    }
+
+    static func customLabel(width: Double, tool: InkTool) -> String {
+        let millimeters = width * multiplier(for: tool) / pointsPerMillimeter
+        return "Custom · \(String(format: "%.2f", millimeters)) mm"
+    }
+
+    private static func multiplier(for tool: InkTool) -> Double {
+        switch tool {
+        case .pencil: return InkStyle.pencil.widthMultiplier
+        case .marker: return InkStyle.marker.widthMultiplier
+        case .highlighter: return InkStyle.highlighter.widthMultiplier
+        default: return InkStyle.pen.widthMultiplier
+        }
+    }
+
+    private var legacyHighlighterWidth: Double {
+        switch self {
+        case .extraFine: return 0.75 // Not offered for Highlighter.
+        case .fine: return 1.5
+        case .medium: return 2.5
+        case .broad: return 7
+        case .highlighter: return 4.5
+        }
+    }
+}
+
 struct SheetDetail: View {
     @EnvironmentObject private var store: NotesStore
     @EnvironmentObject private var inputDevice: InputDeviceMonitor
@@ -15,7 +88,7 @@ struct SheetDetail: View {
     @AppStorage("linePattern") private var linePattern = "solid"
     let sheetID: UUID
     @AppStorage("inkColor") private var inkColor = "#30343B"
-    @AppStorage("inkWidth") private var inkWidth = 2.5
+    @AppStorage("inkWidth") private var inkWidth = InkNibPreset.defaultWidth(for: .pen)
     @AppStorage("inkTool") private var selectedTool = "pen"
     @ViewState private var showAttachmentImporter = false
     @ViewState private var showExporter = false
@@ -320,11 +393,14 @@ struct SheetDetail: View {
     private func selectTool(_ tool: InkTool) {
         selectedTool = tool.rawValue
         switch tool {
-        case .pen: inkWidth = 2.5
-        case .line: inkWidth = 2.5; inkColor = "#30343B"
-        case .pencil: inkWidth = 1.5
-        case .marker: inkWidth = 4
-        case .highlighter: inkWidth = 4.5; inkColor = "#E2B84D"
+        case .pen, .pencil, .marker:
+            inkWidth = InkNibPreset.defaultWidth(for: tool)
+        case .line:
+            inkWidth = InkNibPreset.defaultWidth(for: tool)
+            inkColor = "#30343B"
+        case .highlighter:
+            inkWidth = InkNibPreset.defaultWidth(for: tool)
+            inkColor = "#E2B84D"
         case .text, .select, .lasso, .eraser: break
         }
         NotificationCenter.default.post(name: .noteToolFocus, object: tool)
@@ -380,33 +456,42 @@ struct SheetDetail: View {
                 }.buttonStyle(.plain).accessibilityLabel(inkColorName(hex))
             }
             Menu {
-                Button("Fine") { inkWidth = 1.5 }
-                Button("Medium") { inkWidth = 2.5 }
-                Button("Broad") { inkWidth = 7 }
-                Button("Highlighter width") { inkWidth = 4.5 }
-                Picker("Straight line style", selection: $linePattern) {
+                let presets = InkNibPreset.presets(for: inkTool)
+                if !presets.contains(where: { abs(inkWidth - $0.width(for: inkTool)) < 0.000_001 }) {
+                    CheckedMenuButton(title: InkNibPreset.customLabel(width: inkWidth, tool: inkTool), isSelected: true) {}
+                }
+                ForEach(presets, id: \.self) { preset in
+                    CheckedMenuButton(title: preset.label(for: inkTool),
+                                      isSelected: abs(inkWidth - preset.width(for: inkTool)) < 0.000_001) {
+                        inkWidth = preset.width(for: inkTool)
+                    }
+                }
+                Divider()
+                Menu("Straight line style") {
                     ForEach(LinePattern.allCases, id: \.self) { pattern in
-                        Text(pattern.rawValue.capitalized).tag(pattern.rawValue)
+                        CheckedMenuButton(title: pattern.displayName, isSelected: linePattern == pattern.rawValue) {
+                            linePattern = pattern.rawValue
+                        }
                     }
                 }
                 Divider()
                 ForEach(PaperStyle.allCases, id: \.self) { style in
-                    Button { store.update(sheetID) { $0.paperStyle = style } } label: {
-                        Label(style.rawValue.capitalized + " paper", systemImage: style == sheet?.paperStyle ? "checkmark" : "square")
+                    CheckedMenuButton(title: style.rawValue.capitalized + " paper", isSelected: style == sheet?.paperStyle) {
+                        store.update(sheetID) { $0.paperStyle = style }
                     }
                 }
                 Divider()
                 Menu("Page template") {
                     ForEach(PageTemplate.allCases, id: \.self) { template in
-                        Button { store.update(sheetID) { $0.pageTemplate = template } } label: {
-                            Label(templateTitle(template), systemImage: sheet?.pageTemplate == template ? "checkmark" : "rectangle")
+                        CheckedMenuButton(title: templateTitle(template), isSelected: sheet?.pageTemplate == template) {
+                            store.update(sheetID) { $0.pageTemplate = template }
                         }.disabled(!template.isSupported(on: sheet?.paperStyle ?? .dotted))
                     }
                     Divider()
                     Text("Left margin supports plain and ruled paper.")
                     ForEach(LinePattern.allCases, id: \.self) { pattern in
-                        Button { store.update(sheetID) { $0.templateLinePattern = pattern } } label: {
-                            Label(pattern.rawValue.capitalized + " template line", systemImage: sheet?.templateLinePattern == pattern ? "checkmark" : "line.diagonal")
+                        CheckedMenuButton(title: pattern.displayName + " template line", isSelected: sheet?.templateLinePattern == pattern) {
+                            store.update(sheetID) { $0.templateLinePattern = pattern }
                         }
                     }
                 }

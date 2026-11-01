@@ -24,6 +24,17 @@ enum InkLineGeometry {
     }
 }
 
+extension InkStyle {
+    var widthMultiplier: Double {
+        switch self {
+        case .pen: 1
+        case .pencil: 0.8
+        case .marker: 1.8
+        case .highlighter: 4
+        }
+    }
+}
+
 #if os(macOS)
 import AppKit
 
@@ -63,31 +74,12 @@ extension NSEvent {
             nil
         }
     }
-
-    var normalizedInkPressure: Double {
-        guard isPenPointEvent else { return 0 }
-        let fallback = InkPressure.normalized(force: Double(safeInkPressure ?? 0))
-        guard let cgEvent else { return fallback }
-        let tablet = cgEvent.getDoubleValueField(.tabletEventPointPressure)
-        guard tablet.isFinite, (0...1).contains(tablet) else { return fallback }
-        // The mouse-pressure field can be only 8-bit even when the same event
-        // carries a higher-precision tablet sample. Prefer that tablet record,
-        // including its authoritative zero during very light contact or lift.
-        let hasTabletRecord = type == .tabletPoint || tablet != 0
-            || [CGEventField.tabletEventDeviceID, .tabletEventPointButtons, .tabletEventPointX,
-                .tabletEventPointY, .tabletEventPointZ].contains { cgEvent.getIntegerValueField($0) != 0 }
-        if hasTabletRecord || type == .leftMouseUp { return tablet }
-        // Some mouse-emulating drivers tag the subtype but supply no tablet
-        // record at all (zero device, coordinates, buttons and pressure). Only
-        // that missing-record case uses the driver's ordinary pressure field.
-        return fallback
-    }
 }
 
 struct InkEditor: NSViewRepresentable {
     @Binding var strokes: [InkStroke]
     var colorHex = "#314D43"
-    var lineWidth: Double = 2.5
+    var lineWidth: Double = InkNibPreset.defaultWidth(for: .pen)
     var tool: InkTool = .pen
     var paper: InkPaper = .dotted
     var theme: PageTheme = .light
@@ -162,7 +154,7 @@ enum InkExport {
 enum InkRenderer {
     static func bounds(of stroke: InkStroke) -> NSRect? {
         guard let first = stroke.points.first, stroke.points.allSatisfy({ $0.x.isFinite && $0.y.isFinite }) else { return nil }
-        let width = stroke.maximumRenderedWidth
+        let width = max(0.5, min(100, stroke.width.isFinite ? stroke.width : 2.5)) * stroke.style.widthMultiplier
         if stroke.points.count == 1 { return NSRect(x: first.x - width / 2, y: first.y - width / 2, width: width, height: width) }
         let path = NSBezierPath()
         path.move(to: NSPoint(x: first.x, y: first.y))
@@ -246,9 +238,9 @@ enum InkRenderer {
         guard let first = stroke.points.first, first.x.isFinite, first.y.isFinite else { return }
         let inkColor = color(theme.resolvedInkHex(stroke.colorHex))
         let highlighterAlpha: CGFloat = theme == .dark ? 0.36 : 0.25
-        let baseWidth = stroke.baseRenderedWidth
+        let baseWidth = (stroke.width.isFinite ? max(0.5, min(100, stroke.width)) : 2.5) * stroke.style.widthMultiplier
         if stroke.points.count == 1 {
-            let width = stroke.renderedWidth(at: first)
+            let width = baseWidth * pressure(first.pressure)
             inkColor.withAlphaComponent(stroke.style == .highlighter ? highlighterAlpha : stroke.style == .pencil ? 0.7 : 1).set()
             NSBezierPath(ovalIn: NSRect(x: first.x - width / 2, y: first.y - width / 2, width: width, height: width)).fill()
             return
@@ -257,8 +249,7 @@ enum InkRenderer {
             let path = NSBezierPath()
             path.move(to: NSPoint(x: first.x, y: first.y))
             for index in 1..<stroke.points.count { appendCurve(to: path, points: stroke.points, at: index) }
-            path.lineWidth = stroke.pressureResponse == .legacy && stroke.points.allSatisfy({ $0.renderedWidth == nil })
-                ? baseWidth : stroke.points.reduce(0) { $0 + stroke.renderedWidth(at: $1) } / Double(stroke.points.count)
+            path.lineWidth = baseWidth
             path.lineCapStyle = .round
             path.lineJoinStyle = .round
             applyPattern(stroke.linePattern, width: baseWidth, to: path)
@@ -268,8 +259,7 @@ enum InkRenderer {
         }
         // Translucent tools are drawn in ONE operation, so neighboring segments
         // and self-intersections do not acquire dark seams from repeated alpha.
-        if (stroke.style == .highlighter || stroke.style == .marker), stroke.pressureResponse == .legacy,
-           stroke.points.allSatisfy({ $0.renderedWidth == nil }) {
+        if stroke.style == .highlighter || stroke.style == .marker {
             let path = NSBezierPath()
             path.move(to: NSPoint(x: first.x, y: first.y))
             for index in 1..<stroke.points.count { appendCurve(to: path, points: stroke.points, at: index) }
@@ -281,18 +271,6 @@ enum InkRenderer {
             path.stroke()
             return
         }
-        // Composite new translucent strokes once while retaining local pressure
-        // variation; overlapping segments must not create darker pressure seams.
-        let translucent = stroke.style == .highlighter || stroke.style == .marker
-        let context = NSGraphicsContext.current?.cgContext
-        if translucent {
-            context?.saveGState()
-            context?.setAlpha(stroke.style == .highlighter ? highlighterAlpha : 0.96)
-            context?.beginTransparencyLayer(auxiliaryInfo: nil)
-        }
-        defer {
-            if translucent { context?.endTransparencyLayer(); context?.restoreGState() }
-        }
         for index in 1..<stroke.points.count {
             let previous = stroke.points[index - 1]
             let point = stroke.points[index]
@@ -301,7 +279,7 @@ enum InkRenderer {
             path.move(to: NSPoint(x: previous.x, y: previous.y))
             appendCurve(to: path, points: stroke.points, at: index)
             let force = (previous.pressure + point.pressure) / 2
-            path.lineWidth = (stroke.renderedWidth(at: previous) + stroke.renderedWidth(at: point)) / 2
+            path.lineWidth = baseWidth * pressure(force)
             path.lineCapStyle = .round
             path.lineJoinStyle = .round
             let pencilAlpha = (theme == .dark ? 0.55 : 0.3) + (theme == .dark ? 0.4 : 0.58) * max(0, min(1, force))
@@ -324,6 +302,10 @@ enum InkRenderer {
                    controlPoint2: NSPoint(x: p2.x - (p3.x - p1.x) / 6, y: p2.y - (p3.y - p1.y) / 6))
     }
 
+    private static func pressure(_ value: Double) -> Double {
+        value.isFinite ? 0.35 + 0.65 * max(0, min(1, value)) : 1
+    }
+
     static func color(_ hex: String) -> NSColor {
         let digits = hex.trimmingCharacters(in: CharacterSet(charactersIn: "#"))
         guard digits.count == 6, let value = UInt32(digits, radix: 16) else { return .black }
@@ -337,7 +319,7 @@ enum InkRenderer {
 final class InkDocumentView: NSView {
     var strokes: [InkStroke] = []
     var colorHex = "#314D43" { didSet { if colorHex != oldValue { invalidateTipCursor() } } }
-    var lineWidth: Double = 2.5 { didSet { if lineWidth != oldValue { invalidateTipCursor() } } }
+    var lineWidth: Double = InkNibPreset.defaultWidth(for: .pen) { didSet { if lineWidth != oldValue { invalidateTipCursor() } } }
     var linePattern: LinePattern = .solid
     var tool: InkTool = .pen { didSet { if tool != oldValue { invalidateTipCursor() } } }
     var paper: InkPaper = .dotted
@@ -460,7 +442,7 @@ final class InkDocumentView: NSView {
             isLineGesture = tool == .line
             activeStroke = InkStroke(points: [point], colorHex: colorHex, width: lineWidth,
                                      style: InkStyle(rawValue: tool.rawValue) ?? .pen,
-                                     linePattern: tool == .line ? linePattern : .solid, pressureResponse: .baseWidth)
+                                     linePattern: tool == .line ? linePattern : .solid)
             needsDisplay = true
         }
     }
@@ -477,13 +459,9 @@ final class InkDocumentView: NSView {
             if isLineGesture { updateLineEnd(event); return }
             guard let previous = activeStroke?.points.last else { return }
             let distance = hypot(point.x - previous.x, point.y - previous.y)
-            guard distance >= 0.4 || point.pressure != previous.pressure,
-                  (activeStroke?.points.count ?? 0) < 100_000 else { return }
-            // Repeated stationary tablet samples refine the tip instead of
-            // allocating unbounded duplicate coordinates. Preserve precise force.
-            if distance < 0.01, let last = activeStroke?.points.indices.last { activeStroke?.points[last] = point }
-            else { activeStroke?.points.append(point) }
-            let padding = (activeStroke?.baseRenderedWidth ?? lineWidth) * 2 + 8
+            guard distance >= 0.4, (activeStroke?.points.count ?? 0) < 100_000 else { return }
+            activeStroke?.points.append(point)
+            let padding = lineWidth * (activeStroke?.style.widthMultiplier ?? 1) + 8
             let recent = Array(activeStroke?.points.suffix(4) ?? [])
             let minX = recent.map(\.x).min() ?? point.x, maxX = recent.map(\.x).max() ?? point.x
             let minY = recent.map(\.y).min() ?? point.y, maxY = recent.map(\.y).max() ?? point.y
@@ -554,10 +532,10 @@ final class InkDocumentView: NSView {
         guard let start = activeStroke?.points.first else { return }
         let oldEnd = activeStroke?.points.last ?? start
         var end = inkPoint(event)
-        if event.type == .leftMouseUp, end.pressure <= 0 { end.pressure = oldEnd.pressure }
+        if (event.safeInkPressure ?? 0) <= 0 { end.pressure = oldEnd.pressure }
         end = InkLineGeometry.snappedEnd(start: start, end: end, forceAxis: event.modifierFlags.contains(.shift))
         activeStroke?.points = [start, end]
-        let padding = (activeStroke?.baseRenderedWidth ?? lineWidth) * 2 + 8
+        let padding = lineWidth + 8
         let minX = min(start.x, oldEnd.x, end.x), maxX = max(start.x, oldEnd.x, end.x)
         let minY = min(start.y, oldEnd.y, end.y), maxY = max(start.y, oldEnd.y, end.y)
         setNeedsDisplay(NSRect(x: minX - padding, y: minY - padding,
@@ -566,8 +544,9 @@ final class InkDocumentView: NSView {
 
     private func inkPoint(_ event: NSEvent) -> InkPoint {
         let location = convert(event.locationInWindow, from: nil)
+        let pressure = event.safeInkPressure ?? 0
         return InkPoint(x: max(0, min(bounds.width, location.x)), y: max(0, min(bounds.height, location.y)),
-                        pressure: event.normalizedInkPressure)
+                        pressure: pressure > 0 ? Double(pressure) : 1)
     }
 
     private func erase(at point: InkPoint) {
@@ -575,7 +554,7 @@ final class InkDocumentView: NSView {
         strokes.removeAll { stroke in
             // Defensive consumer guard for legacy or in-memory malformed data.
             guard !stroke.points.isEmpty else { return true }
-            let radius = max(12, stroke.maximumRenderedWidth / 2 + 8)
+            let radius = max(12, stroke.width / 2 + 8)
             if stroke.points.count == 1, let only = stroke.points.first {
                 return hypot(only.x - point.x, only.y - point.y) <= radius
             }
@@ -610,7 +589,7 @@ enum InkTipCursor {
         let style = InkStyle(rawValue: tool.rawValue) ?? .pen
         let zoom = magnification.isFinite ? max(0.25, min(4, magnification)) : 1
         let nib = width.isFinite ? max(0.5, min(30, width)) : 2.5
-        let diameter = max(2, nib * max(1, style.widthMultiplier) * Double(zoom))
+        let diameter = max(2, nib * style.widthMultiplier * Double(zoom))
         let resolved = theme.resolvedInkHex(colorHex)
         let key = "\(tool.rawValue)|\(resolved)|\(theme.rawValue)|\(diameter)"
         if let index = entries.firstIndex(where: { $0.key == key }) {

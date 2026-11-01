@@ -5,8 +5,6 @@ import Foundation
 public enum InkGeometryLimits {
     public static let maximumCoordinate: Double = 100_000
     public static let maximumStrokeWidth: Double = 100
-    /// Includes style expansion and pressure, matching accepted native geometry.
-    public static let maximumRenderedWidth: Double = 1_000
     public static let maximumStrokeCount = 10_000
     public static let maximumPointCount = 1_000_000
     /// Numeric path lengths can amplify a small archive into millions of dashes.
@@ -31,7 +29,6 @@ public enum InkGeometryLimits {
             guard stroke.points.allSatisfy({
                 $0.x.isFinite && $0.y.isFinite && abs($0.x) <= maximumCoordinate && abs($0.y) <= maximumCoordinate
                     && $0.pressure.isFinite && (0...1).contains($0.pressure)
-                    && ($0.renderedWidth.map { $0.isFinite && $0 > 0 && $0 <= maximumRenderedWidth } ?? true)
             }) else {
                 throw LibraryError.invalidData("A drawing contains invalid coordinates or pressure, or lies outside the supported page area.")
             }

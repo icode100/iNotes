@@ -627,23 +627,42 @@ struct WorkspaceScenery: View {
     }
 }
 
+/// A native menu state remains visible even when macOS strips label images.
+struct CheckedMenuButton: View {
+    let title: String
+    let isSelected: Bool
+    var action: () -> Void
+
+    var body: some View {
+        Toggle(title, isOn: Binding(get: { isSelected }, set: { selected in
+            // These are exclusive choices, so clicking the current item must
+            // not clear it. Selecting another item updates the owning setting.
+            if selected { action() }
+        }))
+        .toggleStyle(.automatic)
+        .accessibilityValue(isSelected ? "Selected" : "Not selected")
+    }
+}
+
 struct AppearanceMenu: View {
     @AppStorage("appearance") private var appearance = "system"
     @AppStorage("pageColorScheme") private var pageColorScheme = "system"
     @AppStorage("workspaceTheme") private var workspaceTheme = "classic"
     var body: some View {
         Menu {
-            Picker("Light and dark", selection: $appearance) {
-                Text("Match system").tag("system")
-                Text("Light").tag("light")
-                Text("Dark").tag("dark")
+            Menu("Light and dark") {
+                CheckedMenuButton(title: "Match system", isSelected: appearance == "system") { appearance = "system" }
+                CheckedMenuButton(title: "Light", isSelected: appearance == "light") { appearance = "light" }
+                CheckedMenuButton(title: "Dark", isSelected: appearance == "dark") { appearance = "dark" }
             }
-            Picker("Page colors · all sheets", selection: $pageColorScheme) {
-                Text("Match appearance").tag("system")
-                Text("Vintage · off-white").tag("vintage")
+            Menu("Page colors · all sheets") {
+                CheckedMenuButton(title: "Match appearance", isSelected: pageColorScheme == "system") { pageColorScheme = "system" }
+                CheckedMenuButton(title: "Vintage · off-white", isSelected: pageColorScheme == "vintage") { pageColorScheme = "vintage" }
             }
-            Picker("Workspace scenery", selection: $workspaceTheme) {
-                ForEach(WorkspaceTheme.allCases) { theme in Text(theme.title).tag(theme.rawValue) }
+            Menu("Workspace scenery") {
+                ForEach(WorkspaceTheme.allCases) { theme in
+                    CheckedMenuButton(title: theme.title, isSelected: workspaceTheme == theme.rawValue) { workspaceTheme = theme.rawValue }
+                }
             }
         } label: { Label("Appearance", systemImage: "paintpalette") }
         .help("Application scenery and page colors for all sheets")
