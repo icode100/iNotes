@@ -125,6 +125,7 @@ public struct NoteNode: Identifiable, Codable, Equatable, Sendable {
     public var templateLinePattern: LinePattern
     public var textBoxes: [PageTextBox]
     public var equations: [NoteEquation]
+    public var images: [PageImage]
 
     public init(id: UUID = UUID(), parentID: UUID? = nil, kind: NoteKind, title: String,
                 body: String = "", richTextRTF: Data? = nil, strokes: [InkStroke] = [],
@@ -133,7 +134,7 @@ public struct NoteNode: Identifiable, Codable, Equatable, Sendable {
                 createdAt: Date = Date(), updatedAt: Date = Date(), order: Int = 0, paperStyle: PaperStyle = .dotted,
                 textBoxes: [PageTextBox] = [], equations: [NoteEquation] = [],
                 pageTemplate: PageTemplate = .none, templateLinePattern: LinePattern = .solid,
-                sheetNumber: Int? = nil, lastSheetNumber: Int = 0) {
+                sheetNumber: Int? = nil, lastSheetNumber: Int = 0, images: [PageImage] = []) {
         self.id = id; self.parentID = parentID; self.kind = kind; self.title = title
         self.body = body; self.richTextRTF = richTextRTF; self.strokes = strokes
         self.pencilKitData = pencilKitData; self.attachments = attachments; self.tags = tags
@@ -141,6 +142,7 @@ public struct NoteNode: Identifiable, Codable, Equatable, Sendable {
         self.createdAt = createdAt; self.updatedAt = updatedAt; self.order = order; self.paperStyle = paperStyle
         self.sheetNumber = sheetNumber; self.lastSheetNumber = lastSheetNumber
         self.textBoxes = textBoxes; self.equations = equations
+        self.images = images
         self.pageTemplate = pageTemplate; self.templateLinePattern = templateLinePattern
     }
 
@@ -152,7 +154,7 @@ public struct NoteNode: Identifiable, Codable, Equatable, Sendable {
     private enum CodingKeys: String, CodingKey {
         case id, parentID, kind, title, body, richTextRTF, strokes, pencilKitData, attachments
         case tags, isFavorite, isTrashed, createdAt, updatedAt, order, paperStyle
-        case textBoxes, equations, pageTemplate, templateLinePattern, sheetNumber, lastSheetNumber
+        case textBoxes, equations, images, pageTemplate, templateLinePattern, sheetNumber, lastSheetNumber
     }
 
     public init(from decoder: Decoder) throws {
@@ -177,6 +179,7 @@ public struct NoteNode: Identifiable, Codable, Equatable, Sendable {
         paperStyle = try values.decodeIfPresent(PaperStyle.self, forKey: .paperStyle) ?? .dotted
         textBoxes = try values.decodeIfPresent([PageTextBox].self, forKey: .textBoxes) ?? []
         equations = try values.decodeIfPresent([NoteEquation].self, forKey: .equations) ?? []
+        images = try values.decodeIfPresent([PageImage].self, forKey: .images) ?? []
         pageTemplate = try values.decodeIfPresent(PageTemplate.self, forKey: .pageTemplate) ?? .none
         templateLinePattern = try values.decodeIfPresent(LinePattern.self, forKey: .templateLinePattern) ?? .solid
     }

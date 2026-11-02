@@ -77,7 +77,7 @@ enum MacFileActions {
 
     static func exportPagePNG(_ sheet: NoteNode, paper: InkPaper, theme: PageTheme = .light, store: NotesStore) {
         guard let data = UnifiedPageExport.png(text: sheet.body, rtfData: sheet.richTextRTF, strokes: sheet.strokes, paper: paper, theme: theme,
-                                              pageTemplate: sheet.pageTemplate, templateLinePattern: sheet.templateLinePattern, textBoxes: sheet.textBoxes, equations: sheet.equations) else {
+                                              pageTemplate: sheet.pageTemplate, templateLinePattern: sheet.templateLinePattern, textBoxes: sheet.textBoxes, equations: sheet.equations, images: sheet.images) else {
             store.errorMessage = "This page is too large for PNG export. Export PDF instead."
             return
         }
@@ -88,7 +88,7 @@ enum MacFileActions {
         let data = UnifiedPageExport.pdf(text: sheet.body, rtfData: sheet.richTextRTF,
                                          strokes: sheet.strokes,
                                          paper: InkPaper(rawValue: sheet.paperStyle.rawValue) ?? .dotted, theme: theme,
-                                         pageTemplate: sheet.pageTemplate, templateLinePattern: sheet.templateLinePattern, textBoxes: sheet.textBoxes, equations: sheet.equations)
+                                         pageTemplate: sheet.pageTemplate, templateLinePattern: sheet.templateLinePattern, textBoxes: sheet.textBoxes, equations: sheet.equations, images: sheet.images)
         save(data, title: sheet.displayTitle + ".pdf", type: .pdf, store: store)
     }
 

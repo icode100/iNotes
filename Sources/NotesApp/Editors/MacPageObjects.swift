@@ -2,6 +2,8 @@
 import AppKit
 import SwiftUI
 import NotesCore
+import ImageIO
+import UniformTypeIdentifiers
 
 /// Movable text remains a native rich-text editor; it is layered beneath ink on
 /// the same paper and selected together with handwriting by the page overlay.
@@ -52,9 +54,18 @@ final class MacPageTextBoxView: NSView {
 }
 
 extension UnifiedMacPageView {
-    func displayObjects(textBoxes: [PageTextBox], equations: [NoteEquation], editable: Bool,
+    func displayObjects(textBoxes: [PageTextBox], equations: [NoteEquation], images: [PageImage] = [], editable: Bool,
                         onTextBoxChange: @escaping (UUID, String, Data?) -> Void,
                         onEquationEdit: ((NoteEquation) -> Void)?) {
+        let imageIDs = Set(images.map(\.id))
+        for id in Array(imageViews.keys) where !imageIDs.contains(id) { imageViews.removeValue(forKey: id)?.removeFromSuperview() }
+        // Stable views, ordered behind every native text and ink layer.
+        for image in images {
+            let view = imageViews[image.id] ?? MacPageImageView(frame: .zero)
+            if view.superview == nil { imageViews[image.id] = view }
+            addSubview(view, positioned: .below, relativeTo: textView)
+            view.configure(image)
+        }
         let boxIDs = Set(textBoxes.map(\.id)), equationIDs = Set(equations.map(\.id))
         for id in Array(textBoxViews.keys) where !boxIDs.contains(id) { textBoxViews.removeValue(forKey: id)?.removeFromSuperview() }
         for id in Array(equationViews.keys) where !equationIDs.contains(id) { equationViews.removeValue(forKey: id)?.removeFromSuperview() }
@@ -63,6 +74,8 @@ extension UnifiedMacPageView {
             view.editor.pageUndoManager = selectionController?.history
             if view.superview == nil {
                 view.editor.pageCursorProvider = { [weak self] in self?.activePageCursor }
+                view.editor.onPagePaste = { [weak self] in self?.handlePagePaste() ?? false }
+                view.editor.canPastePage = { [weak self] in self?.canPastePage() ?? false }
                 view.editor.allowsPageTextUndo = { [weak self] in self?.inkView.isInputEnabled == true }
                 addSubview(view, positioned: .below, relativeTo: inkView)
                 textBoxViews[box.id] = view
@@ -75,6 +88,162 @@ extension UnifiedMacPageView {
             view.frame = CGRect(x: equation.x, y: equation.y, width: equation.width, height: equation.height)
             view.configure(equation: equation, theme: theme, onRequestEdit: { if editable { onEquationEdit?(equation) } })
         }
+    }
+}
+
+/// Decode only bounded raster sources. Metadata is checked before pixel allocation;
+/// normalized PNGs keep clipboard encodings and orientation out of saved pages.
+@MainActor
+enum MacPageImageCodec {
+    struct Failure: LocalizedError {
+        let message: String
+        var errorDescription: String? { message }
+    }
+    private static let cache = NSCache<NSData, NSImage>()
+
+    private static func source(_ data: Data) throws -> CGImageSource {
+        guard !data.isEmpty, data.count <= PageImageLimits.maximumBytes else {
+            throw Failure(message: "Images must be no larger than 10 MiB.")
+        }
+        guard let source = CGImageSourceCreateWithData(data as CFData, [kCGImageSourceShouldCache: false] as CFDictionary),
+              let properties = CGImageSourceCopyPropertiesAtIndex(source, 0, nil) as? [CFString: Any],
+              let width = properties[kCGImagePropertyPixelWidth] as? NSNumber,
+              let height = properties[kCGImagePropertyPixelHeight] as? NSNumber,
+              width.doubleValue.isFinite, height.doubleValue.isFinite,
+              width.doubleValue >= 1, height.doubleValue >= 1,
+              width.doubleValue <= Double(PageImageLimits.maximumPixelDimension),
+              height.doubleValue <= Double(PageImageLimits.maximumPixelDimension),
+              width.doubleValue * height.doubleValue <= Double(PageImageLimits.maximumPixels) else {
+            throw Failure(message: "This image is unsupported or too large. Use a raster image up to 16 megapixels and 8192 pixels per side.")
+        }
+        return source
+    }
+
+    static func normalize(_ data: Data) throws -> Data {
+        let source = try source(data)
+        let options: [CFString: Any] = [kCGImageSourceCreateThumbnailFromImageAlways: true,
+            kCGImageSourceCreateThumbnailWithTransform: true,
+            kCGImageSourceThumbnailMaxPixelSize: PageImageLimits.maximumPixelDimension,
+            kCGImageSourceShouldCacheImmediately: true]
+        guard let image = CGImageSourceCreateThumbnailAtIndex(source, 0, options as CFDictionary) else {
+            throw Failure(message: "The copied image could not be decoded.")
+        }
+        let output = NSMutableData()
+        guard let destination = CGImageDestinationCreateWithData(output, UTType.png.identifier as CFString, 1, nil) else {
+            throw Failure(message: "The copied image could not be converted to PNG.")
+        }
+        CGImageDestinationAddImage(destination, image, nil)
+        guard CGImageDestinationFinalize(destination), output.length <= PageImageLimits.maximumBytes else {
+            throw Failure(message: "The image is larger than 10 MiB when saved. Try a smaller image.")
+        }
+        let result = output as Data
+        _ = try PageImageLimits.pngDimensions(result)
+        return result
+    }
+
+    static func decode(_ data: Data) -> CGImage? {
+        guard (try? PageImageLimits.pngDimensions(data)) != nil,
+              let source = try? source(data) else { return nil }
+        return CGImageSourceCreateImageAtIndex(source, 0, [kCGImageSourceShouldCacheImmediately: true] as CFDictionary)
+    }
+
+    static func displayImage(_ data: Data) -> NSImage? {
+        cache.countLimit = 16
+        cache.totalCostLimit = 64 * 1024 * 1024
+        let key = data as NSData
+        if let image = cache.object(forKey: key) { return image }
+        guard let cgImage = decode(data) else { return nil }
+        let image = NSImage(cgImage: cgImage, size: NSSize(width: cgImage.width, height: cgImage.height))
+        cache.setObject(image, forKey: key, cost: cgImage.bytesPerRow * cgImage.height + data.count)
+        return image
+    }
+
+    static let rasterTypes: [NSPasteboard.PasteboardType] = [.png, .tiff,
+        .init(UTType.jpeg.identifier), .init(UTType.heic.identifier), .init(UTType.gif.identifier), .init(UTType.bmp.identifier)]
+
+    static func canRead(_ board: NSPasteboard) -> Bool {
+        board.availableType(from: rasterTypes + [.fileURL]) != nil
+    }
+
+    static func clipboardPNG(_ board: NSPasteboard) throws -> Data {
+        if let type = board.availableType(from: rasterTypes), let data = board.data(forType: type) {
+            return try normalize(data)
+        }
+        if let value = board.string(forType: .fileURL), let url = URL(string: value), url.isFileURL {
+            let access = url.startAccessingSecurityScopedResource()
+            defer { if access { url.stopAccessingSecurityScopedResource() } }
+            return try normalize(BoundedFileReader.read(from: url, maximumBytes: PageImageLimits.maximumBytes))
+        }
+        throw Failure(message: "Copy an image or an image file, then paste it onto the sheet.")
+    }
+}
+
+@MainActor
+final class MacPageImageView: NSView {
+    private var imageData = Data()
+    override var isFlipped: Bool { true }
+    override func hitTest(_ point: NSPoint) -> NSView? { nil }
+
+    func configure(_ image: PageImage) {
+        frame = NSRect(x: image.x, y: image.y, width: image.width, height: image.height)
+        if imageData != image.imageData { imageData = image.imageData; needsDisplay = true }
+        setAccessibilityElement(true)
+        setAccessibilityRole(.image)
+        setAccessibilityLabel("Pasted page image")
+    }
+
+    override func draw(_ dirtyRect: NSRect) {
+        guard let image = MacPageImageCodec.displayImage(imageData) else { return }
+        image.draw(in: bounds, from: .zero, operation: .sourceOver, fraction: 1, respectFlipped: true,
+                   hints: [.interpolation: NSImageInterpolation.high])
+    }
+}
+
+extension UnifiedMacPageView {
+    func canPastePage() -> Bool {
+        let board = NSPasteboard.general
+        let types = [PageClipboardPayload.pasteboardType, PageClipboardPayload.legacyPasteboardType].map { NSPasteboard.PasteboardType($0) }
+        return inkView.isInputEnabled && (board.availableType(from: types) != nil || MacPageImageCodec.canRead(board))
+    }
+
+    /// Only page payloads/images leave NSTextView's normal rich-text paste path.
+    func handlePagePaste() -> Bool {
+        let board = NSPasteboard.general
+        let types = [PageClipboardPayload.pasteboardType, PageClipboardPayload.legacyPasteboardType].map { NSPasteboard.PasteboardType($0) }
+        guard let controller = selectionController, inkView.isInputEnabled,
+              board.availableType(from: types) != nil || MacPageImageCodec.canRead(board) else { return false }
+        if let type = board.availableType(from: types), let data = board.data(forType: type),
+           let payload = try? PageClipboardPayload.decodeValidated(data), payload.images.isEmpty {
+            // Keep rich text copied from a selection on NSTextView's caret path.
+            return false
+        }
+        controller.perform(.paste)
+        return true
+    }
+}
+
+extension MacPageSelectionController {
+    @discardableResult
+    func pasteImage(from board: NSPasteboard) -> Bool {
+        let payloadTypes = [PageClipboardPayload.pasteboardType, PageClipboardPayload.legacyPasteboardType].map { NSPasteboard.PasteboardType($0) }
+        guard board.availableType(from: payloadTypes) == nil, MacPageImageCodec.canRead(board) else { return false }
+        guard let page, page.inkView.isInputEnabled else { return true }
+        do {
+            let data = try MacPageImageCodec.clipboardPNG(board)
+            let size = try PageImageLimits.pngDimensions(data)
+            let visible = page.visibleRect.intersection(page.bounds)
+            let availableWidth = max(40, min(600, page.bounds.width - 80))
+            let scale = min(1, availableWidth / Double(size.width), 700 / Double(size.height))
+            let width = Double(size.width) * scale, height = Double(size.height) * scale
+            let x = max(0, min(page.bounds.width - width, visible.isEmpty ? 40 : visible.minX + 40))
+            let y = max(0, min(100_000, visible.isEmpty ? 40 : visible.minY + 40))
+            let image = PageImage(x: x, y: y, width: width, height: height, imageData: data)
+            paste(PageClipboardPayload(images: [image]), offset: 0, action: "Paste Image")
+        } catch {
+            onPasteError?(error.localizedDescription)
+            NSSound.beep()
+        }
+        return true
     }
 }
 #endif

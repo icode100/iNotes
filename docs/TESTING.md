@@ -1,5 +1,88 @@
 # Validation
 
+## Mac pasted images and annotations — 2 November 2026
+
+Working-tree feature based on `e7955c0`, including the sidebar contrast fix below.
+Mac sheets accept raster clipboard images and copied image files with Cmd-V in
+Text or ink modes. Canonical PNG objects render behind text/ink; Select supports
+movement, mixed selections, copy/cut/duplicate/delete and proportional single-image
+resizing. PNG/PDF exports include images and annotations. Full-library validation
+runs before page transactions; rejected undo/redo retains a retryable history
+action, including partially executed groups. Format 3 protects image-bearing
+libraries from older apps; image-free libraries remain compatible with format 2.
+
+Verified with Swift 6.4.2 Command Line Tools on macOS 27.2 (26B123), without Xcode:
+
+- `bash scripts/test.sh`: 84 standalone tests, zero failures (2.42 seconds),
+  including six new image persistence, legacy, import/duplication, atomic rejection,
+  byte/geometry/pixel and clipboard/page-budget tests. Native macOS access was
+  needed for the existing coordinated-backup tests.
+- SwiftPM Debug Mac build passed using the command/cache configuration recorded
+  in the sidebar section below. No dependencies were added; the existing
+  SwiftMath resource-location patch was applied to its disposable checkout.
+- The final isolated ad hoc signed QA app passed `--smoke-test --editor-test`:
+  301 editor, 399 workspace, 31 equation, 12 ruled-text, 8 shortcut and 16 updater
+  configuration checks, plus store/hierarchy/backup integrations. The 41 new
+  editor checks include private-pasteboard PNG/TIFF insertion, Text menu and Pen
+  responder-chain handling, layer/input routing, mixed movement, proportional
+  resizing, undo/redo and rejected-history retry. Pixel checks confirm both the
+  image and ink in exported PNG and rasterized PDF.
+- `git diff --check` passed. iOS-target syntax parsing passed; this is not an
+  iPad SDK compilation. Shared iPad source preserves image payloads and makes
+  image-bearing sheets read-only with an explicit Mac-only notice.
+
+The final QA executable SHA-256 is
+`9b42f84318fccb6963b813b7bcc6035c50fa8f0601886d8dfac608f7b952e9f7`.
+The Debug QA app contains 38,687,090 regular-file bytes, including the untrimmed
+test resources/framework; its executable is 9,228,736 bytes. These are test-bundle
+sizes, not release-installer size or RAM measurements. Logs:
+`/private/tmp/inotes-images-core.log`, `/private/tmp/inotes-images-build.log`,
+`/private/tmp/inotes-images-native-final.log`. The image export artifact is
+`/private/tmp/inotes-images-export.png`. Initial pixel tests exposed an invalid
+AppKit bitmap fixture; it was replaced by an explicit sRGB fixture, with separate
+checks that normalization preserves its pixels. The final run passed without
+the temporary PDF-document-lifetime warning from the earlier test iteration.
+
+The user tested the final QA application and confirmed image pasting and annotation work on 2 November 2026.
+The harness does not take application focus or replace the user's clipboard;
+native responder-chain checks are not proof of global keyboard dispatch in an
+active app. Physical stylus, iPad SDK/runtime, release packaging/DMG, signed-update
+artifacts and public-release checks remain unverified/deferred for this patch.
+
+## Mac scenic sidebar contrast — 2 November 2026
+
+Working-tree change based on `e7955c0`: scenic Mac sidebars use opaque secondary
+labels and a stronger theme-colored surface over the photograph. This covers
+hierarchy headers, folder kinds, add controls and footer statuses. Classic and
+iPad retain hierarchical secondary styling. Navigation geometry and editor code
+are unchanged.
+
+Verified on macOS 27.2 (26B123), Command Line Tools Swift 6.4.2, without full Xcode:
+
+- `bash scripts/test.sh`: 78 standalone core tests, zero failures. The restricted
+  run encountered the two existing coordinated-backup access failures; rerunning
+  with native macOS access passed without changing tests.
+- `swift build --build-system native --disable-sandbox --cache-path "$PWD/.build/cache" --jobs 4 --product iNotes`
+  (module caches set under `.build`): passed. Existing Swift concurrency and
+  deprecated build-system warnings remain. The existing SwiftMath resource patch
+  was applied only to the disposable dependency checkout.
+- An ad hoc signed Debug QA app with a separate bundle ID and temporary library
+  passed `--smoke-test --editor-test`: 260 editor, 399 workspace, 31 equation,
+  12 ruled-text, 8 shortcut and 16 updater configuration checks, plus store,
+  hierarchy and backup integration checks.
+- `git diff --check`: passed.
+
+The temporary QA executable SHA-256 is
+`1b316ccdadce41784cefa5a40a37d3dd2349414b366eb77348b24d47d50585fa`.
+Logs: `/private/tmp/inotes-sidebar-tests.log`,
+`/private/tmp/inotes-sidebar-build.log`, `/private/tmp/inotes-sidebar-native.log`.
+These are local Debug results, not release/DMG verification. Installer packaging,
+signed update artifacts and iPad compilation were deferred while full Xcode is
+absent. Live visual contrast review is left to the user; Computer Use permission
+was unavailable. The native harness checks do not establish rendered label
+contrast or physical stylus behavior.
+The user subsequently tested this QA app and confirmed the sidebar fix works.
+
 ## Security fixes following v1.0.3 — 1 November 2026
 
 Base revision `00092ba27e1da89fec5aad861f35962bc49afd29`. Codex Security's

@@ -21,6 +21,8 @@ final class IOSPageSelectionController: NSObject {
     var onRender: ((PageContent) -> Void)?
     var onCommit: ((PageContent) -> Void)?
     var onEquationEdit: ((NoteEquation) -> Void)?
+    var onValidate: ((PageContent) -> Bool)?
+    var onError: ((String) -> Void)?
     let history = UndoManager()
     private var observer: NSObjectProtocol?
     private var isApplying = false
@@ -183,6 +185,8 @@ final class IOSPageSelectionController: NSObject {
     func commit(_ value: PageContent, previous: PageContent? = nil, action: String) {
         let before = previous ?? content
         guard value != before else { cancelPreview(); return }
+        guard before.images.isEmpty, value.images.isEmpty,
+              onValidate?(value) ?? true else { cancelPreview(); return }
         clearNativeUndo()
         let needsGroup = history.groupingLevel == 0
         if needsGroup { history.beginUndoGrouping() }
@@ -206,7 +210,18 @@ final class IOSPageSelectionController: NSObject {
     }
 
     func perform(_ command: PageSelectionCommand) {
-        guard let page, page.isUserInteractionEnabled else { return }
+        guard content.images.isEmpty, let page, page.isUserInteractionEnabled else { return }
+        if command == .paste {
+            let board = UIPasteboard.general
+            if let data = board.data(forPasteboardType: PageClipboardPayload.pasteboardType)
+                ?? board.data(forPasteboardType: PageClipboardPayload.legacyPasteboardType) {
+                guard let payload = try? PageClipboardPayload.decodeValidated(data) else { return }
+                guard payload.images.isEmpty else {
+                    onError?("Pasting page images is currently available on Mac. Your sheet has not been changed.")
+                    return
+                }
+            }
+        }
         if page.textToolSelected, let editor = page.activeTextView {
             switch command {
             case .copy: editor.copy(nil); return
@@ -232,7 +247,8 @@ final class IOSPageSelectionController: NSObject {
         case .duplicate: if let payload = clipboardPayload() { paste(payload, offset: 20, action: "Duplicate Selection") }
         case .paste:
             let board = UIPasteboard.general
-            if let data = board.data(forPasteboardType: PageClipboardPayload.pasteboardType) {
+            if let data = board.data(forPasteboardType: PageClipboardPayload.pasteboardType)
+                ?? board.data(forPasteboardType: PageClipboardPayload.legacyPasteboardType) {
                 guard let value = try? PageClipboardPayload.decodeValidated(data) else { return }
                 paste(value, offset: 20, action: "Paste Selection")
             } else if let text = board.string, text.utf8.count <= PageClipboardPayload.maximumBytes {
@@ -247,7 +263,7 @@ final class IOSPageSelectionController: NSObject {
     @discardableResult private func copySelection() -> Bool {
         guard let payload = clipboardPayload(), let data = try? JSONEncoder().encode(payload), data.count <= PageClipboardPayload.maximumBytes else { return false }
         let board = UIPasteboard.general
-        var item: [String: Any] = [PageClipboardPayload.pasteboardType: data, "public.utf8-plain-text": payload.text]
+        var item: [String: Any] = [PageClipboardPayload.pasteboardType: data, PageClipboardPayload.legacyPasteboardType: data, "public.utf8-plain-text": payload.text]
         if let rtfData = payload.rtfData { item["public.rtf"] = rtfData }
         board.setItems([item])
         return true
@@ -295,6 +311,7 @@ final class IOSPageSelectionController: NSObject {
     }
 
     private func paste(_ payload: PageClipboardPayload, offset: Double, action: String) {
+        guard content.images.isEmpty, payload.images.isEmpty else { return }
         guard (try? PortableInkConverter.validatedDrawing(content.pencilKitData, fallback: content.strokes)) != nil else { return }
         var payload = payload
         let nativeAddition: PKDrawing?
@@ -350,7 +367,7 @@ final class IOSPageSelectionController: NSObject {
         }
         // Validate the resulting page too: multiple individually bounded pastes
         // must not bypass the archive's aggregate object and byte limits.
-        let candidate = PageClipboardPayload(text: value.text, rtfData: value.rtfData, strokes: value.strokes, pencilKitData: value.pencilKitData, textBoxes: value.textBoxes, equations: value.equations)
+        let candidate = PageClipboardPayload(text: value.text, rtfData: value.rtfData, strokes: value.strokes, pencilKitData: value.pencilKitData, textBoxes: value.textBoxes, equations: value.equations, images: value.images)
         guard let encoded = try? JSONEncoder().encode(candidate), (try? PageClipboardPayload.decodeValidated(encoded)) != nil else { return }
         selection = selected
         commit(value, action: action)

@@ -193,6 +193,10 @@ struct ContentView: View {
         }
     }
 
+    private var sidebarSecondary: AnyShapeStyle {
+        (WorkspaceTheme(rawValue: workspaceTheme) ?? .classic).sidebarSecondary(isDark: colorScheme == .dark)
+    }
+
     private var sidebar: some View {
         VStack(spacing: 0) {
             List {
@@ -210,13 +214,15 @@ struct ContentView: View {
                         }.buttonStyle(.plain).padding(.vertical, 4)
                     }
                 }
-                Section("NOTEBOOK HIERARCHY") {
+                Section {
                     ForEach(store.children(nil)) { root in folderRow(root) }
                     Button { nameRequest = NameRequest(kind: .workbook) } label: { Label("New workbook", systemImage: "plus") }
-                        .buttonStyle(.plain).foregroundStyle(.secondary).padding(.vertical, 5)
+                        .buttonStyle(.plain).foregroundStyle(sidebarSecondary).padding(.vertical, 5)
+                } header: {
+                    Text("NOTEBOOK HIERARCHY").foregroundStyle(sidebarSecondary)
                 }
                 if store.filter == .trash {
-                    Section("Deleted folders") {
+                    Section {
                         ForEach(store.library.nodes.filter { $0.isTrashed && $0.kind != .sheet && (parentIsVisible($0)) }) { node in
                             HStack {
                                 Label(node.title, systemImage: node.kind.symbol)
@@ -224,6 +230,8 @@ struct ContentView: View {
                                 Button("Restore") { store.restore(node.id) }.buttonStyle(.borderless)
                             }
                         }
+                    } header: {
+                        Text("Deleted folders").foregroundStyle(sidebarSecondary)
                     }
                     Button("Empty Trash…", role: .destructive) { showEmptyTrash = true }
                         .disabled(!store.library.nodes.contains { $0.isTrashed })
@@ -231,7 +239,7 @@ struct ContentView: View {
             }.listStyle(.sidebar).scrollContentBackground(workspaceTheme == "classic" ? .visible : .hidden)
             VStack(alignment: .leading, spacing: 5) {
                 Label(store.saveStatus, systemImage: store.dirty ? "circle.dotted" : "checkmark.circle")
-                    .font(.caption).foregroundStyle(store.dirty ? Color.orange : Color.secondary)
+                    .font(.caption).foregroundStyle(store.dirty ? AnyShapeStyle(Color.orange) : sidebarSecondary)
                 ForEach(BackupDestination.allCases) { destination in
                     if store.backupFolder(for: destination) != nil {
                         VStack(alignment: .leading, spacing: 2) {
@@ -239,13 +247,18 @@ struct ContentView: View {
                                 Text("\(destination.title): \(last, style: .relative) ago")
                             } else { Text("\(destination.title): backup pending") }
                             Text(store.backupStatus(for: destination)).lineLimit(2)
-                        }.font(.caption2).foregroundStyle(.secondary)
+                        }.font(.caption2).foregroundStyle(sidebarSecondary)
                             .help(store.backupStatus(for: destination))
                     }
                 }
-                Text("iNotes · local first").font(.caption2).foregroundStyle(.tertiary)
+                Text("iNotes · local first").font(.caption2)
+                    #if os(macOS)
+                    .foregroundStyle(workspaceTheme == "classic" ? AnyShapeStyle(.tertiary) : sidebarSecondary)
+                    #else
+                    .foregroundStyle(.tertiary)
+                    #endif
             }.frame(maxWidth: .infinity, alignment: .leading).padding(16)
-        }.background { WorkspaceScenery() }.navigationTitle("iNotes")
+        }.background { WorkspaceScenery(readableSidebar: true) }.navigationTitle("iNotes")
     }
 
     private func parentIsVisible(_ node: NoteNode) -> Bool {
@@ -287,7 +300,7 @@ struct ContentView: View {
                         }.font(.caption2).foregroundStyle(.secondary)
                             .accessibilityElement(children: .ignore)
                             .accessibilityLabel((sheet.title.isEmpty ? "" : "Sheet \(store.sheetNumber(sheet.id) ?? 1), ") + "Created \(sheet.createdAt.formatted(date: .abbreviated, time: .omitted))")
-                        Text(sheet.plainTextExport.isEmpty ? (sheet.strokes.isEmpty && sheet.pencilKitData == nil ? "Empty sheet" : "Handwritten notes") : sheet.plainTextExport.replacingOccurrences(of: "\n", with: " "))
+                        Text(sheet.plainTextExport.isEmpty ? (sheet.images.isEmpty ? (sheet.strokes.isEmpty && sheet.pencilKitData == nil ? "Empty sheet" : "Handwritten notes") : "Image notes") : sheet.plainTextExport.replacingOccurrences(of: "\n", with: " "))
                             .font(.caption).foregroundStyle(.secondary).lineLimit(2)
                         Text(store.breadcrumb(sheet.parentID)).font(.caption2).foregroundStyle(.secondary).lineLimit(1)
                     }
@@ -356,10 +369,16 @@ struct ContentView: View {
 
 struct FolderTreeRow: View {
     @EnvironmentObject private var store: NotesStore
+    @Environment(\.colorScheme) private var colorScheme
+    @AppStorage("workspaceTheme") private var workspaceTheme = "classic"
     var node: NoteNode
     var choose: (UUID) -> Void
     var request: (NameRequest) -> Void
     @ViewState private var expanded = true
+
+    private var sidebarSecondary: AnyShapeStyle {
+        (WorkspaceTheme(rawValue: workspaceTheme) ?? .classic).sidebarSecondary(isDark: colorScheme == .dark)
+    }
 
     var body: some View {
         DisclosureGroup(isExpanded: $expanded) {
@@ -373,7 +392,7 @@ struct FolderTreeRow: View {
                         Image(systemName: node.kind.symbol).frame(width: 18)
                         VStack(alignment: .leading, spacing: 2) {
                             Text(node.title).lineLimit(1).fontWeight(store.folderID == node.id ? .semibold : .regular)
-                            Text(node.kind.rawValue.capitalized).font(.caption2).foregroundStyle(.secondary)
+                            Text(node.kind.rawValue.capitalized).font(.caption2).foregroundStyle(sidebarSecondary)
                         }
                         Spacer(minLength: 0)
                     }.foregroundStyle(store.folderID == node.id ? Color.accentColor : Color.primary)
@@ -393,7 +412,7 @@ struct FolderTreeRow: View {
                     expanded = true
                     request(NameRequest(kind: childKind, parent: node.id))
                 } label: { Image(systemName: "plus.circle").frame(width: 26, height: 30) }
-                    .buttonStyle(.plain).foregroundStyle(.secondary)
+                    .buttonStyle(.plain).foregroundStyle(sidebarSecondary)
                     .help("Add \(childKind.rawValue) to \(node.title)")
                     .accessibilityLabel("Add \(childKind.rawValue) to \(node.title)")
             }

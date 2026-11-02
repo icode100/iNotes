@@ -138,6 +138,21 @@ final class NotesStore: ObservableObject {
         }
     }
 
+    /// Validate page transactions before the editor records undo or changes its view.
+    func validatePageChange(_ id: UUID, content: PageContent) -> Bool {
+        guard var node = library.node(id: id), !node.isTrashed else { return false }
+        node.pageContent = content
+        do {
+            var candidate = library
+            try candidate.update(node)
+            _ = try LibraryArchive.encode(candidate)
+            return true
+        } catch {
+            errorMessage = error.localizedDescription
+            return false
+        }
+    }
+
     func update(_ id: UUID, _ change: (inout NoteNode) -> Void) {
         guard let index = library.nodes.firstIndex(where: { $0.id == id }), !library.nodes[index].isTrashed else { return }
         var node = library.nodes[index]

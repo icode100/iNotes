@@ -42,10 +42,10 @@ does not publish a release.
 ## Build and sign a local update
 
 ```sh
-VERSION=1.0.3 BUILD_NUMBER=2011 bash scripts/build-macos.sh
-VERSION=1.0.3 bash scripts/verify-macos.sh
-VERSION=1.0.3 bash scripts/generate-appcast.sh
-VERSION=1.0.3 bash scripts/test-update-signatures.sh
+VERSION=1.0.4 BUILD_NUMBER=2012 bash scripts/build-macos.sh
+VERSION=1.0.4 bash scripts/verify-macos.sh
+VERSION=1.0.4 bash scripts/generate-appcast.sh
+VERSION=1.0.4 bash scripts/test-update-signatures.sh
 ```
 
 The appcast command prepares `dist/update/appcast.xml`. It uses Sparkle's official
@@ -54,10 +54,10 @@ using Apple CryptoKit and the committed public key. It does not upload anything.
 For v1.0.3, the security rebuild 2011 exceeds the initial public build 2010 and
 shared local builds 1010–1012. Check both published and shared `CFBundleVersion`
 values and use a larger number for every update, including same-version rebuilds.
-Development defaults (`1.0.3`, build 2011) are separate from the release workflow's
+Development defaults (`1.0.4`, build 2012) are separate from the release workflow's
 `2001 + GITHUB_RUN_NUMBER`. The offset reserves manual build 2011 after workflow
 run 10 produced 2010; the next new run (11) therefore produces 2012.
-The feed points to the matching `v1.0.3` release's DMG. Never edit a signed appcast
+The feed points to the matching `v1.0.4` release's DMG. Never edit a signed appcast
 after generation. Re-run the script if its contents change. The last command
 checks valid signatures and rejects changed feeds, unsigned feeds, changed
 archives, and a different public key.
@@ -77,7 +77,7 @@ HTTPS feed; malformed configured channels are rejected before packaging.
 ## Publish a version
 
 After reviewing the source and configuring the secret, push a tag such as
-`v1.0.3`. `.github/workflows/release.yml` runs unit/integration tests, builds the
+`v1.0.4`. `.github/workflows/release.yml` runs unit/integration tests, builds the
 ARM64 DMG, verifies the mounted bundle, signs and independently verifies the
 appcast, then publishes the DMG, SHA-256 checksum, and `appcast.xml` as GitHub
 Release assets. Its token has repository-contents write permission only in the

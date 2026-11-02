@@ -81,7 +81,14 @@ struct StandaloneTestRunner {
         let backups = BackupArchiveTests()
         let presentation = PagePresentationTests()
         let inkValidation = InkValidationTests()
+        let images = PageImageTests()
         let tests: [(String, XCTestCase, () throws -> Void)] = [
+            ("annotated image save duplicate import", images, images.testImageArchiveSaveDuplicateAndImportPreserveAnnotatedPage),
+            ("legacy image defaults and version promotion", images, images.testLegacyArchivesSnapshotsAndClipboardDefaultImagesAndPromoteOnlyWhenNeeded),
+            ("image geometry atomic rejection", images, images.testImageGeometryAndIDsRejectAtomicallyAcrossArchiveAndClipboard),
+            ("image byte pixel and container bounds", images, images.testImageBytePixelAndContainerLimitsRejectBeforeRendering),
+            ("image archive version and mixed clipboard", images, images.testImagesRequireVersionThreeAndMixedClipboardRetainsBytes),
+            ("image archive size atomicity", images, images.testImageAggregateArchiveLimitRejectsDuplicateAndImportAtomically),
             ("legacy line and template defaults", presentation, presentation.testLegacyArchivesDefaultToSolidLinesWithoutTemplates),
             ("line and template archive import duplicate", presentation, presentation.testLineAndTemplateChoicesSurviveSaveImportAndDuplicate),
             ("line pattern clipboard and selection", presentation, presentation.testPatternSurvivesClipboardAndSelectionTranslation),

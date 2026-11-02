@@ -215,6 +215,7 @@ struct SheetDetail: View {
                                   pencilKitData: store.binding(sheet.id, \.pencilKitData, fallback: nil),
                                   textBoxes: store.binding(sheet.id, \.textBoxes, fallback: []),
                                   equations: store.binding(sheet.id, \.equations, fallback: []),
+                                  images: store.binding(sheet.id, \.images, fallback: []),
                                   tool: inkTool, colorHex: inkColor, lineWidth: inkWidth, paper: paper, theme: pageTheme,
                                   linePattern: LinePattern(rawValue: linePattern) ?? .solid,
                                   pageTemplate: sheet.pageTemplate, templateLinePattern: sheet.templateLinePattern,
@@ -222,7 +223,9 @@ struct SheetDetail: View {
                                   onInkChange: { strokes, data in store.update(sheet.id) { $0.strokes = strokes; $0.pencilKitData = data } },
                                   onInputChange: { inputDevice.report($0) },
                                   onPageChange: { content in store.update(sheet.id) { $0.pageContent = content } },
-                                  onEquationEdit: { equationDraft = $0 })
+                                  onEquationEdit: { equationDraft = $0 },
+                                  onPageValidate: { store.validatePageChange(sheet.id, content: $0) },
+                                  onPageError: { store.errorMessage = $0 })
                     .frame(maxWidth: .infinity, maxHeight: .infinity).disabled(sheet.isTrashed)
                     .overlay(alignment: .topTrailing) {
                         VStack(alignment: .trailing, spacing: 8) {

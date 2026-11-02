@@ -303,6 +303,16 @@ final class NotesTextView: NSTextView {
     private var undoInteractionState: (editable: Bool, selectable: Bool)?
     deinit { for observer in pageUndoObservers { NotificationCenter.default.removeObserver(observer) } }
     override var undoManager: UndoManager? { pageUndoManager ?? super.undoManager }
+    var onPagePaste: (() -> Bool)?
+    var canPastePage: (() -> Bool)?
+    override func validateMenuItem(_ menuItem: NSMenuItem) -> Bool {
+        if menuItem.action == #selector(paste(_:)), canPastePage?() == true { return true }
+        return super.validateMenuItem(menuItem)
+    }
+    override func paste(_ sender: Any?) {
+        if onPagePaste?() == true { return }
+        super.paste(sender)
+    }
     var onTabletProximity: ((NSEvent) -> Void)?
     override func becomeFirstResponder() -> Bool {
         let accepted = super.becomeFirstResponder()

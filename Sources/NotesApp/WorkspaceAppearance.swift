@@ -533,6 +533,14 @@ enum WorkspaceTheme: String, CaseIterable, Identifiable {
         case .forest: return Color(hex: isDark ? "#212C25" : "#EEF4ED")
         }
     }
+
+    /// Opaque labels avoid native sidebar vibrancy fading small text into artwork.
+    func sidebarSecondary(isDark: Bool) -> AnyShapeStyle {
+        #if os(macOS)
+        if self != .classic { return AnyShapeStyle(Color(hex: isDark ? "#D7E3E8" : "#37474F")) }
+        #endif
+        return AnyShapeStyle(.secondary)
+    }
 }
 
 /// Shared native-image cache keeps the six full-quality photographs out of the
@@ -588,6 +596,7 @@ enum WorkspaceArtwork {
 }
 
 struct WorkspaceScenery: View {
+    var readableSidebar = false
     @AppStorage("workspaceTheme") private var selectedTheme = "classic"
     @Environment(\.colorScheme) private var colorScheme
     @Environment(\.colorSchemeContrast) private var contrast
@@ -611,6 +620,15 @@ struct WorkspaceScenery: View {
                                 (dark ? Color.black : Color.white)
                                     .opacity(contrast == .increased ? (dark ? 0.72 : 0.88) : (dark ? 0.38 : 0.64))
                             }
+                            #if os(macOS)
+                            .overlay {
+                                // A stable surface behind navigation labels also quiets
+                                // bright waves/rocks beneath native disclosure controls.
+                                if readableSidebar {
+                                    surface.opacity(contrast == .increased ? 1 : 0.72)
+                                }
+                            }
+                            #endif
                             .overlay {
                                 LinearGradient(stops: [.init(color: surface.opacity(0), location: 0.35),
                                                        .init(color: surface.opacity(0.3), location: 0.7),

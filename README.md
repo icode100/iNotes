@@ -1,11 +1,10 @@
 # iNotes
 
-Version 1.0.3 fixes sidebar reflow and pane reopening during sheet changes, smooths
-native pane transitions, and adds millimetre nib presets with Fine as the default.
-Settings menus visibly check the current choice. Earlier writing behavior and the
-existing drawing cursors are retained; the withdrawn pressure experiment is not included.
+Version 1.0.4 adds pasted images that you can annotate directly on Mac sheets,
+with movement, proportional resizing, undo, and combined image/ink exports.
+Scenic sidebars have clearer labels and a quieter background.
 
-Release preparation targets version 1.0.3, build 2010. See [release notes](docs/releases/1.0.3.md)
+Release preparation targets version 1.0.4, build 2012. See [release notes](docs/releases/1.0.4.md)
 and [validation](docs/TESTING.md) for local results and separately recorded public-build verification.
 
 A small, native, open-source notebook for Apple silicon Macs, with a shared iPad app target. Built with SwiftUI, AppKit/UIKit, and PencilKit, with Sparkle for signed Mac updates and SwiftMath for offline equations. No Electron, cloud SDK, account, or telemetry.
@@ -17,6 +16,7 @@ A small, native, open-source notebook for Apple silicon Macs, with a shared iPad
 - Text and handwriting share one scrollable, zoomable page. Select Text, pen, straight line, pencil, marker, highlighter, or eraser without hiding either text or ink. Native rich text includes headings, formatting, lists, links, spell checking, and undo/redo.
 - **Text** routes every pointer, including a pen tablet or Apple Pencil, to the text caret and text selection. Choose a drawing tool for handwriting. Typing in Text mode keeps ordinary letters as text.
 - **Select** draws a rectangular selection; **Lasso** follows a freehand outline. Select typed text, pen strokes, positioned text boxes, and equations together, then move, copy, cut, paste, duplicate, delete, or undo the selection. Moving or pasting selected typed text creates a positioned rich-text box on the same paper.
+- On Mac, paste a copied image or image file with **⌘V** into the open sheet, then write or draw over it with Text or the ink tools. Use **Select** to move an image, or drag its lower-right selection handle to resize it proportionally. Images and annotations can be selected and moved together; resizing an image alone leaves annotations independent. Images save with the sheet and appear in combined PDF/PNG exports. PNG, TIFF, JPEG, HEIC, GIF (first frame), and BMP clipboard images are accepted within the 10 MiB, 16-megapixel, and 8192-pixel-per-side limits. Image pasting is currently Mac-only.
 - Editable LaTeX equations with a native live preview, fractions, roots, powers, Greek symbols, sums, integrals, and matrices. Equations share the page with text and handwriting and adapt to light/dark paper. Rendering uses the pinned, open-source SwiftMath 1.7.3 library entirely on the device.
 - Straight-line pen tool for table borders, with near-horizontal/vertical snapping and Shift axis constraints on Mac.
 - Mac pen and pencil cursors show a nib dot sized for the selected width and page zoom. The highlighter uses a slanted chisel-tip cursor.
@@ -63,7 +63,7 @@ Requires an Apple silicon Mac and macOS 14+. Building the installer requires ful
 open dist/iNotes.app
 ```
 
-The default local installer is `dist/iNotes-1.0.3-arm64.dmg` (version 1.0.3, build 2010). Downloaded public builds are also ad hoc signed: **they are not Apple notarized**, so macOS may report that Apple could not verify iNotes is free of malware.
+The default local installer is `dist/iNotes-1.0.4-arm64.dmg` (version 1.0.4, build 2012). Downloaded public builds are also ad hoc signed: **they are not Apple notarized**, so macOS may report that Apple could not verify iNotes is free of malware.
 
 If you trust the download from the [official releases](https://github.com/icode100/iNotes/releases), follow Apple's [per-app first-open procedure](https://support.apple.com/en-us/102445):
 
@@ -90,7 +90,7 @@ Backups are retained until you remove them. A successful folder write confirms a
 
 The local library is `~/Library/Application Support/iNotes/Library.json`; the previous saved version is `Library.previous.json`. Use **File → Show Library in Finder**. A malformed primary library is kept intact and saves pause. If a valid previous version exists, **Backups → Recover previous local version…** preserves the damaged file before restoring it. Always keep independent exported backups.
 
-The portable library format is versioned JSON with embedded rich text, pen data, positioned text boxes, editable LaTeX source, and attachments. Format 2 reads legacy format 1 libraries; adding positioned content upgrades a legacy library to format 2. Older apps reject the new format, protecting new page content from being silently discarded. The attachment picker accepts individual files up to 10 MiB. Archive imports use a 64 MiB aggregate limit, including embedded attachments, rather than a separate per-attachment limit. This intentionally bounded release targets personal notebooks, not multi-gigabyte OneNote libraries. Text and attachment contents are saved locally in readable form; device storage protection is provided by macOS/iPadOS.
+The portable library format is versioned JSON with embedded rich text, pen data, positioned text boxes, editable LaTeX source, and attachments. Format 3 reads legacy formats 1 and 2. Movable text/equations promote a legacy library to format 2; adding a page image promotes it to format 3. Older apps reject image-containing libraries rather than silently dropping images. The shared iPad source preserves these images and marks image-bearing sheets read-only until iPad image support is added. The attachment picker accepts individual files up to 10 MiB. Archive imports use a 64 MiB aggregate limit, including embedded attachments, rather than a separate per-attachment limit. This intentionally bounded release targets personal notebooks, not multi-gigabyte OneNote libraries. Text and attachment contents are saved locally in readable form; device storage protection is provided by macOS/iPadOS.
 
 ## Scope and compatibility
 

@@ -1,12 +1,13 @@
 import Foundation
 
 public struct NoteLibrary: Codable, Equatable, Sendable {
-    public static let currentFormatVersion = 2
+    public static let currentFormatVersion = 3
     public var formatVersion: Int
     public private(set) var nodes: [NoteNode]
     public private(set) var modifiedAt: Date
 
-    public init(nodes: [NoteNode] = [], modifiedAt: Date = Date(), formatVersion: Int = currentFormatVersion) {
+    // Keep image-free notebooks readable by previous releases until an image is added.
+    public init(nodes: [NoteNode] = [], modifiedAt: Date = Date(), formatVersion: Int = 2) {
         self.formatVersion = formatVersion; self.nodes = nodes; self.modifiedAt = modifiedAt
         // Invalid programmatically constructed libraries remain available to validate(), which
         // reports their error. Never discard nodes if their numbering cannot be migrated.
@@ -110,7 +111,10 @@ public struct NoteLibrary: Codable, Equatable, Sendable {
         }
         replacement.updatedAt = Date()
         candidate.nodes[index] = replacement
-        if !replacement.textBoxes.isEmpty || !replacement.equations.isEmpty { candidate.formatVersion = Self.currentFormatVersion }
+        if !replacement.images.isEmpty { candidate.formatVersion = max(candidate.formatVersion, 3) }
+        else if !replacement.textBoxes.isEmpty || !replacement.equations.isEmpty {
+            candidate.formatVersion = max(candidate.formatVersion, 2)
+        }
         if previous.parentID == replacement.parentID, previous.kind == replacement.kind,
            previous.isTrashed == replacement.isTrashed, previous.order == replacement.order {
             // Existing structure is unchanged. Avoid scanning every other sheet's ink on each keypress.
@@ -241,6 +245,9 @@ public struct NoteLibrary: Codable, Equatable, Sendable {
         if formatVersion == 1, nodes.contains(where: { !$0.textBoxes.isEmpty || !$0.equations.isEmpty }) {
             throw LibraryError.invalidData("Movable text and equations require archive format 2.")
         }
+        if formatVersion < 3, nodes.contains(where: { !$0.images.isEmpty }) {
+            throw LibraryError.invalidData("Page images require archive format 3.")
+        }
         guard nodes.count <= 50_000 else { throw LibraryError.invalidData("Too many items.") }
         guard Set(nodes.map(\.id)).count == nodes.count else { throw LibraryError.duplicateID }
         let lookup = Dictionary(uniqueKeysWithValues: nodes.map { ($0.id, $0) })
@@ -303,6 +310,7 @@ public struct NoteLibrary: Codable, Equatable, Sendable {
 
     private static func validatePayload(_ node: NoteNode, previous: NoteNode? = nil) throws {
         _ = try cleanTitle(node.title, kind: node.kind)
+        if previous?.images != node.images { try PageImageLimits.validate(node.images) }
         guard node.lastSheetNumber >= 0,
               (node.kind == .chapter || node.kind == .topic || node.lastSheetNumber == 0),
               (node.kind == .sheet ? node.sheetNumber.map { $0 > 0 } == true : node.sheetNumber == nil) else {

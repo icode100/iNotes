@@ -8,8 +8,69 @@ struct MacPageSelection {
     var nativeStrokes = Set<Int>()
     var textBoxes = Set<UUID>()
     var equations = Set<UUID>()
+    var images = Set<UUID>()
     var textRanges: [NSRange] = []
-    var isEmpty: Bool { strokes.isEmpty && nativeStrokes.isEmpty && textBoxes.isEmpty && equations.isEmpty && textRanges.isEmpty }
+    var isEmpty: Bool { strokes.isEmpty && nativeStrokes.isEmpty && textBoxes.isEmpty && equations.isEmpty && images.isEmpty && textRanges.isEmpty }
+}
+
+/// A store rejection must leave the same native undo/redo action retryable.
+/// UndoManager normally consumes a callback even when it makes no change. A
+/// rejected callback installs a no-op inverse that restores that callback; the
+/// opposite operation then restores the whole group, including any successful
+/// callbacks that preceded the rejection. All content changes still validate.
+@MainActor
+final class PageUndoManager: UndoManager {
+    private var operationInProgress = false
+    private var repairNeeded = false
+    private var repairActionName: String?
+    private(set) var isRejectingRemainingActions = false
+
+    override func undo() {
+        guard !operationInProgress else { return }
+        operationInProgress = true
+        defer { operationInProgress = false; repairNeeded = false; repairActionName = nil; isRejectingRemainingActions = false }
+        repairNeeded = false
+        let name = undoActionName
+        super.undo()
+        if repairNeeded {
+            repairActionName = name
+            repairNeeded = false
+            isRejectingRemainingActions = false
+            super.redo()
+        }
+    }
+
+    override func redo() {
+        guard !operationInProgress else { return }
+        operationInProgress = true
+        defer { operationInProgress = false; repairNeeded = false; repairActionName = nil; isRejectingRemainingActions = false }
+        repairNeeded = false
+        let name = redoActionName
+        super.redo()
+        if repairNeeded {
+            repairActionName = name
+            repairNeeded = false
+            isRejectingRemainingActions = false
+            super.undo()
+        }
+    }
+
+    override func setActionName(_ actionName: String) {
+        super.setActionName(repairActionName ?? actionName)
+    }
+
+    func retainRejectedAction<T: AnyObject>(withTarget target: T, actionName: String,
+                                           handler: @escaping (T) -> Void) {
+        guard isUndoing || isRedoing else { return }
+        repairNeeded = true
+        isRejectingRemainingActions = true
+        registerUndo(withTarget: target) { [weak self] target in
+            guard let self else { return }
+            self.registerUndo(withTarget: target, handler: handler)
+            self.setActionName(actionName)
+        }
+        setActionName(actionName)
+    }
 }
 
 @MainActor
@@ -19,8 +80,10 @@ final class MacPageSelectionController: NSObject {
     var selection = MacPageSelection()
     var onRender: ((PageContent) -> Void)?
     var onCommit: ((PageContent) -> Void)?
+    var onValidate: ((PageContent) -> Bool)?
+    var onPasteError: ((String) -> Void)?
     var onEquationEdit: ((NoteEquation) -> Void)?
-    let history = UndoManager()
+    let history = PageUndoManager()
     private var observer: NSObjectProtocol?
     private var isApplying = false
     private var transientContent: PageContent?
@@ -64,6 +127,9 @@ final class MacPageSelectionController: NSObject {
         for equation in content.equations where PageSelectionGeometry.intersects(rect: CGRect(x: equation.x, y: equation.y, width: equation.width, height: equation.height), polygon: polygon) {
             value.equations.insert(equation.id)
         }
+        for image in content.images where PageSelectionGeometry.intersects(rect: CGRect(x: image.x, y: image.y, width: image.width, height: image.height), polygon: polygon) {
+            value.images.insert(image.id)
+        }
         value.textRanges = merged(value.textRanges + bodyRanges(polygon: polygon))
         selection = value
         page.selectionView.needsDisplay = true
@@ -90,6 +156,11 @@ final class MacPageSelectionController: NSObject {
             if let hit = hits.first, hit.location < (content.text as NSString).length {
                 let word = page.textView.selectionRange(forProposedRange: hit, granularity: .selectByWord)
                 value.textRanges = merged(value.textRanges + [word])
+            } else if let image = content.images.reversed().first(where: {
+                CGRect(x: $0.x, y: $0.y, width: $0.width, height: $0.height).contains(CGPoint(x: point.x, y: point.y))
+            }) {
+                // Images sit behind both native text and handwriting.
+                value.images.insert(image.id)
             }
         }
         selection = value
@@ -108,6 +179,7 @@ final class MacPageSelectionController: NSObject {
         }
         rectangles += content.textBoxes.filter { selection.textBoxes.contains($0.id) }.compactMap { page.textBoxViews[$0.id]?.frame }
         rectangles += content.equations.filter { selection.equations.contains($0.id) }.map { CGRect(x: $0.x, y: $0.y, width: $0.width, height: $0.height) }
+        rectangles += content.images.filter { selection.images.contains($0.id) }.map { CGRect(x: $0.x, y: $0.y, width: $0.width, height: $0.height) }
         rectangles += selection.textRanges.compactMap { bodyRect(range: $0) }
         return rectangles.reduce(nil) { $0?.union($1) ?? $1 }
     }
@@ -137,6 +209,9 @@ final class MacPageSelectionController: NSObject {
         var points = base.strokes.filter { selected.strokes.contains($0.id) }.flatMap(\.points)
         points += base.textBoxes.filter { selected.textBoxes.contains($0.id) }.map { InkPoint(x: $0.x, y: $0.y) }
         points += base.equations.filter { selected.equations.contains($0.id) }.map { InkPoint(x: $0.x, y: $0.y) }
+        points += base.images.filter { selected.images.contains($0.id) }.flatMap {
+            [InkPoint(x: $0.x, y: $0.y), InkPoint(x: $0.x + $0.width, y: $0.y + $0.height)]
+        }
         let bounds = PageSelectionGeometry.bounds(of: points)
         let horizontal = horizontalBounds(base, selection: selected)
         let paperWidth = Double(page?.bounds.width ?? InkExport.paperSize.width)
@@ -172,7 +247,34 @@ final class MacPageSelectionController: NSObject {
             result.equations[index].x = max(0, min(100_000, base.equations[index].x + dx))
             result.equations[index].y = max(0, min(100_000, base.equations[index].y + dy))
         }
+        for index in result.images.indices where selected.images.contains(result.images[index].id) {
+            result.images[index].x = base.images[index].x + dx
+            result.images[index].y = base.images[index].y + dy
+        }
         return result
+    }
+
+    var singleSelectedImageID: UUID? {
+        guard selection.images.count == 1, selection.strokes.isEmpty, selection.nativeStrokes.isEmpty,
+              selection.textBoxes.isEmpty, selection.equations.isEmpty, selection.textRanges.isEmpty else { return nil }
+        return selection.images.first
+    }
+
+    /// Resize only the image; annotations remain independent page content.
+    func resizedImage(_ base: PageContent, id: UUID, width: Double) -> PageContent {
+        guard width.isFinite, let index = base.images.firstIndex(where: { $0.id == id }) else { return base }
+        let image = base.images[index]
+        guard image.width > 0, image.height > 0 else { return base }
+        let ratio = image.height / image.width
+        let maximumWidth = min(Double(page?.bounds.width ?? InkExport.paperSize.width) - image.x,
+                               10_000, 10_000 / ratio, (100_000 - image.y) / ratio)
+        let minimumWidth = max(1, 1 / ratio)
+        guard maximumWidth >= minimumWidth else { return base }
+        var value = base
+        value.images[index].width = min(maximumWidth, max(min(max(24, minimumWidth), maximumWidth), width))
+        value.images[index].height = value.images[index].width * ratio
+        guard (try? PageImageLimits.validate(value.images)) != nil else { return base }
+        return value
     }
 
     func canMoveSelection() -> Bool {
@@ -183,6 +285,7 @@ final class MacPageSelectionController: NSObject {
         var rectangles = value.strokes.filter { selected == nil || selected!.strokes.contains($0.id) }.compactMap { InkRenderer.bounds(of: $0) }
         rectangles += value.textBoxes.filter { selected == nil || selected!.textBoxes.contains($0.id) }.map { CGRect(x: $0.x, y: $0.y, width: $0.width, height: 24) }
         rectangles += value.equations.filter { selected == nil || selected!.equations.contains($0.id) }.map { CGRect(x: $0.x, y: $0.y, width: $0.width, height: $0.height) }
+        rectangles += value.images.filter { selected == nil || selected!.images.contains($0.id) }.map { CGRect(x: $0.x, y: $0.y, width: $0.width, height: $0.height) }
         if let drawing = nativeDrawing(value) {
             rectangles += drawing.strokes.enumerated().filter { selected == nil || selected!.nativeStrokes.contains($0.offset) }.map { $0.element.renderBounds }
         }
@@ -193,13 +296,32 @@ final class MacPageSelectionController: NSObject {
     func preview(_ value: PageContent) { transientContent = value; onRender?(value) }
     func cancelPreview() { transientContent = nil; onRender?(content) }
 
-    func commit(_ value: PageContent, previous: PageContent? = nil, action: String) {
+    @discardableResult
+    func commit(_ value: PageContent, previous: PageContent? = nil, action: String) -> Bool {
         let before = previous ?? content
-        guard value != before else { cancelPreview(); return }
+        if history.isRejectingRemainingActions {
+            // Stop at the first rejected snapshot. Later callbacks in this
+            // native group must not jump across it to an unrelated older state.
+            history.retainRejectedAction(withTarget: self, actionName: action) {
+                $0.commit(value, previous: before, action: action)
+            }
+            cancelPreview()
+            return false
+        }
+        guard value != before else { cancelPreview(); return false }
         // Reject the whole transaction before history, view or persisted data
         // change. A failed native conversion must never become empty ink.
-        guard (try? InkGeometryLimits.validate(value.strokes)) != nil else { cancelPreview(); NSSound.beep(); return }
-        if value.pencilKitData != nil, nativeDrawing(value) == nil { cancelPreview(); NSSound.beep(); return }
+        func reject() -> Bool {
+            history.retainRejectedAction(withTarget: self, actionName: action) { target in
+                target.commit(value, previous: before, action: action)
+            }
+            cancelPreview()
+            return false
+        }
+        guard (try? InkGeometryLimits.validate(value.strokes)) != nil,
+              (try? PageImageLimits.validate(value.images)) != nil else { NSSound.beep(); return reject() }
+        if value.pencilKitData != nil, nativeDrawing(value) == nil { NSSound.beep(); return reject() }
+        guard onValidate?(value) != false else { return reject() }
         let needsGroup = history.groupingLevel == 0
         if needsGroup { history.beginUndoGrouping() }
         history.registerUndo(withTarget: self) { target in target.commit(before, previous: value, action: action) }
@@ -212,10 +334,33 @@ final class MacPageSelectionController: NSObject {
         onCommit?(value)
         isApplying = false
         page?.selectionView.needsDisplay = true
+        return true
     }
 
     func perform(_ command: PageSelectionCommand) {
         guard let page, page.inkView.isInputEnabled else { return }
+        if command == .paste {
+            let board = NSPasteboard.general
+            if let data = board.data(forType: NSPasteboard.PasteboardType(PageClipboardPayload.pasteboardType))
+                ?? board.data(forType: NSPasteboard.PasteboardType(PageClipboardPayload.legacyPasteboardType)) {
+                guard let payload = try? PageClipboardPayload.decodeValidated(data) else { NSSound.beep(); return }
+                if payload.images.isEmpty, page.activeTool == .text,
+                   let editor = page.window?.firstResponder as? NSTextView,
+                   editor === page.textView || page.textBoxViews.values.contains(where: { $0.editor === editor }) {
+                    // Native text paste uses the RTF/string fallback at the caret.
+                    // The text-view page-paste hook declines image-free payloads.
+                    editor.paste(nil)
+                    return
+                }
+                paste(payload, offset: 20, action: "Paste Selection")
+                if page.activeTool != .text || payload.images.isEmpty {
+                    page.window?.makeFirstResponder(page.selectionView)
+                }
+                page.selectionView.needsDisplay = true
+                return
+            }
+            if pasteImage(from: board) { return }
+        }
         if page.activeTool == .text, let editor = page.window?.firstResponder as? NSTextView,
            editor === page.textView || page.textBoxViews.values.contains(where: { $0.editor === editor }) {
             switch command {
@@ -235,6 +380,7 @@ final class MacPageSelectionController: NSObject {
         case .selectAll:
             selection = MacPageSelection(strokes: Set(content.strokes.map(\.id)), nativeStrokes: Set(nativeDrawing(content)?.strokes.indices ?? 0..<0),
                                          textBoxes: Set(content.textBoxes.map(\.id)), equations: Set(content.equations.map(\.id)),
+                                         images: Set(content.images.map(\.id)),
                                          textRanges: content.text.isEmpty ? [] : [NSRange(location: 0, length: (content.text as NSString).length)])
         case .copy: copySelection()
         case .cut: if copySelection() { deleteSelection() }
@@ -242,10 +388,7 @@ final class MacPageSelectionController: NSObject {
         case .duplicate: if let payload = clipboardPayload() { paste(payload, offset: 20, action: "Duplicate Selection") }
         case .paste:
             let board = NSPasteboard.general
-            if let data = board.data(forType: NSPasteboard.PasteboardType(PageClipboardPayload.pasteboardType)) {
-                guard let value = try? PageClipboardPayload.decodeValidated(data) else { NSSound.beep(); return }
-                paste(value, offset: 20, action: "Paste Selection")
-            } else if let text = board.string(forType: .string), text.utf8.count <= PageClipboardPayload.maximumBytes {
+            if let text = board.string(forType: .string), text.utf8.count <= PageClipboardPayload.maximumBytes {
                 let box = PageTextBox(x: 80, y: 80, width: 500, text: text)
                 paste(PageClipboardPayload(textBoxes: [box]), offset: 0, action: "Paste Text")
             }
@@ -259,6 +402,12 @@ final class MacPageSelectionController: NSObject {
         let board = NSPasteboard.general
         board.clearContents()
         board.setData(data, forType: NSPasteboard.PasteboardType(PageClipboardPayload.pasteboardType))
+        if payload.images.isEmpty {
+            board.setData(data, forType: NSPasteboard.PasteboardType(PageClipboardPayload.legacyPasteboardType))
+        } else if payload.images.count == 1, payload.strokes.isEmpty, payload.pencilKitData == nil,
+                  payload.textBoxes.isEmpty, payload.equations.isEmpty, payload.text.isEmpty {
+            board.setData(payload.images[0].imageData, forType: .png)
+        }
         board.setString(payload.text, forType: .string)
         if let rtfData = payload.rtfData { board.setData(rtfData, forType: .rtf) }
         return true
@@ -283,7 +432,7 @@ final class MacPageSelectionController: NSObject {
             guard let portable = try? PortableInkConverter.validatedStrokes(from: selected) else { return nil }
             native = selected.dataRepresentation(); ink = portable
         }
-        return PageClipboardPayload(text: plain, rtfData: rtf(text), strokes: ink, pencilKitData: native, textBoxes: boxes, equations: equations)
+        return PageClipboardPayload(text: plain, rtfData: rtf(text), strokes: ink, pencilKitData: native, textBoxes: boxes, equations: equations, images: content.images.filter { selection.images.contains($0.id) })
     }
 
     private func deleteSelection() {
@@ -298,16 +447,16 @@ final class MacPageSelectionController: NSObject {
         }
         value.textBoxes.removeAll { selection.textBoxes.contains($0.id) }
         value.equations.removeAll { selection.equations.contains($0.id) }
+        value.images.removeAll { selection.images.contains($0.id) }
         if !selection.textRanges.isEmpty {
             let body = NSMutableAttributedString(attributedString: canonicalBody())
             for range in selection.textRanges.reversed() where NSMaxRange(range) <= body.length { body.deleteCharacters(in: range) }
             value.text = body.string; value.rtfData = rtf(body)
         }
-        selection = MacPageSelection()
-        commit(value, action: "Delete Selection")
+        if commit(value, action: "Delete Selection") { selection = MacPageSelection() }
     }
 
-    private func paste(_ payload: PageClipboardPayload, offset: Double, action: String) {
+    func paste(_ payload: PageClipboardPayload, offset: Double, action: String) {
         let nativeAddition: PKDrawing?
         if content.pencilKitData != nil || payload.pencilKitData != nil {
             guard let drawing = try? PortableInkConverter.validatedClipboardDrawing(payload.pencilKitData, fallback: payload.strokes) else { NSSound.beep(); return }
@@ -315,7 +464,7 @@ final class MacPageSelectionController: NSObject {
         } else { nativeAddition = nil }
         let containsTypedText = !payload.textBoxes.isEmpty || (!payload.text.isEmpty && payload.equations.isEmpty)
         let offset = page?.paperView.paper == .ruled && containsTypedText && offset > 0 ? Double(RuledTextLayout.spacing) : offset
-        var payloadContent = PageContent(strokes: payload.strokes, pencilKitData: payload.pencilKitData, textBoxes: payload.textBoxes, equations: payload.equations)
+        var payloadContent = PageContent(strokes: payload.strokes, pencilKitData: payload.pencilKitData, textBoxes: payload.textBoxes, equations: payload.equations, images: payload.images)
         if payload.textBoxes.isEmpty && payload.equations.isEmpty && !payload.text.isEmpty { payloadContent.textBoxes = [PageTextBox(x: 80, y: 80, width: 500, text: payload.text)] }
         let horizontal = horizontalBounds(payloadContent)
         let paperWidth = Double(page?.bounds.width ?? InkExport.paperSize.width)
@@ -357,12 +506,20 @@ final class MacPageSelectionController: NSObject {
             equation.id = UUID(); equation.x += offsetX; equation.y = max(0, min(100_000, equation.y + offset))
             value.equations.append(equation); selected.equations.insert(equation.id)
         }
+        for var image in payload.images {
+            image.id = UUID(); image.x += offsetX; image.y += offset
+            value.images.append(image); selected.images.insert(image.id)
+        }
         // Validate the resulting page too: multiple individually bounded pastes
         // must not bypass the archive's aggregate object and byte limits.
-        let candidate = PageClipboardPayload(text: value.text, rtfData: value.rtfData, strokes: value.strokes, pencilKitData: value.pencilKitData, textBoxes: value.textBoxes, equations: value.equations)
-        guard let encoded = try? JSONEncoder().encode(candidate), (try? PageClipboardPayload.decodeValidated(encoded)) != nil else { NSSound.beep(); return }
-        selection = selected
-        commit(value, action: action)
+        let candidate = PageClipboardPayload(text: value.text, rtfData: value.rtfData, strokes: value.strokes, pencilKitData: value.pencilKitData, textBoxes: value.textBoxes, equations: value.equations, images: value.images)
+        do { try candidate.validatePageContent() }
+        catch {
+            onPasteError?(error.localizedDescription)
+            NSSound.beep()
+            return
+        }
+        if commit(value, action: action) { selection = selected }
     }
 
     private func nativeDrawing(_ content: PageContent) -> PKDrawing? {
@@ -432,6 +589,7 @@ final class MacPageSelectionView: NSView {
     var polygon: [InkPoint] = []
     private var start: InkPoint?
     private var moving = false
+    private var resizingImageID: UUID?
     private var before: PageContent?
     private var moveBase: PageContent?
     private var moveSelection = MacPageSelection()
@@ -444,7 +602,7 @@ final class MacPageSelectionView: NSView {
         super.init(frame: frame)
         setAccessibilityElement(true); setAccessibilityRole(.group)
         setAccessibilityLabel("Shared page selection")
-        setAccessibilityHelp("Drag a rectangle or lasso around text and handwriting, then drag the selection to move it. Copy, cut, paste, delete and undo work on the whole selection.")
+        setAccessibilityHelp("Drag a rectangle or lasso around text, images and handwriting, then drag the selection to move it. Drag the lower-right handle of a single selected image to resize it. Copy, cut, paste, delete and undo work on the whole selection.")
     }
     required init?(coder: NSCoder) { fatalError("init(coder:) is unavailable") }
     override func resetCursorRects() {
@@ -469,15 +627,26 @@ final class MacPageSelectionView: NSView {
         }
         window?.makeFirstResponder(self)
         start = point; before = controller.content; moveBase = nil; lastPreview = nil
-        moving = !controller.selection.isEmpty && controller.selectionBounds()?.insetBy(dx: -5, dy: -5).contains(CGPoint(x: point.x, y: point.y)) == true
-        if !moving { polygon = [point]; if !event.modifierFlags.contains(.shift) { controller.selection = MacPageSelection() } }
+        resizingImageID = nil
+        if let id = controller.singleSelectedImageID, let bounds = controller.selectionBounds() {
+            let handle = CGRect(x: bounds.maxX - 3, y: bounds.maxY - 3, width: 16, height: 16)
+            if handle.contains(CGPoint(x: point.x, y: point.y)) { resizingImageID = id }
+        }
+        moving = resizingImageID == nil && !controller.selection.isEmpty && controller.selectionBounds()?.insetBy(dx: -5, dy: -5).contains(CGPoint(x: point.x, y: point.y)) == true
+        if !moving && resizingImageID == nil { polygon = [point]; if !event.modifierFlags.contains(.shift) { controller.selection = MacPageSelection() } }
         needsDisplay = true
     }
 
     override func mouseDragged(with event: NSEvent) {
         guard let start, let controller else { return }
         let point = pagePoint(event)
-        if moving {
+        if let id = resizingImageID, let before,
+           let image = before.images.first(where: { $0.id == id }) {
+            let ratio = image.height / image.width
+            let delta = ((point.x - start.x) + (point.y - start.y) * ratio) / (1 + ratio * ratio)
+            let value = controller.resizedImage(before, id: id, width: image.width + delta)
+            lastPreview = value; controller.preview(value)
+        } else if moving {
             guard hypot(point.x - start.x, point.y - start.y) >= 2 else { return }
             if moveBase == nil {
                 guard controller.canMoveSelection() else { return }
@@ -496,14 +665,16 @@ final class MacPageSelectionView: NSView {
     override func mouseUp(with event: NSEvent) {
         guard let start, let controller else { return }
         let end = pagePoint(event)
-        if moving {
+        if resizingImageID != nil {
+            if let value = lastPreview, let before { controller.commit(value, previous: before, action: "Resize Image") }
+        } else if moving {
             if let value = lastPreview, let before {
                 controller.selection = moveSelection
                 controller.commit(value, previous: before, action: "Move Selection")
             }
         } else if hypot(end.x - start.x, end.y - start.y) < 4 { controller.select(at: end, extending: event.modifierFlags.contains(.shift)) }
         else { controller.select(polygon: polygon, extending: event.modifierFlags.contains(.shift)) }
-        self.start = nil; before = nil; moveBase = nil; lastPreview = nil; polygon = []; moving = false
+        self.start = nil; before = nil; moveBase = nil; lastPreview = nil; polygon = []; moving = false; resizingImageID = nil
         needsDisplay = true
     }
 
@@ -532,7 +703,7 @@ final class MacPageSelectionView: NSView {
     }
     override func cancelOperation(_ sender: Any?) {
         controller?.perform(.clear)
-        start = nil; before = nil; moveBase = nil; lastPreview = nil; polygon = []; moving = false
+        start = nil; before = nil; moveBase = nil; lastPreview = nil; polygon = []; moving = false; resizingImageID = nil
         needsDisplay = true
     }
     @objc func copy(_ sender: Any?) { controller?.perform(.copy) }
@@ -549,7 +720,20 @@ final class MacPageSelectionView: NSView {
             let item = NSMenuItem(title: title, action: #selector(menuCommand(_:)), keyEquivalent: "")
             item.target = self; item.representedObject = command; menu.addItem(item)
         }
+        if controller?.singleSelectedImageID != nil {
+            menu.addItem(.separator())
+            for (title, scale) in [("Make Image Larger", 1.25), ("Make Image Smaller", 0.8)] {
+                let item = NSMenuItem(title: title, action: #selector(resizeImageCommand(_:)), keyEquivalent: "")
+                item.target = self; item.representedObject = scale; menu.addItem(item)
+            }
+        }
         return menu
+    }
+    @objc private func resizeImageCommand(_ sender: NSMenuItem) {
+        guard let controller, let id = controller.singleSelectedImageID,
+              let image = controller.content.images.first(where: { $0.id == id }),
+              let scale = sender.representedObject as? Double else { return }
+        controller.commit(controller.resizedImage(controller.content, id: id, width: image.width * scale), action: "Resize Image")
     }
     @objc private func menuCommand(_ sender: NSMenuItem) { if let command = sender.representedObject as? PageSelectionCommand { controller?.perform(command) } }
     private func pagePoint(_ event: NSEvent) -> InkPoint { let point = convert(event.locationInWindow, from: nil); return InkPoint(x: point.x, y: point.y) }

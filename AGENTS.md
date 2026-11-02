@@ -60,8 +60,17 @@ Use availability guards for APIs newer than the deployment target.
 - Legacy numbering migration orders by `createdAt`, then UUID for ties; it must
   preserve content, IDs, timestamps, and stored array order. Reject nonfinite dates
   before sorting. Content edits must not rewrite creation dates or numbering.
-- Archive format 2 reads format 1; adding positioned text/equations promotes format 1.
-  Add decoder defaults and legacy fixtures for new optional fields.
+- Archive format 3 reads formats 1 and 2. Image-free new libraries default to format 2;
+  adding positioned text/equations promotes format 1 to 2, and adding page images
+  promotes to 3 without later downgrading. Add decoder defaults and legacy fixtures.
+- Page images are canonical PNG objects behind text and ink. Preserve them in every
+  page snapshot, undo operation, duplication/import, mixed clipboard payload and
+  PDF/PNG export. Image-bearing iPad sheets are currently read-only with an explicit
+  Mac-only notice; shared-source edits must never silently clear image payloads.
+  Enforce PageImageLimits before native decoding: 10 MiB/image, 8192 pixels/side,
+  16 million pixels/image, 64 million pixels/page and 100 images/page. Clipboard
+  transfers are bounded at 16 MiB, separately from the 64 MiB archive/page budget.
+  Preserve image-free legacy clipboard types and native text paste at the caret.
 - Preserve candidate-copy/validate/commit atomicity: rejected edits, imports, moves,
   or oversized duplicates must leave the previous library intact.
 - Enforce the existing 64 MiB archive limit, 50,000-node limit, 128-level hierarchy

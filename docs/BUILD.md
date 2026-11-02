@@ -38,9 +38,9 @@ bash scripts/verify-macos.sh
 The build creates:
 
 - `dist/iNotes.app`: native ARM64 app bundle.
-- `dist/iNotes-1.0.3-arm64.dmg`: compressed disk image containing the app, an
+- `dist/iNotes-1.0.4-arm64.dmg`: compressed disk image containing the app, an
   Applications shortcut, and installation instructions.
-- `dist/iNotes-1.0.3-arm64.dmg.sha256`: SHA-256 checksum.
+- `dist/iNotes-1.0.4-arm64.dmg.sha256`: SHA-256 checksum.
 
 Open the disk image and drag iNotes to Applications. The DMG does not install
 background services, kernel extensions, browser runtimes, or privileged helpers.
@@ -48,12 +48,12 @@ The build script validates the property list, architecture, app signature, and D
 before publishing outputs. The verification script mounts it read-only and checks
 the packaged app and Applications shortcut.
 
-The defaults are version 1.0.3 and development build 2010. To publish an update,
-choose a build number greater than the latest published `CFBundleVersion`.
-For example, `VERSION=1.0.3 BUILD_NUMBER=2010 bash scripts/build-macos.sh` exceeds
-public v1.0.2 build 1009 and shared local candidates 1010–1012. Check actual builds
-before choosing its successor; Sparkle compares build numbers, not just the
-displayed version. The release workflow uses `2000 + GITHUB_RUN_NUMBER`.
+The defaults are version 1.0.4 and development build 2012. This exceeds public
+v1.0.3 build 2011 and the previously shared local builds. For every later update,
+check the actual public appcast and choose a greater `CFBundleVersion`; Sparkle
+compares build numbers, not just the displayed version. The release workflow
+uses `2001 + GITHUB_RUN_NUMBER`: release run 11 produces build 2012. A workflow
+rerun does not increase its build number.
 Build products stay under `dist`, module/package caches under `.build`, and the
 temporary native build scratch directory under `/private/tmp`. The scratch
 directory is removed after packaging. The script explicitly selects SwiftPM's

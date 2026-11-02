@@ -4,6 +4,7 @@ import SwiftUI
 import NotesCore
 import PencilKit
 import PDFKit
+import ImageIO
 
 /// Models a key window with a local pointer position for stationary-cursor
 /// tests without activating this offscreen app or moving the user's pointer.
@@ -904,7 +905,278 @@ enum EditorDiagnostics {
         selector.history.endUndoGrouping()
         try check(editableBox.text == "Changed again" && editableView.isEditable,
                   "textbox editing continues after a model refresh in Text mode")
+        checks += try imageChecks(window: window)
         return "\(checks) native editor integration checks passed (shared text/ink page, straight lines, formatting, pressure, dark/light, searchable export, mixed text/ink lasso, atomic move/delete/undo, canonical rich text, native PencilKit masks and clipboard validation)."
     }
+
+    /// Uses a private pasteboard and disposable native page; never replaces the
+    /// user's clipboard or touches the production library.
+    private static func imageChecks(window: NSWindow) throws -> Int {
+        var checks = 0
+        func check(_ condition: @autoclosure () -> Bool, _ message: String) throws {
+            guard condition() else { throw Failure(description: "Image diagnostic failed: \(message)") }
+            checks += 1
+        }
+        func exportedColors(_ image: CGImage) throws -> (red: Bool, blue: Bool) {
+            // Native export can carry an ICC color space that colorAt cannot
+            // interpret. Convert rendered pixels into a known sRGB buffer;
+            // do not infer image presence from the container or byte count.
+            let width = min(1600, image.width)
+            let height = max(1, Int(Double(image.height) * Double(width) / Double(image.width)))
+            guard let space = CGColorSpace(name: CGColorSpace.sRGB),
+                  let context = CGContext(data: nil, width: width, height: height, bitsPerComponent: 8,
+                                          bytesPerRow: width * 4, space: space,
+                                          bitmapInfo: CGImageAlphaInfo.premultipliedLast.rawValue | CGBitmapInfo.byteOrder32Big.rawValue),
+                  let data = context.data?.assumingMemoryBound(to: UInt8.self) else {
+                throw Failure(description: "Cannot normalize exported image pixels for verification")
+            }
+            context.draw(image, in: CGRect(x: 0, y: 0, width: width, height: height))
+            var red = false, blue = false
+            for offset in stride(from: 0, to: width * height * 4, by: 4) {
+                red = red || (data[offset] > 204 && data[offset + 1] < 51 && data[offset + 2] < 51)
+                blue = blue || (data[offset + 2] > 204 && data[offset] < 51 && data[offset + 1] < 51)
+                if red && blue { break }
+            }
+            return (red, blue)
+        }
+        guard let fixtureSpace = CGColorSpace(name: CGColorSpace.sRGB),
+              let fixtureContext = CGContext(data: nil, width: 16, height: 8, bitsPerComponent: 8,
+                                             bytesPerRow: 16 * 4, space: fixtureSpace,
+                                             bitmapInfo: CGImageAlphaInfo.premultipliedLast.rawValue | CGBitmapInfo.byteOrder32Big.rawValue) else {
+            throw Failure(description: "Cannot create image diagnostic fixture")
+        }
+        fixtureContext.setFillColor(red: 1, green: 0, blue: 0, alpha: 1)
+        fixtureContext.fill(CGRect(x: 0, y: 0, width: 16, height: 8))
+        guard let fixtureImage = fixtureContext.makeImage() else {
+            throw Failure(description: "Cannot render image diagnostic fixture")
+        }
+        let source = NSBitmapImageRep(cgImage: fixtureImage)
+        guard let png = source.representation(using: .png, properties: [:]),
+              let tiff = source.representation(using: .tiff, properties: [:]) else {
+            throw Failure(description: "Cannot encode image diagnostic fixture")
+        }
+        let normalized = try MacPageImageCodec.normalize(png)
+        let normalizedTIFF = try MacPageImageCodec.normalize(tiff)
+        try check(MacPageImageCodec.decode(normalized)?.width == 16
+                  && MacPageImageCodec.decode(normalizedTIFF)?.height == 8,
+                  "PNG and TIFF normalize into bounded decodable page images")
+        guard let normalizedFixture = MacPageImageCodec.decode(normalized),
+              let normalizedTIFFFixture = MacPageImageCodec.decode(normalizedTIFF) else {
+            throw Failure(description: "Cannot decode normalized diagnostic fixture")
+        }
+        let normalizedColors = try exportedColors(normalizedFixture)
+        let normalizedTIFFColors = try exportedColors(normalizedTIFFFixture)
+        try check(normalizedColors.red && !normalizedColors.blue && normalizedTIFFColors.red,
+                  "PNG and TIFF fixtures contain opaque red pixels after normalization")
+        try check((try? MacPageImageCodec.normalize(Data("not an image".utf8))) == nil,
+                  "malformed external images are rejected")
+        try check((try? MacPageImageCodec.normalize(Data(repeating: 0, count: PageImageLimits.maximumBytes + 1))) == nil,
+                  "oversized external image bytes are rejected")
+
+        let page = UnifiedMacPageView(frame: NSRect(origin: .zero, size: InkExport.paperSize))
+        let controller = MacPageSelectionController()
+        controller.history.groupsByEvent = false
+        controller.page = page; page.selectionController = controller; page.selectionView.controller = controller
+        page.textView.pageUndoManager = controller.history; page.inkView.pageSelectionHistory = controller.history
+        page.inkView.isInputEnabled = true
+        let scroll = NSScrollView(frame: NSRect(x: 0, y: 0, width: 640, height: 480))
+        scroll.documentView = page; window.contentView = scroll
+        let rich = RichTextEditor.Coordinator(RichTextEditor(text: .constant("Existing text"), rtfData: .constant(nil)))
+        var saved = PageContent(text: "Existing text")
+        var writes = 0
+        controller.onRender = { value in
+            rich.load(text: value.text, rtf: value.rtfData, into: page.textView)
+            page.inkView.strokes = value.strokes
+            page.displayObjects(textBoxes: value.textBoxes, equations: value.equations, images: value.images,
+                                editable: true, onTextBoxChange: { _,_,_ in }, onEquationEdit: nil)
+            page.resizePaperToContent()
+        }
+        controller.onCommit = { saved = $0; writes += 1 }
+        controller.load(saved); controller.onRender?(saved)
+        let board = NSPasteboard.withUniqueName()
+        defer { board.releaseGlobally() }
+        board.setData(png, forType: .png)
+        page.activeTool = .text
+        page.textView.onPagePaste = { controller.pasteImage(from: board) }
+        page.textView.paste(nil)
+        try check(saved.images.count == 1 && saved.text == "Existing text" && writes == 1,
+                  "native Text paste inserts a positioned image and preserves existing body text")
+        guard let pasted = saved.images.first, let imageView = page.imageViews[pasted.id] else {
+            throw Failure(description: "Pasted image did not produce a native page layer")
+        }
+        try check(pasted.width > 0 && pasted.height > 0 && abs(pasted.width / pasted.height - 2) < 0.001,
+                  "pasted image keeps its aspect ratio")
+        let afterPaste = saved
+        controller.history.undo()
+        try check(saved.images.isEmpty && saved.text == "Existing text", "image insertion has one reversible undo transaction")
+        controller.history.redo()
+        try check(saved == afterPaste, "image redo restores exact payload and geometry")
+        let imageIndex = page.subviews.firstIndex(where: { $0 === page.imageViews[pasted.id] })
+        let textIndex = page.subviews.firstIndex(where: { $0 === page.textView })
+        let inkIndex = page.subviews.firstIndex(where: { $0 === page.inkView })
+        try check(imageIndex != nil && textIndex != nil && inkIndex != nil
+                  && imageIndex! < textIndex! && imageIndex! < inkIndex!,
+                  "pasted image renders below native text and handwriting")
+        let point = NSPoint(x: pasted.x + pasted.width / 2, y: pasted.y + pasted.height / 2)
+        page.activeTool = .pen
+        page.focus(tool: .pen)
+        // This offscreen fixture does not take application focus from the user.
+        // Inspect its actual first-responder chain instead of NSApp's key window.
+        var pasteTarget: NSResponder? = window.firstResponder
+        while let target = pasteTarget, !target.responds(to: #selector(NSText.paste(_:))) {
+            pasteTarget = target.nextResponder
+        }
+        try check(window.firstResponder === page.inkView && pasteTarget === page,
+                  "Pen first-responder chain exposes the shared page Paste action")
+        try check(page.inputView(at: point, event: nil) === page.inkView
+                  && imageView.hitTest(point) == nil && !page.textView.isEditable,
+                  "image layer passes pointer input to ink without enabling native text")
+        page.activeTool = .text
+        page.textView.canPastePage = { true }
+        try check(page.textView.validateMenuItem(NSMenuItem(title: "Paste", action: #selector(NSText.paste(_:)), keyEquivalent: "v")),
+                  "native Text Paste menu remains enabled for supported page content")
+        try check(page.inputView(at: point, event: nil) === page.textView && page.textView.isEditable,
+                  "Text tool can type over the image on the same page")
+        page.theme = .dark; controller.onRender?(controller.content)
+        try check(controller.content.images == afterPaste.images && saved.images == afterPaste.images,
+                  "dark appearance preserves canonical image bytes and geometry")
+        page.theme = .light
+
+        page.activeTool = .select
+        let image = PageImage(x: 100, y: 200, width: 240, height: 120, imageData: normalized)
+        let ink = InkStroke(points: [InkPoint(x: 120, y: 230), InkPoint(x: 290, y: 230)], colorHex: "#0000FF", width: 5)
+        let mixed = PageContent(text: "Existing text", strokes: [ink], images: [image])
+        controller.history.removeAllActions(); controller.load(mixed); controller.onRender?(mixed)
+        controller.select(polygon: PageSelectionGeometry.rectangle(from: InkPoint(x: 90, y: 190), to: InkPoint(x: 350, y: 330)))
+        try check(controller.selection.images == [image.id] && controller.selection.strokes == [ink.id],
+                  "one rectangular selection includes an image and its ink annotation")
+        let payload = controller.clipboardPayload()
+        try check(payload?.images == [image] && payload?.strokes == [ink],
+                  "mixed clipboard payload preserves image and annotation together")
+        let moved = controller.translated(mixed, selection: controller.selection, dx: 45, dy: 60)
+        controller.commit(moved, action: "Move Selection")
+        try check(saved.images[0].x == image.x + 45 && saved.images[0].y == image.y + 60
+                  && saved.strokes[0].points[0].x == ink.points[0].x + 45,
+                  "image and annotation move using one shared displacement")
+        controller.history.undo()
+        try check(saved == mixed, "mixed image and ink movement undoes atomically")
+        controller.history.redo()
+        try check(saved == moved, "mixed image and ink movement redoes atomically")
+        controller.selection = MacPageSelection(images: [image.id])
+        let resized = controller.resizedImage(moved, id: image.id, width: 360)
+        controller.commit(resized, action: "Resize Image")
+        try check(saved.images[0].width == 360 && saved.images[0].height == 180 && saved.strokes == moved.strokes,
+                  "image resize preserves aspect ratio and leaves annotations independently editable")
+        controller.history.undo()
+        try check(saved == moved, "image resize undo restores original dimensions")
+        controller.perform(.delete)
+        try check(saved.images.isEmpty && saved.strokes == moved.strokes, "deleting an image preserves its independent ink annotations")
+        controller.history.undo()
+        try check(saved == moved, "image deletion undo restores exact image payload")
+        controller.selection = MacPageSelection(images: [image.id])
+        controller.perform(.duplicate)
+        try check(saved.images.count == 2 && saved.images[0].id != saved.images[1].id
+                  && saved.images[0].imageData == saved.images[1].imageData,
+                  "image duplication allocates an independent object and preserves bytes")
+
+        board.clearContents(); board.setData(tiff, forType: .tiff)
+        let countBeforeTIFF = controller.content.images.count
+        try check(controller.pasteImage(from: board) && saved.images.count == countBeforeTIFF + 1,
+                  "native TIFF clipboard input inserts a normalized image")
+        controller.history.removeAllActions()
+        let beforeDenied = controller.content, writesBeforeDenied = writes
+        controller.onValidate = { _ in false }
+        try check(controller.pasteImage(from: board) && controller.content == beforeDenied
+                  && writes == writesBeforeDenied && !controller.history.canUndo,
+                  "store-rejected image paste leaves page, persistence and undo unchanged")
+        controller.onValidate = nil
+
+        let retryBase = controller.content
+        var retryChange = retryBase
+        retryChange.images[0].x += 1
+        controller.commit(retryChange, action: "Move Image")
+        let retryUndoName = controller.history.undoActionName, writesBeforeUndoDenial = writes
+        controller.onValidate = { _ in false }
+        controller.history.undo()
+        try check(controller.content == retryChange && saved == retryChange && writes == writesBeforeUndoDenial
+                  && controller.history.canUndo && controller.history.undoActionName == retryUndoName,
+                  "rejected undo retains its original content, action name and retryable history")
+        controller.onValidate = nil
+        controller.history.undo()
+        try check(controller.content == retryBase && saved == retryBase,
+                  "undo can be retried after the store accepts changes again")
+        let retryRedoName = controller.history.redoActionName, writesBeforeRedoDenial = writes
+        controller.onValidate = { _ in false }
+        controller.history.redo()
+        try check(controller.content == retryBase && saved == retryBase && writes == writesBeforeRedoDenial
+                  && controller.history.canRedo && controller.history.redoActionName == retryRedoName,
+                  "rejected redo retains its original content, action name and retryable history")
+        controller.onValidate = nil
+        controller.history.redo()
+        try check(controller.content == retryChange && saved == retryChange,
+                  "redo can be retried after the store accepts changes again")
+
+        controller.history.removeAllActions()
+        let groupBase = controller.content
+        var groupFirst = groupBase
+        groupFirst.images[0].x += 1
+        var groupLast = groupFirst
+        groupLast.images[0].x += 1
+        controller.history.beginUndoGrouping()
+        controller.commit(groupFirst, action: "Grouped Image Changes")
+        controller.commit(groupLast, action: "Grouped Image Changes")
+        controller.history.endUndoGrouping()
+        let groupName = controller.history.undoActionName
+        controller.onValidate = { $0 != groupBase }
+        controller.history.undo()
+        try check(controller.content == groupLast && saved == groupLast && controller.history.canUndo
+                  && controller.history.undoActionName == groupName,
+                  "partial grouped undo failure restores the complete pre-undo page and retryable group")
+        controller.onValidate = nil
+        controller.history.undo()
+        try check(controller.content == groupBase && saved == groupBase,
+                  "repaired multi-change undo group retries to its original page")
+        controller.history.redo()
+        try check(controller.content == groupLast && saved == groupLast,
+                  "repaired multi-change group redoes all image changes")
+        controller.onValidate = { $0 != groupFirst }
+        controller.history.undo()
+        try check(controller.content == groupLast && saved == groupLast && controller.history.canUndo,
+                  "rejection of the first intermediate undo snapshot cannot apply later callbacks")
+        controller.onValidate = nil
+        controller.history.undo()
+        try check(controller.content == groupBase && saved == groupBase,
+                  "grouped undo retries after an intermediate snapshot becomes valid")
+        controller.onValidate = { $0 != groupFirst }
+        controller.history.redo()
+        try check(controller.content == groupBase && saved == groupBase && controller.history.canRedo,
+                  "rejection of the first intermediate redo snapshot leaves the group unchanged")
+        controller.onValidate = nil
+        controller.history.redo()
+        try check(controller.content == groupLast && saved == groupLast,
+                  "grouped redo retries after an intermediate snapshot becomes valid")
+
+        guard let exportedPNG = UnifiedPageExport.png(text: "", rtfData: nil, strokes: [ink], paper: .blank, images: [image]),
+              let exportedSource = CGImageSourceCreateWithData(exportedPNG as CFData, nil),
+              let exportedImage = CGImageSourceCreateImageAtIndex(exportedSource, 0, nil) else {
+            throw Failure(description: "Cannot export annotated image as PNG")
+        }
+        try exportedPNG.write(to: URL(fileURLWithPath: "/private/tmp/inotes-images-export.png"), options: .atomic)
+        let pngColors = try exportedColors(exportedImage)
+        try check(pngColors.red, "combined PNG export contains the actual image pixels")
+        try check(pngColors.blue, "combined PNG export contains ink annotations over the image")
+        let exportedPDF = UnifiedPageExport.pdf(text: "", rtfData: nil, strokes: [ink], paper: .blank, images: [image])
+        guard let pdfDocument = PDFDocument(data: exportedPDF), let pdfPage = pdfDocument.page(at: 0),
+              let pdfRaster = pdfPage.thumbnail(of: NSSize(width: 400, height: 550), for: .mediaBox).tiffRepresentation,
+              let pdfSource = CGImageSourceCreateWithData(pdfRaster as CFData, nil),
+              let pdfImage = CGImageSourceCreateImageAtIndex(pdfSource, 0, nil) else {
+            throw Failure(description: "Cannot rasterize annotated image PDF")
+        }
+        let pdfColors = try exportedColors(pdfImage)
+        try check(pdfColors.red, "combined PDF export contains the actual image pixels")
+        try check(pdfColors.blue, "combined PDF export contains ink annotations over the image")
+        return checks
+    }
+
 }
 #endif

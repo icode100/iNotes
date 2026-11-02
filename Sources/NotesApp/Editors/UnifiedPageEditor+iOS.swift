@@ -13,6 +13,7 @@ struct UnifiedPageEditor: UIViewRepresentable {
     @Binding var pencilKitData: Data?
     @Binding var textBoxes: [PageTextBox]
     @Binding var equations: [NoteEquation]
+    @Binding var images: [PageImage]
     var tool: InkTool = .pen
     var colorHex: String = "#314D43"
     var lineWidth: Double = InkNibPreset.defaultWidth(for: .pen)
@@ -25,22 +26,24 @@ struct UnifiedPageEditor: UIViewRepresentable {
     var onInkChange: (([InkStroke], Data?) -> Void)? = nil
     var onInputChange: ((String) -> Void)? = nil
     var onPageChange: ((PageContent) -> Void)? = nil
+    var onPageValidate: ((PageContent) -> Bool)? = nil
+    var onPageError: ((String) -> Void)? = nil
     var onEquationEdit: ((NoteEquation) -> Void)? = nil
 
     init(text: Binding<String>, rtfData: Binding<Data?>, strokes: Binding<[InkStroke]>, pencilKitData: Binding<Data?>,
-         textBoxes: Binding<[PageTextBox]> = .constant([]), equations: Binding<[NoteEquation]> = .constant([]),
+         textBoxes: Binding<[PageTextBox]> = .constant([]), equations: Binding<[NoteEquation]> = .constant([]), images: Binding<[PageImage]> = .constant([]),
          tool: InkTool = .pen, colorHex: String = "#314D43", lineWidth: Double? = nil,
          paper: InkPaper = .dotted, theme: PageTheme = .light,
          linePattern: LinePattern = .solid, pageTemplate: PageTemplate = .none, templateLinePattern: LinePattern = .solid,
          onTextChange: ((String, Data?) -> Void)? = nil, onInkChange: (([InkStroke], Data?) -> Void)? = nil,
          onInputChange: ((String) -> Void)? = nil, onPageChange: ((PageContent) -> Void)? = nil,
-         onEquationEdit: ((NoteEquation) -> Void)? = nil) {
+         onEquationEdit: ((NoteEquation) -> Void)? = nil, onPageValidate: ((PageContent) -> Bool)? = nil, onPageError: ((String) -> Void)? = nil) {
         _text = text; _rtfData = rtfData; _strokes = strokes; _pencilKitData = pencilKitData
-        _textBoxes = textBoxes; _equations = equations; self.tool = tool; self.colorHex = colorHex
+        _textBoxes = textBoxes; _equations = equations; _images = images; self.tool = tool; self.colorHex = colorHex
         self.lineWidth = lineWidth ?? InkNibPreset.defaultWidth(for: tool); self.paper = paper; self.theme = theme
         self.linePattern = linePattern; self.pageTemplate = pageTemplate; self.templateLinePattern = templateLinePattern
         self.onTextChange = onTextChange; self.onInkChange = onInkChange; self.onInputChange = onInputChange
-        self.onPageChange = onPageChange; self.onEquationEdit = onEquationEdit
+        self.onPageChange = onPageChange; self.onEquationEdit = onEquationEdit; self.onPageValidate = onPageValidate; self.onPageError = onPageError
     }
 
     func makeCoordinator() -> Coordinator { Coordinator(self) }
@@ -74,6 +77,7 @@ struct UnifiedPageEditor: UIViewRepresentable {
         private var isLoading = false
         private var nativeToolActive = false
         private var rejectedDrawing = false
+        private var showingImageWarning = false
         private var lastData: Data?
         private var lastStrokes: [InkStroke] = []
         private var expectedDrawingData: Data?
@@ -153,7 +157,7 @@ struct UnifiedPageEditor: UIViewRepresentable {
             view.page.layer.addSublayer(linePreview)
             view.page.onPencil = { [weak self, weak view] in
                 guard let self, let view else { return }
-                guard self.parent.tool != .text else { return }
+                guard self.parent.images.isEmpty, self.parent.tool != .text else { return }
                 self.parent.onInputChange?("Apple Pencil")
                 guard self.parent.tool != .select && self.parent.tool != .lasso else { return }
                 self.picker.setVisible(true, forFirstResponder: view.page.canvas)
@@ -169,15 +173,20 @@ struct UnifiedPageEditor: UIViewRepresentable {
             }
         }
 
-        func update(_ view: UnifiedPageScrollView, enabled: Bool) {
+        func update(_ view: UnifiedPageScrollView, enabled externalEnabled: Bool) {
+            // Image authoring is currently Mac-only. Keep every image byte in
+            // snapshots, but prevent edits against an incomplete iPad preview.
+            let enabled = externalEnabled && parent.images.isEmpty
             // A system appearance transition waits until the current Pencil
             // gesture completes, preserving in-flight native ink and pressure.
             let theme = nativeToolActive ? (appliedTheme ?? parent.theme) : parent.theme
             let incoming = PageContent(text: parent.text, rtfData: parent.rtfData, strokes: parent.strokes,
-                                       pencilKitData: parent.pencilKitData, textBoxes: parent.textBoxes, equations: parent.equations)
+                                       pencilKitData: parent.pencilKitData, textBoxes: parent.textBoxes, equations: parent.equations, images: parent.images)
             if !selection.hasPreview { selection.load(incoming) }
             let content = selection.displayedContent
-            selection.onEquationEdit = parent.onEquationEdit
+            selection.onEquationEdit = parent.images.isEmpty ? parent.onEquationEdit : nil
+            selection.onValidate = parent.onPageValidate
+            selection.onError = parent.onPageError
             richTextCoordinator.parent = RichTextEditor(text: parent.$text, rtfData: parent.$rtfData, theme: theme, onChange: { [weak self] text, rtf in
                 self?.publishText(text, rtf: rtf)
             })
@@ -185,7 +194,13 @@ struct UnifiedPageEditor: UIViewRepresentable {
             editor.undoManager?.levelsOfUndo = 50
             view.page.canvas.undoManager?.levelsOfUndo = 50
             editor.isEditable = enabled
-            view.isUserInteractionEnabled = enabled
+            view.isUserInteractionEnabled = externalEnabled
+            view.page.isUserInteractionEnabled = enabled
+            if !enabled {
+                view.page.endEditing(true)
+                picker.setVisible(false, forFirstResponder: view.page.canvas)
+                view.page.canvas.resignFirstResponder()
+            }
             view.page.textToolSelected = parent.tool == .text
             let selecting = parent.tool == .select || parent.tool == .lasso
             view.page.selectionEnabled = selecting
@@ -232,6 +247,14 @@ struct UnifiedPageEditor: UIViewRepresentable {
             lineGesture?.isEnabled = enabled && !rejectedDrawing && parent.tool == .line
             view.page.selectionView.isUserInteractionEnabled = enabled && selecting && !rejectedDrawing
             renderObjects(content, on: view, theme: theme, enabled: enabled)
+            if !content.images.isEmpty {
+                showingImageWarning = true
+                view.setInkError("This sheet contains images. Open it on Mac to view and annotate its images. Page editing is disabled on iPad; your saved content is preserved.")
+                view.panGestureRecognizer.minimumNumberOfTouches = 1
+            } else if showingImageWarning {
+                showingImageWarning = false
+                view.setInkError(rejectedDrawing ? "This sheet contains unsupported ink and cannot be edited safely. Its saved drawing has been preserved." : nil)
+            }
             view.resizePage()
             linePreview.frame = view.page.bounds
             if previousTool != parent.tool {
@@ -241,7 +264,7 @@ struct UnifiedPageEditor: UIViewRepresentable {
         }
 
         private func focus(_ tool: InkTool, in view: UnifiedPageScrollView) {
-            guard view.isUserInteractionEnabled else { return }
+            guard view.isUserInteractionEnabled, parent.images.isEmpty else { return }
             guard view.window != nil else { pendingFocus = tool; return }
             pendingFocus = nil
             let page = view.page
@@ -308,7 +331,7 @@ struct UnifiedPageEditor: UIViewRepresentable {
         }
 
         private func showToolsIfNeeded() {
-            guard let view, view.window != nil, view.isUserInteractionEnabled,
+            guard parent.images.isEmpty, let view, view.window != nil, view.isUserInteractionEnabled,
                   parent.tool != .text && parent.tool != .select && parent.tool != .lasso else { return }
             picker.setVisible(true, forFirstResponder: view.page.canvas)
             view.page.canvas.becomeFirstResponder()
@@ -426,7 +449,7 @@ struct UnifiedPageEditor: UIViewRepresentable {
         }
 
         private func persistInk(_ canvas: PKCanvasView) {
-            guard !isLoading, !rejectedDrawing else { return }
+            guard parent.images.isEmpty, !isLoading, !rejectedDrawing else { return }
             #if DEBUG
             guard !isRunningDiagnostics else { return }
             #endif
@@ -465,6 +488,7 @@ struct UnifiedPageEditor: UIViewRepresentable {
         }
 
         private func publishText(_ text: String, rtf: Data?) {
+            guard parent.images.isEmpty else { return }
             var content = selection.content
             content.text = text; content.rtfData = rtf
             selection.load(content)
@@ -474,13 +498,14 @@ struct UnifiedPageEditor: UIViewRepresentable {
         }
 
         private func publishPage(_ content: PageContent) {
+            guard parent.images.isEmpty, content.images.isEmpty else { return }
             if let onPageChange = parent.onPageChange { onPageChange(content) }
             else {
                 if let onTextChange = parent.onTextChange { onTextChange(content.text, content.rtfData) }
                 else { parent.text = content.text; parent.rtfData = content.rtfData }
                 if let onInkChange = parent.onInkChange { onInkChange(content.strokes, content.pencilKitData) }
                 else { parent.strokes = content.strokes; parent.pencilKitData = content.pencilKitData }
-                parent.textBoxes = content.textBoxes; parent.equations = content.equations
+                parent.textBoxes = content.textBoxes; parent.equations = content.equations; parent.images = content.images
             }
         }
 
@@ -508,7 +533,7 @@ struct UnifiedPageEditor: UIViewRepresentable {
                 show(canonicalDrawing: canonical, on: view.page.canvas, theme: theme)
                 lastData = content.pencilKitData; lastStrokes = content.strokes
             }
-            renderObjects(content, on: view, theme: theme, enabled: view.isUserInteractionEnabled)
+            renderObjects(content, on: view, theme: theme, enabled: view.page.isUserInteractionEnabled)
             view.resizePage()
             view.page.selectionView.setNeedsDisplay()
         }
@@ -523,7 +548,7 @@ struct UnifiedPageEditor: UIViewRepresentable {
                 if page.textBoxViews[box.id] == nil { page.textBoxViews[box.id] = object; page.insertSubview(object, belowSubview: page.canvas) }
                 object.configure(box: box, theme: theme, editable: enabled && parent.tool == .text, paper: parent.paper)
                 object.onChange = { [weak self, weak view] changed in
-                    guard let self, let view, let index = self.selection.content.textBoxes.firstIndex(where: { $0.id == changed.id }) else { return }
+                    guard let self, self.parent.images.isEmpty, let view, let index = self.selection.content.textBoxes.firstIndex(where: { $0.id == changed.id }) else { return }
                     var value = self.selection.content
                     guard value.textBoxes[index] != changed else { return }
                     value.textBoxes[index] = changed
