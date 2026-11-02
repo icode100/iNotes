@@ -1,5 +1,96 @@
 # Validation
 
+## Backup-retention release preparation, build 2014 — 2 November 2026
+
+The user authorized publishing a same-version v1.0.4 rebuild. Public build 2012
+and release-workflow counter 11 were rechecked; QA build 2013 is also reserved.
+Defaults now use 2014 and the release offset is `2002 + GITHUB_RUN_NUMBER`, so
+the next new workflow run (12) produces 2014 and run 13 produces 2015.
+
+A prepublication source review found a historical-recovery edge case: an
+unverified corrupt daily/weekly representative could displace a valid older
+copy. Retention now verifies all selected recovery representatives before
+deleting alternatives, replans around corrupt files, and stops cleanup if its
+verification budget is exhausted. All retained identities are rechecked during
+cleanup. Legacy cleanup also stops if a protected older copy changes mid-run.
+Three regressions cover these cases, including actual partial-removal reporting.
+
+Final local verification on the same CLT/macOS environment as below:
+
+- `bash scripts/test.sh` with native coordination access: **111 tests, zero
+  failures, 2.99 seconds**. Log: `/private/tmp/inotes-backups-core-final.log`.
+- SwiftPM Debug Mac build passed. Log:
+  `/private/tmp/inotes-backups-build-final.log`.
+- A separate temporary release-check app passed the store/hierarchy/backup
+  `--smoke-test`, including 16 updater configuration checks. Import of 49,127
+  nodes took 1.433 seconds; folder query took 0.044 seconds. Log:
+  `/private/tmp/inotes-backups-native-final.log`.
+- Release workflow YAML parsed using Ruby; rebuild shell syntax and
+  `git diff --check` passed.
+
+The rebuild workflow requires the full reviewed source SHA and refuses moved
+branches or reused installer names. It preserves the original tag/installer,
+uploads and verifies public installer bytes before replacing the signed feed
+last, and attempts to restore original feed bytes if replacement fails.
+Hosted and public-asset results will be recorded separately. No additional
+manual QA, cloud-delivery or physical-device pass is claimed from publication
+authorization alone. The previously opened QA app was left unchanged.
+
+## Bounded backup retention candidate — 2 November 2026
+
+Working tree based on `f997376`; this is an unpublished v1.0.4 rebuild candidate.
+Automatic backups and Back up now now share owner-isolated history with the
+latest 5, up to 7 UTC daily and 4 UTC weekly recovery points, capped at 500 MiB
+where files can be safely removed. The current archive is read back and verified
+before pruning; the newest two valid copies remain. Identical snapshots are
+skipped. Legacy backups are reviewed and explicitly selected in bounded batches,
+with directory/file identity and content revalidation before deletion. Independent
+exports, other owners and unknown/corrupt files are preserved. No portable archive
+schema, local save cadence, editor/input behavior or dependencies changed.
+
+Verified with Swift 6.4.2 Command Line Tools on macOS 27.2 (26B123):
+
+- `bash scripts/test.sh`: 108 standalone tests, zero failures, 2.76 seconds.
+  The 24 new tests cover retention calendars and byte budgets, ownership,
+  duplicates, rapid writes and clock rollback, failed verification, corruption,
+  cleanup failure/retry, changed files/directories, symbolic links, multibyte
+  filenames, protected legacy recovery copies and repeatable bounded cleanup.
+  Native file-coordination access is required on this host; the sandboxed run
+  encountered the existing NSFileCoordinator restriction. The first native run
+  exposed a test-only `/var` versus `/private/var` URL equality issue; the assertion
+  now compares canonical paths while still checking exact directory contents
+  and unchanged bytes. Log: `/private/tmp/inotes-backups-core-canonical.log`.
+- SwiftPM Debug Mac build passed with module caches under `.build`, the native
+  build system and `--disable-sandbox --jobs 4`. Existing workspace concurrency
+  and deprecated build-system warnings remain. Log:
+  `/private/tmp/inotes-backups-build.log`.
+- The isolated, ad hoc signed Backup QA app passed `--smoke-test`: store/autosave,
+  reopen/import, quit and failed-save protection, 16 updater configuration checks,
+  hierarchy regressions, independent backup destinations, persistent owner identity,
+  duplicate suppression, bounded rotation, latest content, failure/retry and
+  disconnect. The 49,127-node import took 1.438 seconds; query took 0.043 seconds.
+  Log: `/private/tmp/inotes-backups-native.log`.
+- Strict ad hoc bundle signature verification and `git diff --check` passed.
+  QA setup created only disposable data: 24 legacy copies, five managed copies
+  after 12 distinct writes, and one permanent example export. The QA app was
+  opened for user testing; visual/manual cleanup confirmation is still pending.
+
+The QA app is `/private/tmp/inotes-backup-rotation-qa/iNotes Backup QA.app`, with
+separate identity `io.inotes.backup-qa-20261102`, marketing version 1.0.4 and QA
+build 2013. It uses a temporary library and a local sample backup folder, not
+production notes or connected cloud destinations. Its executable is 9,875,440
+bytes, SHA-256 `23ebd809d3aec3fbb05e2c21febd4cc751ae1825be6c79bbc68b66191b04d328`;
+the app contains 39,333,783 regular-file bytes. These are Debug QA sizes, not
+release-installer size or RAM usage.
+
+`bash scripts/build-macos.sh` stopped at the missing Xcode `actool` preflight.
+The documented iPad simulator command also stopped because `xcodebuild` requires
+full Xcode. No new release DMG, signed appcast, public asset or iPad SDK result is
+claimed. Native editor/cursor checks were not repeated for this backup-only patch;
+no UI automation was used. Real provider upload/deletion propagation is untested.
+Recheck the public feed and release counter before assigning/publishing the new
+build; preserve the existing v1.0.4 tag and build-2012 installer.
+
 ## Published v1.0.4 / build 2012 — 2 November 2026
 
 Released source [`d733841`](https://github.com/icode100/iNotes/commit/d7338419042a4512c569af992ab2384fc088762d)

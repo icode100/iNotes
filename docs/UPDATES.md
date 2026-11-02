@@ -42,7 +42,7 @@ does not publish a release.
 ## Build and sign a local update
 
 ```sh
-VERSION=1.0.4 BUILD_NUMBER=2012 bash scripts/build-macos.sh
+VERSION=1.0.4 BUILD_NUMBER=2014 bash scripts/build-macos.sh
 VERSION=1.0.4 bash scripts/verify-macos.sh
 VERSION=1.0.4 bash scripts/generate-appcast.sh
 VERSION=1.0.4 bash scripts/test-update-signatures.sh
@@ -54,9 +54,10 @@ using Apple CryptoKit and the committed public key. It does not upload anything.
 For v1.0.3, the security rebuild 2011 exceeds the initial public build 2010 and
 shared local builds 1010–1012. Check both published and shared `CFBundleVersion`
 values and use a larger number for every update, including same-version rebuilds.
-Development defaults (`1.0.4`, build 2012) are separate from the release workflow's
-`2001 + GITHUB_RUN_NUMBER`. The offset reserves manual build 2011 after workflow
-run 10 produced 2010; run 11 published v1.0.4 build 2012, and the next new run (12) will produce 2013.
+Development defaults (`1.0.4`, build 2014) are separate from the release workflow's
+`2002 + GITHUB_RUN_NUMBER`. Run 11 published v1.0.4 build 2012; isolated backup QA
+used build 2013. New run 12 publishes the same-version rebuild as 2014, and run 13
+must produce 2015 or higher. This reserves both the original installer and QA slot.
 The feed points to the matching `v1.0.4` release's DMG. Never edit a signed appcast
 after generation. Re-run the script if its contents change. The last command
 checks valid signatures and rejects changed feeds, unsigned feeds, changed
@@ -81,28 +82,34 @@ After reviewing the source and configuring the secret, push a tag such as
 ARM64 DMG, verifies the mounted bundle, signs and independently verifies the
 appcast, then publishes the DMG, SHA-256 checksum, and `appcast.xml` as GitHub
 Release assets. Its token has repository-contents write permission only in the
-release job. Build numbers use `2001 + GITHUB_RUN_NUMBER`; keep this workflow's
+release job. Build numbers use `2002 + GITHUB_RUN_NUMBER`; keep this workflow's
 counter and publish versions in ascending order. A missing key fails the workflow
 before publication. The normal CI workflow does not publish releases.
 
 ### Rebuild an existing visible version
 
-The tag-triggered workflow creates new releases; it does not replace an existing
-release. Do not delete or force-move a published tag, and do not rerun its workflow
-to obtain a higher build number (`GITHUB_RUN_NUMBER` does not advance on a rerun).
-For the explicitly authorized v1.0.3 rebuild, use build 2011 and a distinct asset
-name, `iNotes-1.0.3-build2011-arm64.dmg`. The original v1.0.3 tag and original DMG
-continue to identify build 2010. The release notes must identify the new source
-commit and build separately.
+The tag-triggered workflow creates new releases. For an explicitly authorized
+same-version rebuild, dispatch **Signed macOS release** on the reviewed source
+commit with the existing version (for example, `1.0.4`) and its full source commit
+SHA. The workflow refuses a branch that moved after review. It preserves the original
+tag and installers and publishes a distinct build-numbered DMG/checksum. Do not
+delete or force-move a published tag. Start a new workflow dispatch instead of
+rerunning an attempt; the counter must advance for a changed binary.
 
-Run all checks against the final higher-build app. Copy the final DMG to its
-build-numbered filename, create a matching checksum, and pass that filename to
-`generate-appcast.sh` and `test-update-signatures.sh`. Upload the new DMG/checksum
-and verify the downloaded public bytes before replacing `appcast.xml` last.
-Keeping the original DMG lets cached old feeds finish safely. Verify the public
-feed signatures, enclosure, app version/build, and mounted installer after upload.
-Recheck the latest public build and workflow counter immediately before publishing;
-reserve manual build numbers in the offset so future tag releases remain newer.
+The workflow checks that this is the current stable release and that its new
+build number exceeds the public appcast. It runs the build, runtime and signature
+checks, uploads the distinct installer/checksum without replacing old assets,
+and verifies their downloaded public bytes. It records the new source commit
+and build in the release notes, then replaces the signed appcast last and verifies
+both versioned and latest public feeds. A changed live feed or existing installer
+name stops publication. Failed feed replacement attempts to restore the original
+signed feed bytes. All checks must still be independently confirmed after release.
+
+Full iPad compilation runs in Native checks on source pushes; wait for that exact
+commit to pass before dispatching publication. Recheck the public feed and release
+counter immediately before publishing. Retain earlier installers so cached feeds
+can finish safely. The original version tag continues to identify the original
+build, while the rebuild's source commit is recorded in the release notes.
 
 The workflow currently uses ad hoc Apple code signing. Ed25519 establishes update
 authenticity; Developer ID signing and notarization are separate requirements for

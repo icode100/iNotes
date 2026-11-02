@@ -26,6 +26,7 @@ final class NotesStore: ObservableObject {
     @Published var recoveryAvailable = false
     private let repository: LibraryRepository
     private let preferences: UserDefaults
+    private let backupOwnerID: UUID
     let libraryURL: URL
     private var saveTask: Task<Void, Never>?
     private var backupTasks: [BackupDestination: Task<Void, Never>] = [:]
@@ -49,6 +50,16 @@ final class NotesStore: ObservableObject {
                 .appendingPathComponent("iNotes", isDirectory: true)
         }
         libraryURL = base.appendingPathComponent("Library.json")
+        // A separate identity per local library keeps QA libraries and other
+        // installations from rotating each other's history in a shared folder.
+        let ownerKey = "backup.owner.\(libraryURL.standardizedFileURL.path)"
+        if let value = preferences.string(forKey: ownerKey), let existing = UUID(uuidString: value) {
+            backupOwnerID = existing
+        } else {
+            let created = UUID()
+            backupOwnerID = created
+            preferences.set(created.uuidString, forKey: ownerKey)
+        }
         repository = LibraryRepository(url: libraryURL)
         do {
             if let saved = try repository.load() {
@@ -289,24 +300,65 @@ final class NotesStore: ObservableObject {
         performBackup(to: destination, reportFailure: true)
     }
 
-    private func performBackup(to destination: BackupDestination, reportFailure: Bool) {
-        guard let folder = backupFolder(for: destination) else { return }
+    @discardableResult
+    private func performBackup(to destination: BackupDestination, reportFailure: Bool) -> ManagedBackupResult? {
+        guard let folder = backupFolder(for: destination) else { return nil }
         do {
-            try BackupArchiveWriter.write(archiveData(), to: folder)
+            let result = try ManagedBackupWriter.write(archiveData(), to: folder, ownerID: backupOwnerID)
             let now = Date()
             if destination == .googleDrive { lastBackup = now } else { lastICloudBackup = now }
             preferences.set(now, forKey: destination.lastBackupKey)
             backupNeedsWrite.remove(destination)
             backupRetryAfter.removeValue(forKey: destination)
-            backupStatuses[destination] = "Backup saved to folder. \(destination.title) handles uploading."
+            let history = result.cleanupWarning == nil
+                ? "\(result.retainedCount) managed backups · \(ByteCountFormatter.string(fromByteCount: result.retainedBytes, countStyle: .file)). " : ""
+            backupStatuses[destination] = (result.didWrite ? "Backup saved to folder. " : "Backup already current. ")
+                + history + "\(destination.title) handles uploading."
+                + (result.cleanupWarning.map { " Cleanup needs attention: \($0)" } ?? "")
                 + (backupSessionOnly.contains(destination) ? " Reconnect after restarting iNotes." : "")
+            return result
         } catch {
             backupNeedsWrite.insert(destination)
             backupRetryAfter[destination] = Date().addingTimeInterval(BackupSchedule.minimumInterval)
             backupStatuses[destination] = "Backup failed; retrying in 1 minute. Your notes remain on this device."
             if reportFailure { errorMessage = "The \(destination.title) folder backup failed. Your notes remain in iNotes. \(error.localizedDescription)" }
             scheduleBackups()
+            return nil
         }
+    }
+
+    func managedBackupDirectory(for destination: BackupDestination) -> URL? {
+        backupFolder(for: destination).map { ManagedBackupWriter.directory(in: $0, ownerID: backupOwnerID) }
+    }
+
+    func previewOlderBackups(for destination: BackupDestination) async throws -> LegacyBackupPreview {
+        guard let folder = backupFolder(for: destination) else {
+            throw LibraryError.invalidData("Reconnect the backup folder before reviewing older copies.")
+        }
+        let access = backupAccesses[destination]
+        return try await Task.detached(priority: .utility) {
+            try withExtendedLifetime(access) { try LegacyBackupCleanup.preview(in: folder) }
+        }.value
+    }
+
+    func removeOlderBackups(_ ids: Set<String>, from preview: LegacyBackupPreview,
+                           destination: BackupDestination) async throws -> LegacyBackupCleanupResult {
+        guard let folder = backupFolder(for: destination),
+              folder.standardizedFileURL == preview.folderURL.standardizedFileURL else {
+            throw LibraryError.invalidData("The backup folder changed. Review its older backups again.")
+        }
+        // A current, read-back-verified copy must exist before the user's
+        // explicit legacy cleanup. Local notes and manual exports are untouched.
+        backupTasks.removeValue(forKey: destination)?.cancel()
+        guard let current = performBackup(to: destination, reportFailure: false) else {
+            throw LibraryError.invalidData("A current backup could not be verified. Older copies were kept. \(backupStatus(for: destination))")
+        }
+        let access = backupAccesses[destination]
+        return try await Task.detached(priority: .utility) {
+            try withExtendedLifetime(access) {
+                try LegacyBackupCleanup.remove(ids, from: preview, verifiedBackupURL: current.url)
+            }
+        }.value
     }
 
     private func scheduleBackups() {
@@ -445,12 +497,17 @@ enum BackupDiagnostics {
         }
         let restored = NotesStore(directory: root.appendingPathComponent("Library"), preferences: preferences)
         try require(restored.driveFolder?.resolvingSymlinksInPath() == google.resolvingSymlinksInPath() && restored.iCloudFolder?.resolvingSymlinksInPath() == cloud.resolvingSymlinksInPath(), "Both folder bookmarks reopen after restarting")
+        guard let googleDirectory = store.managedBackupDirectory(for: .googleDrive),
+              let cloudDirectory = store.managedBackupDirectory(for: .iCloudDrive) else { throw LibraryError.nodeNotFound }
+        try require(restored.managedBackupDirectory(for: .googleDrive)?.resolvingSymlinksInPath() == googleDirectory.resolvingSymlinksInPath(), "Managed history ownership persists after restarting")
+        store.backupNow(to: .googleDrive)
+        try require(try FileManager.default.contentsOfDirectory(at: googleDirectory, includingPropertiesForKeys: nil).count == 1, "Repeated Back up now skips an identical archive")
         guard let sheet = store.selectedSheet else { throw LibraryError.nodeNotFound }
         store.iCloudFolder = root.appendingPathComponent("Unavailable")
         store.update(sheet.id) { $0.body += "\nAutomatic Google backup survives an unavailable iCloud folder." }
         try require(store.prepareForQuit(), "An unavailable backup destination does not prevent a successful local quit save")
-        let googleFiles = try FileManager.default.contentsOfDirectory(at: google.appendingPathComponent("iNotes Backups"), includingPropertiesForKeys: nil)
-        let cloudFiles = try FileManager.default.contentsOfDirectory(at: cloud.appendingPathComponent("iNotes Backups"), includingPropertiesForKeys: nil)
+        let googleFiles = try FileManager.default.contentsOfDirectory(at: googleDirectory, includingPropertiesForKeys: nil)
+        let cloudFiles = try FileManager.default.contentsOfDirectory(at: cloudDirectory, includingPropertiesForKeys: nil)
         try require(googleFiles.count == 2 && cloudFiles.count == 1, "Google receives the changed backup independently of iCloud failure")
         try require(store.backupStatus(for: .iCloudDrive).contains("retrying"), "A failed target advertises its automatic retry")
         // Filenames may share a timestamp; find the completed archive by content.
@@ -459,12 +516,20 @@ enum BackupDiagnostics {
         store.iCloudFolder = cloud
         store.backupNow(to: .iCloudDrive)
         try require(store.backupStatus(for: .iCloudDrive).contains("saved to folder"), "A repaired destination can retry without discarding notes")
+        for index in 0..<9 {
+            store.update(sheet.id) { $0.body = "Rotating backup revision \(index)" }
+            store.backupNow(to: .googleDrive)
+        }
+        let rotated = try FileManager.default.contentsOfDirectory(at: googleDirectory, includingPropertiesForKeys: nil)
+        try require(rotated.count == 5, "A burst of same-day edits retains only the five most recent managed archives")
+        try require(try rotated.contains { try LibraryArchive.decode(LibraryArchive.read(from: $0)).node(id: sheet.id)?.body == "Rotating backup revision 8" }, "Rotation preserves the newest complete notes")
+        try require(try FileManager.default.contentsOfDirectory(at: cloudDirectory, includingPropertiesForKeys: nil).count == 2, "Rotating Google history does not prune iCloud history")
         store.disconnectDrive()
         try require(store.driveFolder == nil && store.iCloudFolder == cloud && preferences.data(forKey: BackupDestination.iCloudDrive.bookmarkKey) != nil, "Disconnecting Google preserves iCloud connection and permission")
         store.disconnectBackup(.iCloudDrive)
         restored.disconnectDrive()
         restored.disconnectBackup(.iCloudDrive)
-        return "Backup integration checks passed: independent destinations, bookmarks/relaunch, auto-backup on quit, Google fallback, failed-target retry, complete latest archive, independent disconnect"
+        return "Backup integration checks passed: independent destinations, bookmarks/ownership on relaunch, duplicate suppression, bounded rotation, latest content, auto-backup on quit, Google fallback, failed-target retry, independent disconnect"
     }
 }
 #endif

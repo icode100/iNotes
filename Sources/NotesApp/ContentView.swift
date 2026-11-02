@@ -43,6 +43,7 @@ struct ContentView: View {
     @ViewState private var nameRequest: NameRequest?
     @ViewState private var showImporter = false
     @ViewState private var backupFolderDestination: BackupDestination?
+    @ViewState private var backupCleanupDestination: BackupDestination?
     @ViewState private var showExporter = false
     @ViewState private var exportDocument = BackupDocument()
     @ViewState private var showSettings = false
@@ -132,6 +133,7 @@ struct ContentView: View {
                             Button(store.backupFolder(for: destination) == nil ? "Connect folder…" : "Change folder…") { chooseBackupFolder(destination) }
                             if store.backupFolder(for: destination) != nil {
                                 Button("Back up now") { store.backupNow(to: destination) }
+                                Button("Review older backups…") { backupCleanupDestination = destination }
                                 Button("Disconnect folder") { store.disconnectBackup(destination) }
                             }
                         } label: { Label(destination.title, systemImage: destination.symbol) }
@@ -157,6 +159,9 @@ struct ContentView: View {
             }
         }
         .sheet(isPresented: $showSettings) { StorageInfoView() }
+        .sheet(item: $backupCleanupDestination) { destination in
+            BackupCleanupView(destination: destination)
+        }
         .confirmationDialog("Restore the previous local version?", isPresented: $showRecovery, titleVisibility: .visible) {
             Button("Restore Previous Version") { store.recoverPreviousVersion() }
         } message: { Text("The damaged library will be preserved in a separate file before the previous version is restored.") }
@@ -486,7 +491,9 @@ struct StorageInfoView: View {
     @EnvironmentObject private var store: NotesStore
     @Environment(\.dismiss) private var dismiss
     var body: some View {
-        VStack(alignment: .leading, spacing: 18) {
+        VStack(spacing: 18) {
+            ScrollView {
+                VStack(alignment: .leading, spacing: 18) {
             Label("Your notes, close to home", systemImage: "externaldrive.badge.checkmark").font(.title2.weight(.semibold))
             Text("iNotes saves automatically on this device. Local saves keep a previous version for recovery. Export a library backup to keep an independent copy.")
             ForEach([BackupDestination.iCloudDrive, .googleDrive]) { destination in
@@ -501,12 +508,114 @@ struct StorageInfoView: View {
             #else
             Text("Use Automatic backups in the toolbar, choose a service, then select its folder in Files. Enable iCloud Drive or the Google Drive Files location first. Automatic backups start after connecting; Google Drive continues independently when iCloud Drive is unavailable. Some providers may ask you to reconnect their folder after restarting.")
             #endif
-            Text("After changes, iNotes writes complete, versioned backups at most once per minute and on normal quit. Failed folder writes retry while iNotes is open. The provider handles cloud uploads; a successful folder write does not confirm upload. Existing backups are never removed automatically.").font(.callout)
+            Text("After changes, iNotes backs up at most once per minute and on normal quit, skipping identical copies. Automatic backups and Back up now share a rotating history: the latest 5 copies, up to 7 daily and 4 weekly copies, targeting 500 MiB per local library and destination. Older history is removed only after a current copy is verified; the newest two valid copies are kept. Files that cannot be safely removed are kept with a warning and may leave history above this budget. Export a library backup to keep a permanent copy.").font(.callout)
+            Text("Backups from earlier versions stay untouched until you select Review older backups in the destination menu. Failed writes retry independently. The provider handles uploads; a successful folder write does not confirm cloud delivery.").font(.callout)
             Text("To transfer notes between devices, import an .inotes backup. Import adds a separate copy with new identifiers. Backups do not merge concurrent edits automatically.").font(.callout)
             Text("Attachments are embedded in the portable archive. The library limit is 64 MiB; individual attachments are limited to 10 MiB. Text and ink share one page. Rich text, paper style, portable pen paths, and native PencilKit data are preserved; advanced PencilKit tools can look different on Mac.").font(.caption).foregroundStyle(.secondary)
             Text("iNotes \(Bundle.main.object(forInfoDictionaryKey: "CFBundleShortVersionString") as? String ?? "Development") · Open source under the MIT license")
                 .font(.caption).foregroundStyle(.secondary)
+                }
+            }
             HStack { Spacer(); Button("Done") { dismiss() }.keyboardShortcut(.defaultAction) }
-        }.padding(28).frame(maxWidth: 520)
+        }.padding(28).frame(maxWidth: 520, idealHeight: 620)
+    }
+}
+
+struct BackupCleanupView: View {
+    let destination: BackupDestination
+    @EnvironmentObject private var store: NotesStore
+    @Environment(\.dismiss) private var dismiss
+    @ViewState private var preview: LegacyBackupPreview?
+    @ViewState private var selected = Set<String>()
+    @ViewState private var isBusy = false
+    @ViewState private var showConfirmation = false
+    @ViewState private var errorMessage: String?
+    @ViewState private var resultMessage: String?
+
+    private var selectedBytes: Int64 {
+        preview?.entries.filter { selected.contains($0.id) }.reduce(0) { $0 + $1.byteCount } ?? 0
+    }
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 14) {
+            Text("Review older backups").font(.title2.weight(.semibold))
+            Text("\(destination.title) · \(preview?.folderURL.lastPathComponent ?? store.backupFolder(for: destination)?.lastPathComponent ?? "Backup folder")")
+                .font(.headline)
+            Text("These copies were made before automatic rotation. They may include manual backups or copies from another device. Select only copies you no longer need. The two newest valid copies are kept for recovery.")
+                .font(.callout)
+            if isBusy { ProgressView("Checking backups…").controlSize(.small) }
+            if let warning = preview?.warning { Text(warning).font(.callout).foregroundStyle(.orange) }
+            if let errorMessage { Text(errorMessage).font(.callout).foregroundStyle(.red).textSelection(.enabled) }
+            if let resultMessage { Text(resultMessage).font(.callout) }
+            if let preview {
+                if preview.entries.isEmpty {
+                    Text("No older backup copies were found. New automatic backups rotate on their own.")
+                        .foregroundStyle(.secondary).frame(maxWidth: .infinity, minHeight: 120)
+                } else {
+                    List(preview.entries) { entry in
+                        Toggle(isOn: Binding(get: { selected.contains(entry.id) }, set: { value in
+                            if value && entry.canDelete { selected.insert(entry.id) }
+                            else { selected.remove(entry.id) }
+                        })) {
+                            VStack(alignment: .leading, spacing: 3) {
+                                HStack {
+                                    Text(entry.date, format: .dateTime.year().month().day().hour().minute())
+                                    Spacer()
+                                    Text(ByteCountFormatter.string(fromByteCount: entry.byteCount, countStyle: .file))
+                                }
+                                Text(entry.fileName).font(.caption).foregroundStyle(.secondary).lineLimit(1).help(entry.fileName)
+                                if !entry.canDelete { Text("Kept for recovery").font(.caption).foregroundStyle(.secondary) }
+                            }
+                        }
+                        #if os(macOS)
+                        .toggleStyle(.checkbox)
+                        #endif
+                        .disabled(!entry.canDelete || isBusy)
+                    }.frame(minHeight: 220, idealHeight: 300)
+                    HStack {
+                        Button("Select eligible copies") { selected = Set(preview.entries.filter(\.canDelete).map(\.id)) }
+                        Button("Clear selection") { selected.removeAll() }
+                    }.disabled(isBusy)
+                }
+            }
+            HStack {
+                Text("\(selected.count) selected · \(ByteCountFormatter.string(fromByteCount: selectedBytes, countStyle: .file))")
+                    .font(.callout).foregroundStyle(.secondary)
+                Spacer()
+                Button("Done") { dismiss() }.keyboardShortcut(.cancelAction).disabled(isBusy)
+                Button("Delete selected…", role: .destructive) { showConfirmation = true }
+                    .disabled(selected.isEmpty || isBusy)
+            }
+        }
+        .padding(24).frame(minWidth: 480, idealWidth: 640)
+        .interactiveDismissDisabled(isBusy)
+        .task { await reload() }
+        .confirmationDialog("Permanently delete \(selected.count) older backups?", isPresented: $showConfirmation, titleVisibility: .visible) {
+            Button("Delete selected backups", role: .destructive) { Task { await removeSelected() } }
+        } message: {
+            Text("This removes \(ByteCountFormatter.string(fromByteCount: selectedBytes, countStyle: .file)) from the backup folder. Your cloud provider may sync these deletions to other devices. A current backup will be verified first. Your open notes are unchanged.")
+        }
+    }
+
+    @MainActor private func reload() async {
+        isBusy = true
+        defer { isBusy = false }
+        selected.removeAll()
+        preview = nil
+        do { preview = try await store.previewOlderBackups(for: destination) }
+        catch { errorMessage = error.localizedDescription }
+    }
+
+    @MainActor private func removeSelected() async {
+        guard let preview, !selected.isEmpty else { return }
+        isBusy = true
+        errorMessage = nil
+        resultMessage = nil
+        do {
+            let result = try await store.removeOlderBackups(selected, from: preview, destination: destination)
+            resultMessage = "Removed \(result.removedCount) older backups (\(ByteCountFormatter.string(fromByteCount: result.removedBytes, countStyle: .file)))."
+            if let warning = result.warning { errorMessage = warning }
+        } catch { errorMessage = error.localizedDescription }
+        await reload()
     }
 }

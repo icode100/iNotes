@@ -81,10 +81,27 @@ Open `iNotes.xcodeproj` in full Xcode, select the **iNotes-iPad** scheme, set yo
 
 1. Enable iCloud Drive or install and sign into Google Drive for desktop. On iPad, enable the provider's location in Files.
 2. In iNotes, open **Automatic backups**, choose **iCloud Drive** or **Google Drive**, and select **Connect folder…**. Choose a folder belonging to that provider. Connect each destination separately if you want both.
-3. iNotes writes timestamped `.inotes` archives inside an `iNotes Backups` subfolder. After edits, automatic backups occur at most once per minute; **Back up now** writes immediately. A failed destination retries while the app remains open. Google backups continue independently when the iCloud destination fails.
+3. iNotes writes timestamped `.inotes` archives inside an `iNotes Backups/Automatic-…` subfolder belonging to this local library. After edits, automatic backups occur at most once per minute; **Back up now** runs immediately. Identical copies are skipped. A failed destination retries while the app remains open. Google backups continue independently when the iCloud destination fails.
 4. The cloud provider handles uploading. To bring notes to another device, import a completed backup; import adds a separate notebook copy. Some iPad providers may require reconnecting their folder after restarting.
 
-Backups are retained until you remove them. A successful folder write confirms a local/provider write; it does not confirm a completed cloud upload. The app does not use CloudKit or automatically merge edits from multiple devices. A connected folder can also be on a local or external drive. Google documents [Finder access and offline behavior](https://support.google.com/drive/answer/13401938?hl=en).
+Automatic backups and **Back up now** use a rotating history: the latest 5 copies,
+up to one per UTC day for 7 days and one per UTC week for 4 weeks (at most 16
+distinct copies), within a 500 MiB budget per local library and destination.
+The budget removes older recovery points first. Cleanup runs only after a current
+archive is read back and verified, and keeps the two newest valid copies. Files
+that cannot be safely checked or removed are kept with a warning; these can leave
+the folder above its budget. Other installations' history and unrecognized files
+are excluded. **Export library backup…** creates an independent permanent copy.
+
+Backups made by earlier versions stay in the original `iNotes Backups` folder.
+Choose **Automatic backups → [destination] → Review older backups…** to inspect
+their dates and sizes, select unwanted copies and confirm deletion. These older
+files may include manual or other-device backups; none are selected automatically.
+The two newest valid older copies are protected, and a current managed backup is
+verified before cleanup. Large folders are reviewed in bounded batches. Deletions
+may also be synchronized by the cloud provider.
+
+A successful folder write confirms a local/provider write; it does not confirm a completed cloud upload. The app does not use CloudKit or automatically merge edits from multiple devices. A connected folder can also be on a local or external drive. Google documents [Finder access and offline behavior](https://support.google.com/drive/answer/13401938?hl=en).
 
 ## Data and recovery
 

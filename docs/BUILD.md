@@ -48,12 +48,13 @@ The build script validates the property list, architecture, app signature, and D
 before publishing outputs. The verification script mounts it read-only and checks
 the packaged app and Applications shortcut.
 
-The defaults are version 1.0.4 and development build 2012. This matches public
-v1.0.4 build 2012 and exceeds v1.0.3 build 2011 and earlier shared local builds. For every later update,
-check the actual public appcast and choose a greater `CFBundleVersion`; Sparkle
-compares build numbers, not just the displayed version. The release workflow
-uses `2001 + GITHUB_RUN_NUMBER`: release run 11 produces build 2012. A workflow
-rerun does not increase its build number.
+The defaults are version 1.0.4 and development build 2014. This exceeds the
+original public v1.0.4 build 2012 and the isolated backup QA build 2013. For every
+later update, check the actual public appcast and choose a greater
+`CFBundleVersion`; Sparkle compares build numbers, not just the displayed version.
+The release workflow uses `2002 + GITHUB_RUN_NUMBER`: new run 12 produces build
+2014, and run 13 produces 2015. A workflow rerun does not increase its build
+number; start a new dispatched run for a same-version rebuild.
 Build products stay under `dist`, module/package caches under `.build`, and the
 temporary native build scratch directory under `/private/tmp`. The scratch
 directory is removed after packaging. The script explicitly selects SwiftPM's
@@ -139,6 +140,15 @@ versioned `.inotes` files and leaves cloud uploading to the selected provider; i
 does not include CloudKit, a cloud SDK, server credentials, or concurrent-edit
 merging. Real provider uploads and physical-device folder permission behavior
 require separate verification.
+
+Managed folder backups use a local-library owner ID persisted in preferences,
+separate automatic-history directories, and bounded recent/daily/weekly retention
+with a 500 MiB budget. Cleanup verifies the current archive before removing older
+copies and preserves the newest two valid recovery points. Independent exports,
+legacy root archives and other owners' histories are excluded. Legacy cleanup is
+an explicit review/selection operation with file-identity and content checks;
+large reviews use bounded batches. This changes backup management, not the
+portable archive format, local autosave or provider upload mechanism.
 
 Archive format 2 preserves positioned rich-text boxes and editable equations.
 The app reads format 1 libraries with empty object arrays and promotes them to

@@ -240,6 +240,17 @@ conflict merging. A successful folder write does not prove cloud delivery.
 Keep destinations, failures, retries, and connection state independent. Imported
 backups add separate copies. Local note/attachment data is not app-level encrypted.
 
+Managed backups live in `iNotes Backups/Automatic-<local-library owner UUID>`.
+Automatic writes and Back up now share retention (latest 5, up to 7 UTC daily and
+4 UTC weekly copies, 500 MiB); independent exports are permanent. Never prune
+another owner's files or legacy root archives automatically. Verify a current
+archive by bounded read-back before pruning and protect the newest two valid
+copies. Keep cleanup warnings separate from backup write failures; safety skips
+can leave history above budget. Legacy cleanup requires a reviewed selection,
+fresh verified backup, unchanged directory/file identities and content, and
+newest-two protection. Preserve bounded, descriptor-relative no-follow operations
+and batch large reviews; tests must use temporary folders only.
+
 ## Security record and review rules
 
 `docs/TESTING.md` records a v1.0.0 Codex Security standard scan of 78 tracked files
@@ -297,10 +308,13 @@ Source pushes run `Native checks`; a `vX.Y.Z` tag runs the publishing workflow.
 Do not push a release tag merely to test packaging. Confirm publishing is authorized
 and checks are complete; verify the separately built public assets after release.
 Sparkle compares build numbers: choose a value greater than the latest published
-`CFBundleVersion`; hosted release builds now use `2001 + GITHUB_RUN_NUMBER`.
-Run 10 shipped build 2010; the manual same-version security rebuild reserves 2011,
-and v1.0.4 run 11 published build 2012; the next new run (12) must produce 2013. A workflow rerun does not
+`CFBundleVersion`; hosted release builds now use `2002 + GITHUB_RUN_NUMBER`.
+Run 10 shipped build 2010; the manual same-version security rebuild reserved 2011,
+and v1.0.4 run 11 published 2012. Backup QA used 2013; new dispatched run 12 uses
+2014, and the next new run (13) must produce 2015. A workflow rerun does not
 advance `GITHUB_RUN_NUMBER`. Never reuse its build number for an updated binary.
+The release workflow supports an explicit `workflow_dispatch` for the current
+stable version; wait for Native checks on its exact source commit first.
 For a same-version rebuild, preserve the original tag and old installer, upload a
 distinct build-numbered DMG/checksum first, verify their public bytes, then replace
 the signed appcast last. Record the new source commit in the release notes;

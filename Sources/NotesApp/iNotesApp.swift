@@ -216,7 +216,7 @@ enum StoreDiagnostics {
         store.driveFolder = drive
         store.backupToDrive()
         try require(store.errorMessage == nil && store.lastBackup != nil, "Versioned backup writes successfully: \(store.errorMessage ?? "")")
-        let backups = drive.appendingPathComponent("iNotes Backups")
+        guard let backups = store.managedBackupDirectory(for: .googleDrive) else { throw LibraryError.nodeNotFound }
         let files = try FileManager.default.contentsOfDirectory(at: backups, includingPropertiesForKeys: nil)
         try require(files.count == 1, "First backup produces one file")
         let backup = try LibraryArchive.decode(LibraryArchive.read(from: files[0]))

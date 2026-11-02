@@ -3,6 +3,17 @@ on:
   push:
     tags:
       - 'v*'
+  workflow_dispatch:
+    inputs:
+      version:
+        description: 'Existing visible version to rebuild without moving its tag'
+        required: true
+        default: '1.0.4'
+        type: string
+      source_commit:
+        description: 'Full source commit that passed Native checks'
+        required: true
+        type: string
 permissions:
   contents: read
 concurrency:
@@ -20,9 +31,23 @@ jobs:
       - name: Validate tag and release key
         env:
           SPARKLE_PRIVATE_KEY: ${{ secrets.SPARKLE_PRIVATE_KEY }}
+          REBUILD_VERSION: ${{ inputs.version }}
+          REBUILD_COMMIT: ${{ inputs.source_commit }}
         run: |
           set -euo pipefail
-          if [[ ! "$GITHUB_REF_NAME" =~ ^v[0-9]+\.[0-9]+\.[0-9]+$ ]]; then
+          release_tag="$GITHUB_REF_NAME"
+          if [[ "$GITHUB_EVENT_NAME" == 'workflow_dispatch' ]]; then
+            release_tag="v$REBUILD_VERSION"
+            if [[ "$GITHUB_SHA" != "$REBUILD_COMMIT" ]]; then
+              echo 'The selected branch no longer matches the reviewed source commit.' >&2
+              exit 2
+            fi
+            if [[ "$GITHUB_RUN_ATTEMPT" != '1' ]]; then
+              echo 'Start a new rebuild run to obtain a new build number; do not rerun an updated binary.' >&2
+              exit 2
+            fi
+          fi
+          if [[ ! "$release_tag" =~ ^v[0-9]+\.[0-9]+\.[0-9]+$ ]]; then
             echo 'Release tags must use vX.Y.Z.' >&2
             exit 2
           fi
@@ -33,10 +58,16 @@ jobs:
           umask 077
           printf '%s\n' "$SPARKLE_PRIVATE_KEY" > "$RUNNER_TEMP/inotes-update-key"
           printf 'UPDATE_PRIVATE_KEY_FILE=%s\n' "$RUNNER_TEMP/inotes-update-key" >> "$GITHUB_ENV"
-          printf 'VERSION=%s\n' "${GITHUB_REF_NAME#v}" >> "$GITHUB_ENV"
-          # Run 10 published 2010; the manual v1.0.3 security rebuild reserves 2011.
-          # Offset 2001 makes the next new run (11) publish 2012, not reuse 2011.
-          printf 'BUILD_NUMBER=%s\n' "$((2001 + GITHUB_RUN_NUMBER))" >> "$GITHUB_ENV"
+          printf 'VERSION=%s\n' "${release_tag#v}" >> "$GITHUB_ENV"
+          printf 'RELEASE_TAG=%s\n' "$release_tag" >> "$GITHUB_ENV"
+          # Public run 11 shipped 2012; the isolated backup QA build used 2013.
+          # Offset 2002 makes new run 12 publish 2014, then run 13 publish 2015.
+          printf 'BUILD_NUMBER=%s\n' "$((2002 + GITHUB_RUN_NUMBER))" >> "$GITHUB_ENV"
+      - name: Check existing release before rebuilding
+        if: github.event_name == 'workflow_dispatch'
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: bash scripts/publish-rebuild.sh --preflight
       - name: Unit and integration tests
         run: bash scripts/test.sh
       - name: Build native ARM64 DMG
@@ -47,9 +78,16 @@ jobs:
         run: |
           dist/iNotes.app/Contents/MacOS/iNotes --smoke-test --editor-test
           bash scripts/verify-macos.sh
-          bash scripts/generate-appcast.sh
-          bash scripts/test-update-signatures.sh
+          archive="dist/iNotes-$VERSION-arm64.dmg"
+          if [[ "$GITHUB_EVENT_NAME" == 'workflow_dispatch' ]]; then
+            archive="dist/iNotes-$VERSION-build$BUILD_NUMBER-arm64.dmg"
+            cp "dist/iNotes-$VERSION-arm64.dmg" "$archive"
+            (cd dist && shasum -a 256 "$(basename "$archive")" > "$(basename "$archive").sha256")
+          fi
+          bash scripts/generate-appcast.sh "$archive"
+          bash scripts/test-update-signatures.sh dist/update/appcast.xml "$archive"
       - name: Publish release assets
+        if: github.event_name == 'push'
         env:
           GH_TOKEN: ${{ github.token }}
         run: |
@@ -66,6 +104,11 @@ jobs:
             --repo "$GITHUB_REPOSITORY" --verify-tag --latest \
             --title "iNotes $VERSION" \
             --notes-file "$notes_file"
+      - name: Publish verified same-version rebuild
+        if: github.event_name == 'workflow_dispatch'
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: bash scripts/publish-rebuild.sh --publish
       - name: Remove signing seed from runner
         if: always()
         run: rm -f "$RUNNER_TEMP/inotes-update-key"

@@ -79,6 +79,8 @@ struct StandaloneTestRunner {
         let pages = PageContentTests()
         let geometry = PageSelectionGeometryTests()
         let backups = BackupArchiveTests()
+        let retention = BackupRetentionTests()
+        let legacyCleanup = LegacyBackupCleanupTests()
         let presentation = PagePresentationTests()
         let inkValidation = InkValidationTests()
         let images = PageImageTests()
@@ -118,6 +120,33 @@ struct StandaloneTestRunner {
             ("versioned backups", backups, backups.testVersionedWritesNeverReplaceAnExistingBackup),
             ("failed cloud folder backup", backups, backups.testUnavailableDestinationAndInvalidArchivePreserveLocalData),
             ("independent backup scheduling", backups, backups.testScheduleThrottlesTargetsAndRetriesIndependently),
+            ("backup recent daily weekly retention", retention, retention.testRetentionPlannerKeepsRecentDailyAndWeeklyRecoveryPoints),
+            ("backup UTC retention boundaries", retention, retention.testRetentionPlannerUsesUTCDayAndISOWeekBoundaries),
+            ("backup byte budget and recovery floor", retention, retention.testRetentionBudgetTrimsOlderPointsButPreservesTwoNewest),
+            ("backup deterministic and malformed metadata", retention, retention.testRetentionPlannerIsStableForDateTiesAndRejectsMalformedMetadata),
+            ("bounded complete backup history", retention, retention.testFrequentManagedBackupsRetainFiveCompleteRecentCopies),
+            ("duplicate backup suppression", retention, retention.testIdenticalManagedBackupIsSkippedAcrossSeparateCalls),
+            ("backup ownership and export isolation", retention, retention.testRetentionPreservesOtherOwnersLegacyExportsAndUnrecognizedFiles),
+            ("multibyte backup filename isolation", retention, retention.testMultibyteLookalikeFilenameIsPreservedWithoutInterruptingBackups),
+            ("failed backup history preservation", retention, retention.testFailedManagedWritePreservesAllExistingRecoveryCopies),
+            ("managed backup name collision", retention, retention.testManagedNameCollisionNeverReplacesSavedContents),
+            ("rapid and backward-clock backup retention", retention, retention.testRapidAndBackwardClockWritesProtectTheActualLatestCopies),
+            ("independent retention destinations", retention, retention.testDestinationsRetainAndDeduplicateIndependently),
+            ("backup readback verification before pruning", retention, retention.testUnverifiedNewBackupCannotPruneExistingHistory),
+            ("backup directory replacement during write", retention, retention.testOwnerDirectoryReplacementDuringWritePreservesOriginalHistory),
+            ("backup cleanup failure and retry", retention, retention.testCleanupFailureDoesNotMisreportVerifiedBackupAsFailed),
+            ("corrupt backup recovery protection", retention, retention.testCorruptNewestCopyDoesNotReplaceValidRecoveryProtection),
+            ("corrupt historical backup recovery protection", retention, retention.testCorruptHistoricalRepresentativeCannotDisplaceValidDailyOrWeeklyRecovery),
+            ("historical backup replacement stops cleanup", retention, retention.testHistoricalRecoveryReplacementStopsCleanupBeforeRemovingOtherCopies),
+            ("backup replacement during cleanup", retention, retention.testCleanupPreservesAFileReplacedAfterRetentionPlanning),
+            ("backup symlink isolation", retention, retention.testManagedBackupRejectsSymlinkDirectoriesAndPreservesLinkedFiles),
+            ("legacy backup review preserves unknown files", legacyCleanup, legacyCleanup.testLegacyPreviewProtectsNewestAndIgnoresUnrecognizedFiles),
+            ("explicit legacy backup cleanup", legacyCleanup, legacyCleanup.testExplicitLegacyCleanupPreservesNewestManualExportsAndManagedHistory),
+            ("changed legacy backup cleanup rejection", legacyCleanup, legacyCleanup.testChangedLegacySelectionRejectsBeforeDeletingAnyFile),
+            ("legacy cleanup recovery and selection guards", legacyCleanup, legacyCleanup.testLegacyCleanupRequiresVerifiedCurrentBackupAndRejectsProtectedOrForgedIDs),
+            ("legacy cleanup folder replacement rejection", legacyCleanup, legacyCleanup.testLegacyCleanupRejectsFolderReplacementAndSymlinkedBackupFolder),
+            ("bounded legacy cleanup batch progress", legacyCleanup, legacyCleanup.testBoundedLegacyReviewBatchesMakeProgressWithoutDroppingNewestProtection),
+            ("legacy protected-copy replacement stops cleanup", legacyCleanup, legacyCleanup.testProtectedLegacyReplacementStopsCleanupAndReportsActualPartialCount),
             ("theme text and ink contrast", themes, themes.testDefaultTextAndDarkInkContrast),
             ("theme palette storage roundtrip", themes, themes.testKnownPaletteRoundTripsBetweenDisplayAndStorage),
             ("theme custom hue resolution", themes, themes.testCustomDarkHuesLightenButBrightColorsStayUnchanged),
