@@ -1,5 +1,71 @@
 # Validation
 
+## Published v1.0.4 / build 2015 — 2 November 2026
+
+Released source [`7c62227`](https://github.com/icode100/iNotes/commit/7c6222769b5aa44cd985454396cdd39024aad746)
+passed [Native checks 41452230322](https://github.com/icode100/iNotes/actions/runs/41452230322):
+111 XCTest tests, Mac release packaging, 300 editor/406 workspace/31 equation/
+12 ruled-text/8 shortcut checks, store/backup checks, mounted installer verification
+and iPad simulator compilation. The hosted environment was macOS 26.6.2 (25G83),
+Xcode 26.6, Swift 6.3.3 and iPhoneSimulator SDK 26.5. Its injected-stall switch
+collected 12 post-turn observations over 2.284 seconds, with a 0.973-second first
+sample delay and zero observed drift. This records coverage gaps rather than
+claiming uninterrupted observation.
+
+[Release run 41454707559](https://github.com/icode100/iNotes/actions/runs/41454707559)
+(counter 13, build `2002 + 13 = 2015`) passed 111 tests, packaging, the full native
+suite, mounted verification and all five update-signature checks. It uploaded
+and verified the distinct installer/checksum and replaced the signed feed last.
+**The workflow nevertheless concluded failure:** its immediate post-upload
+readback received different cached feed bytes. No new binary was generated or
+reuploaded to work around this. Subsequent independent public checks below
+established that publication had completed successfully. The publication helper's
+follow-up change waits a bounded interval for exact signed-feed bytes; it does
+not weaken byte/signature checks or alter the already published artifacts.
+
+The follow-up publication helper passed 23 offline control-flow scenarios,
+including stale-then-fresh responses at both feed URLs, transient HTTP failure,
+bounded failure for persistently stale responses and immediate prepublication
+mismatch rejection. Production polling shares a 120-second deadline across both
+URLs, with 15-second request caps. Timeout tests shorten only temporary script
+copies to one second; mocked network/signature calls establish neither actual
+CDN timing nor cryptographic validity. Bash syntax and whitespace checks passed.
+Log: `/private/tmp/inotes-publish-rebuild-mock-test.log`.
+
+Independent downloaded-public-asset verification on macOS 27.2 (26B123) passed:
+
+- Versioned and default latest feeds were byte-identical, advertised 1.0.4 build
+  2015 and matched GitHub's new appcast asset digest. Ed25519 feed/archive
+  verification and all five valid/tampered/unsigned/wrong-key checks passed.
+- The public installer matched its checksum, had valid strict ad hoc signatures,
+  contained the ARM64 app with version 1.0.4/build 2015, and passed the deployment,
+  Applications link, adaptive icon, scenery hash, math-resource/license and
+  persistence checks.
+- The downloaded binary passed 300 editor, 406 workspace, 31 equation, 12 ruled-text,
+  8 shortcut and 16 updater checks, plus store/hierarchy/backup integrations.
+  Import of 49,127 nodes took 1.029 seconds; query took 0.021 seconds. Its deliberate
+  stall lasted 0.651 seconds; 12 post-turn observations followed within 0.935 seconds,
+  with zero observed drift and no pane-collapse events.
+- Independent preservation review confirmed the original v1.0.4 tag still resolves
+  to `d733841`, original installer/checksum asset IDs and original SHA-256 are
+  unchanged, and release notes record the new source commit and build.
+
+Public asset `iNotes-1.0.4-build2015-arm64.dmg`: 24,555,573 bytes, SHA-256
+`442b037a0065ebbb15172c881ae8e374ba7ef8f94da258876ef5956ab100fb3f`.
+The app contains 30,018,805 regular-file bytes; this is not a RAM measurement.
+The 1,278-byte appcast SHA-256 is
+`968a65952b278152e94557971f436806bcb0dca6e54a6ed2c4f58c99d113d2aa`.
+
+Evidence: `/private/tmp/inotes-build2015-ci-hosted.log`,
+`/private/tmp/inotes-build2015-release.log`,
+`/private/tmp/inotes-public-104-build2015-verification.log`,
+`/private/tmp/inotes-public-104-build2015/verification.json` and
+`/private/tmp/inotes-preservation-report.json`. Checks used temporary libraries;
+the installed app and real notes were not modified. Actual updater installation,
+real provider upload/deletion propagation, older macOS and physical stylus/iPad
+coverage remain unverified for this build. Distribution remains ad hoc signed,
+not Apple notarized. The next new release run (14) must produce build 2016 or higher.
+
 ## Release run 12 stopped before publication; build 2015 preparation
 
 Source [`9c1fee8`](https://github.com/icode100/iNotes/commit/9c1fee875719e7b69dbf38cfb156ec20fa3a374a)

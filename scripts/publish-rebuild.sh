@@ -18,6 +18,33 @@ download() {
   curl --fail --silent --show-error --location --retry 6 --retry-all-errors --retry-delay 2 "$1" --output "$2"
 }
 
+# A replaced release asset can briefly remain stale at GitHub's download caches.
+# Poll only after publication, within a shared deadline for both public URLs.
+# A stale response must never trigger another upload or restore the older feed.
+read_published_feed() {
+  local url="$1" output="$2" deadline="$3" remaining timeout delay
+  while true; do
+    remaining=$((deadline - SECONDS))
+    if (( remaining <= 0 )); then break; fi
+    timeout="$remaining"
+    if (( timeout > 15 )); then timeout=15; fi
+    if curl --fail --silent --show-error --location --retry 0 --connect-timeout 10 --max-time "$timeout" \
+        "$url" --output "$output.pending" \
+        && cmp -s dist/update/appcast.xml "$output.pending"; then
+      mv "$output.pending" "$output"
+      return 0
+    fi
+    remaining=$((deadline - SECONDS))
+    if (( remaining <= 0 )); then break; fi
+    delay=5
+    if (( remaining < delay )); then delay="$remaining"; fi
+    sleep "$delay"
+  done
+  rm -f "$output.pending"
+  echo "Published feed did not match the expected signed bytes within the 120-second readback window: $url" >&2
+  return 1
+}
+
 check_release() {
   gh api "repos/$GITHUB_REPOSITORY/releases/latest" > "$STATE/latest.json"
   python3 - "$STATE/latest.json" "$TAG" "$NAME" <<'PY'
@@ -82,8 +109,10 @@ PY
       echo 'Feed replacement failed; attempted to restore the previous signed feed.' >&2
       exit 1
     fi
-    download "$PREFIX/appcast.xml" "$STATE/public/appcast.xml"
-    download "https://github.com/$GITHUB_REPOSITORY/releases/latest/download/appcast.xml" "$STATE/public/latest-appcast.xml"
+    publication_deadline=$((SECONDS + 120))
+    read_published_feed "$PREFIX/appcast.xml" "$STATE/public/appcast.xml" "$publication_deadline"
+    read_published_feed "https://github.com/$GITHUB_REPOSITORY/releases/latest/download/appcast.xml" \
+      "$STATE/public/latest-appcast.xml" "$publication_deadline"
     cmp dist/update/appcast.xml "$STATE/public/appcast.xml"
     cmp dist/update/appcast.xml "$STATE/public/latest-appcast.xml"
     swift -module-cache-path .build/module-cache scripts/verify-update.swift \

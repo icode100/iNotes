@@ -59,7 +59,7 @@ values and use a larger number for every update, including same-version rebuilds
 Development defaults (`1.0.4`, build 2015) are separate from the release workflow's
 `2002 + GITHUB_RUN_NUMBER`. Run 11 published v1.0.4 build 2012; isolated backup QA
 used build 2013. Run 12 built 2014 but stopped at native diagnostic verification before publication.
-New run 13 uses 2015, and run 14 must produce 2016 or higher. Failed build 2014
+Run 13 published 2015, and run 14 must produce 2016 or higher. Failed build 2014
 remains reserved alongside the original installer and QA slot.
 The feed points to the matching `v1.0.4` release's DMG. Never edit a signed appcast
 after generation. Re-run the script if its contents change. The last command
@@ -104,7 +104,9 @@ build number exceeds the public appcast. It runs the build, runtime and signatur
 checks, uploads the distinct installer/checksum without replacing old assets,
 and verifies their downloaded public bytes. It records the new source commit
 and build in the release notes, then replaces the signed appcast last and verifies
-both versioned and latest public feeds. A changed live feed or existing installer
+both versioned and latest public feeds, allowing a bounded wait for GitHub's
+post-replacement cache to serve the exact signed bytes. A changed live feed before
+publication or an existing installer
 name stops publication. Failed feed replacement attempts to restore the original
 signed feed bytes. All checks must still be independently confirmed after release.
 

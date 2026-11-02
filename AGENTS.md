@@ -320,11 +320,14 @@ Sparkle compares build numbers: choose a value greater than the latest published
 `CFBundleVersion`; hosted release builds now use `2002 + GITHUB_RUN_NUMBER`.
 Run 10 shipped build 2010; the manual same-version security rebuild reserved 2011,
 and v1.0.4 run 11 published 2012. Backup QA used 2013; dispatched run 12 built
-2014 but failed verification before publishing. New run 13 uses 2015, and the
+2014 but failed verification before publishing. Run 13 published 2015, and the
 next new run (14) must produce 2016. A workflow rerun does not
 advance `GITHUB_RUN_NUMBER`. Never reuse its build number for an updated binary.
 The release workflow supports an explicit `workflow_dispatch` for the current
 stable version; wait for Native checks on its exact source commit first.
+GitHub may briefly serve a cached old feed after asset replacement. Preserve the
+bounded exact-byte readback wait before final signature checks; a stale read must
+not cause a signed feed to be edited or an installer build number to be reused.
 For a same-version rebuild, preserve the original tag and old installer, upload a
 distinct build-numbered DMG/checksum first, verify their public bytes, then replace
 the signed appcast last. Record the new source commit in the release notes;
