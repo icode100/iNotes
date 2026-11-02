@@ -61,7 +61,7 @@ jobs:
           printf 'VERSION=%s\n' "${release_tag#v}" >> "$GITHUB_ENV"
           printf 'RELEASE_TAG=%s\n' "$release_tag" >> "$GITHUB_ENV"
           # Public run 11 shipped 2012; the isolated backup QA build used 2013.
-          # Offset 2002 makes new run 12 publish 2014, then run 13 publish 2015.
+          # Run 12 built 2014 but failed verification; new run 13 uses 2015.
           printf 'BUILD_NUMBER=%s\n' "$((2002 + GITHUB_RUN_NUMBER))" >> "$GITHUB_ENV"
       - name: Check existing release before rebuilding
         if: github.event_name == 'workflow_dispatch'

@@ -48,12 +48,13 @@ The build script validates the property list, architecture, app signature, and D
 before publishing outputs. The verification script mounts it read-only and checks
 the packaged app and Applications shortcut.
 
-The defaults are version 1.0.4 and development build 2014. This exceeds the
+The defaults are version 1.0.4 and development build 2015. This exceeds the
 original public v1.0.4 build 2012 and the isolated backup QA build 2013. For every
 later update, check the actual public appcast and choose a greater
 `CFBundleVersion`; Sparkle compares build numbers, not just the displayed version.
-The release workflow uses `2002 + GITHUB_RUN_NUMBER`: new run 12 produces build
-2014, and run 13 produces 2015. A workflow rerun does not increase its build
+The release workflow uses `2002 + GITHUB_RUN_NUMBER`: run 12 built
+2014 but failed a diagnostic coverage check before publishing; new run 13 uses
+2015, and run 14 produces 2016. A workflow rerun does not increase its build
 number; start a new dispatched run for a same-version rebuild.
 Build products stay under `dist`, module/package caches under `.build`, and the
 temporary native build scratch directory under `/private/tmp`. The scratch

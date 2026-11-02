@@ -149,6 +149,15 @@ Do not treat callback-level cursor assertions alone as proof of the displayed cu
 
 ## Known regressions and testing traps
 
+- **Hosted load exhausted a sheet-switch sampling window.** Release run 12
+  (unpublished build 2014) observed one sample after a slow run-loop turn, with
+  zero measured drift, stable probe identity and no collapse events. Keep the
+  diagnostic's minimum 12 post-turn observations, nominal 0.6-second window and
+  5-second timeout. Do not reuse an expired deadline to count same-turn samples,
+  discard early drift/KVO evidence, force layout, or relax geometry thresholds.
+  Preserve the diagnostic-only first-turn stall regression and log sample gaps;
+  late observations do not establish continuity across an unsampled gap.
+
 - **Sidebar layout stayed stale until a page click (reported after v1.0.2).**
   With the sheets pane hidden, the native sidebar could close while leaving a
   sidebar-width blank gutter, or open over the heading/tools/page. The detail
@@ -310,8 +319,9 @@ and checks are complete; verify the separately built public assets after release
 Sparkle compares build numbers: choose a value greater than the latest published
 `CFBundleVersion`; hosted release builds now use `2002 + GITHUB_RUN_NUMBER`.
 Run 10 shipped build 2010; the manual same-version security rebuild reserved 2011,
-and v1.0.4 run 11 published 2012. Backup QA used 2013; new dispatched run 12 uses
-2014, and the next new run (13) must produce 2015. A workflow rerun does not
+and v1.0.4 run 11 published 2012. Backup QA used 2013; dispatched run 12 built
+2014 but failed verification before publishing. New run 13 uses 2015, and the
+next new run (14) must produce 2016. A workflow rerun does not
 advance `GITHUB_RUN_NUMBER`. Never reuse its build number for an updated binary.
 The release workflow supports an explicit `workflow_dispatch` for the current
 stable version; wait for Native checks on its exact source commit first.

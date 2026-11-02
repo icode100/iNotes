@@ -5,7 +5,7 @@ set -euo pipefail
 ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 cd "$ROOT"
 VERSION="${VERSION:-1.0.4}"
-BUILD_NUMBER="${BUILD_NUMBER:-2014}"
+BUILD_NUMBER="${BUILD_NUMBER:-2015}"
 SIGNING_IDENTITY="${SIGNING_IDENTITY:--}"
 export UPDATE_FEED_URL="${UPDATE_FEED_URL-https://github.com/icode100/iNotes/releases/latest/download/appcast.xml}"
 if [[ ! ${UPDATE_PUBLIC_ED_KEY+x} && -f Resources/UpdatePublicEDKey.txt ]]; then

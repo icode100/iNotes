@@ -1,5 +1,48 @@
 # Validation
 
+## Release run 12 stopped before publication; build 2015 preparation
+
+Source [`9c1fee8`](https://github.com/icode100/iNotes/commit/9c1fee875719e7b69dbf38cfb156ec20fa3a374a)
+passed [Native checks 41446989533](https://github.com/icode100/iNotes/actions/runs/41446989533):
+111 XCTest tests, Mac packaging, 300 editor/399 workspace/31 equation/12 ruled-text/
+8 shortcut checks, store/backup checks, mounted installer verification, and iPad
+simulator compilation. Hosted log: `/private/tmp/inotes-backups-ci-hosted.log`.
+
+The [signed release run 41448614734](https://github.com/icode100/iNotes/actions/runs/41448614734)
+(counter 12, build 2014) passed core tests and packaging but stopped before any
+asset publication. The existing workspace sheet-switch diagnostic got only one
+sample in its 0.6-second wall-clock window. It recorded stable probe identity,
+no pane-collapse changes and zero measured frame drift; the sample-count
+requirement failed. This does not prove unobserved geometry was correct.
+The signing seed was removed by the workflow cleanup step. Public build 2012,
+its feed and original assets were unchanged. Failure log:
+`/private/tmp/inotes-backups-release-run12.log`.
+
+The diagnostic now samples immediately after the switch and then requires at
+least 12 genuine post-run-loop geometry observations over at least 0.6 seconds,
+with a 5-second timeout. Every early observation, drift measurement and KVO event
+is retained. A controlled 0.65-second first-turn stall reproduces the missed-window
+case; first-sample delay and sampling gaps are logged even on success. Geometry
+tolerances, probe/pane/content/tool/undo checks and presentation-layer motion
+tests are unchanged. No production navigation/layout behavior changed.
+
+Local Debug build and the full native harness passed after this adjustment:
+301 editor, 406 workspace, 31 equation, 12 ruled-text, 8 shortcut and 16 updater
+checks, plus store/backup/hierarchy integrations. The injected stall lasted
+0.651 seconds; its switch recorded 12 post-turn observations over 0.962 seconds,
+with a 0.742-second initial gap, zero observed drift and no pane-collapse events.
+These measurements are explicit about the unsampled gap. Logs:
+`/private/tmp/inotes-backups-build2015.log` and
+`/private/tmp/inotes-backups-native2015.log`. The 111 core tests had already passed
+on the unchanged backup/core sources; full hosted checks will rerun them.
+
+The new run must use build 2015 (counter 13), preserving the failed 2014 slot.
+Offline publication-control tests passed 19 mocked scenarios, including build/
+version/source-commit guards, collisions, public-byte verification ordering and
+best-effort restoration after feed-upload failure. These mocked signature calls
+do not establish cryptographic validity. Log:
+`/private/tmp/inotes-publish-rebuild-mock-test.log`.
+
 ## Backup-retention release preparation, build 2014 — 2 November 2026
 
 The user authorized publishing a same-version v1.0.4 rebuild. Public build 2012

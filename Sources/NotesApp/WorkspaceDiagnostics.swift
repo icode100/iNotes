@@ -629,6 +629,7 @@ enum WorkspaceDiagnostics {
             settle() // Editing is fixture setup, never part of the passive switch wait.
         }
 
+        var didInjectSwitchStall = false
         for mode in ["sidebar hidden", "both panes hidden", "full page"] {
             presentation.fullPage = false
             presentation.sheetsVisible = true
@@ -662,23 +663,74 @@ enum WorkspaceDiagnostics {
                 }
                 defer { observations.forEach { $0.invalidate() } }
                 var stableIdentity = true, maximumFrameDrift: CGFloat = 0, samples = 0
-                let deadline = Date(timeIntervalSinceNow: 0.6)
-                store.sheetID = target
-                repeat {
-                    RunLoop.main.run(until: min(deadline, Date(timeIntervalSinceNow: 0.016)))
+                var turns = 0, postTurnSamples = 0
+                let start = ProcessInfo.processInfo.systemUptime
+                let deadline = start + 5
+                var previousSampleTime = start, maximumSampleGap: TimeInterval = 0
+                var firstPostTurnSampleDelay: TimeInterval?
+                let injectStall = !didInjectSwitchStall
+                var injectedStallDuration: TimeInterval = 0
+                var injectedStallTurn: Int?
+                func sample(afterTurn: Bool) {
+                    let now = ProcessInfo.processInfo.systemUptime
+                    maximumSampleGap = max(maximumSampleGap, now - previousSampleTime)
+                    previousSampleTime = now
                     let currentProbes = probes(in: host.view)
                     stableIdentity = stableIdentity && currentProbes.count == 1 && currentProbes.first === stableProbe
                     if let activePage = findPage(host.view), let frames = switchFrames(activePage) {
                         samples += 1
+                        if afterTurn {
+                            postTurnSamples += 1
+                            if firstPostTurnSampleDelay == nil { firstPostTurnSampleDelay = now - start }
+                        }
                         for (actual, expected) in zip(frames, expectedFrames) {
                             maximumFrameDrift = max(maximumFrameDrift, [abs(actual.minX - expected.minX),
                                 abs(actual.minY - expected.minY), abs(actual.width - expected.width),
                                 abs(actual.height - expected.height)].max() ?? 0)
                         }
                     }
-                } while Date() < deadline
+                }
+                store.sheetID = target
+                sample(afterTurn: false)
+                if injectStall {
+                    didInjectSwitchStall = true
+                    // Diagnostic-only slow run-loop source: reproduce a hosted
+                    // stall that consumes the old 0.6-second sampling window.
+                    // It does not lay out, redraw, focus or change any view.
+                    RunLoop.main.perform {
+                        MainActor.assumeIsolated {
+                            injectedStallTurn = turns
+                            let stallStart = ProcessInfo.processInfo.systemUptime
+                            Thread.sleep(forTimeInterval: 0.65)
+                            injectedStallDuration = ProcessInfo.processInfo.systemUptime - stallStart
+                        }
+                    }
+                }
+                while ProcessInfo.processInfo.systemUptime < deadline
+                        && (ProcessInfo.processInfo.systemUptime - start < 0.6 || postTurnSamples < 12) {
+                    let remaining = deadline - ProcessInfo.processInfo.systemUptime
+                    RunLoop.main.run(until: Date(timeIntervalSinceNow: min(0.016, max(0, remaining))))
+                    turns += 1
+                    sample(afterTurn: true)
+                }
+                let elapsed = ProcessInfo.processInfo.systemUptime - start
                 // No forced layout/display, focus changes, or page clicks above.
-                geometryHistory.append("Sheet switch [\(mode)] target=\(target) samples=\(samples) probeStable=\(stableIdentity) frameDrift=\(maximumFrameDrift) nativeCollapseChanges=\(collapseChanges)")
+                // Later samples do not establish continuous geometry during a
+                // stalled source; report the actual gaps without discarding any
+                // observed drift or native collapse events.
+                let sampleLog = "Sheet switch [\(mode)] target=\(target) samples=\(samples) postTurnSamples=\(postTurnSamples)"
+                    + " turns=\(turns) elapsed=\(elapsed) firstPostTurnSampleDelay=\(firstPostTurnSampleDelay.map { String($0) } ?? "none")"
+                    + " maximumSampleGap=\(maximumSampleGap) injectedStallDuration=\(injectedStallDuration)"
+                    + " injectedStallTurn=\(injectedStallTurn.map { String($0) } ?? "none") probeStable=\(stableIdentity)"
+                    + " frameDrift=\(maximumFrameDrift) nativeCollapseChanges=\(collapseChanges)"
+                geometryHistory.append(sampleLog)
+                print(sampleLog)
+                try check(postTurnSamples >= 12 && elapsed >= 0.6 && elapsed < 5,
+                          "\(mode) sheet switch obtains enough passive geometry samples within its timeout")
+                if injectStall {
+                    try check(injectedStallTurn == 0 && injectedStallDuration >= 0.6 && maximumSampleGap >= 0.6,
+                              "sheet switch sampling continues after an injected first-turn run-loop stall")
+                }
                 try check(stableIdentity, "\(mode) sheet switch retains one window-level navigation probe throughout")
                 try check(collapseChanges.isEmpty && [sidebarItem.isCollapsed, sheetsItem.isCollapsed] == expectedCollapsed,
                           "\(mode) sheet switch never transiently reopens either native pane")
@@ -686,7 +738,7 @@ enum WorkspaceDiagnostics {
                            presentation.toolsVisible] == expectedPresentation,
                           "\(mode) sheet switch preserves independent chrome preferences")
                 try check(samples > 1 && maximumFrameDrift <= 2,
-                          "\(mode) sheet switch keeps detail, heading/tools region, and viewport steady throughout")
+                          "\(mode) sheet switch keeps detail, heading/tools region, and viewport steady in every sample")
                 let activePage = try require(findPage(host.view), "selected switch page")
                 try check(activePage.textView.string == text && store.selectedSheet?.id == target
                           && store.selectedSheet?.body == text,
