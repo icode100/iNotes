@@ -299,7 +299,7 @@ and checks are complete; verify the separately built public assets after release
 Sparkle compares build numbers: choose a value greater than the latest published
 `CFBundleVersion`; hosted release builds now use `2001 + GITHUB_RUN_NUMBER`.
 Run 10 shipped build 2010; the manual same-version security rebuild reserves 2011,
-so the next new workflow run (11) must produce 2012. A workflow rerun does not
+and v1.0.4 run 11 published build 2012; the next new run (12) must produce 2013. A workflow rerun does not
 advance `GITHUB_RUN_NUMBER`. Never reuse its build number for an updated binary.
 For a same-version rebuild, preserve the original tag and old installer, upload a
 distinct build-numbered DMG/checksum first, verify their public bytes, then replace

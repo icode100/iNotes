@@ -1,5 +1,44 @@
 # Validation
 
+## Published v1.0.4 / build 2012 — 2 November 2026
+
+Released source [`d733841`](https://github.com/icode100/iNotes/commit/d7338419042a4512c569af992ab2384fc088762d)
+passed [Native checks run 41432882320](https://github.com/icode100/iNotes/actions/runs/41432882320):
+unit/integration tests, release Mac packaging, native editor/cursor regressions,
+mounted DMG verification and iPad simulator compilation. The
+[signed release run 41434302469](https://github.com/icode100/iNotes/actions/runs/41434302469)
+(release counter 11) independently passed its build, runtime and signature gates
+and published [v1.0.4](https://github.com/icode100/iNotes/releases/tag/v1.0.4) using
+the existing signing identity. Its build is `2001 + 11 = 2012`; the next new
+release run must use build 2013 or higher, never rerun 11 for a changed binary.
+
+Independent public-asset verification on macOS 27.2 (26B123) passed:
+
+- Downloaded DMG matched the published checksum. CryptoKit verified the appcast
+  and DMG against the committed Ed25519 public key. All five valid/tampered/
+  unsigned/wrong-key signature checks passed. The default latest-update feed was
+  byte-identical to the versioned v1.0.4 feed.
+- The mounted public installer passed strict ad hoc signatures, ARM64 and
+  version/build checks, Applications link, adaptive icons, exact scenery hashes,
+  math resource/license checks and persistence smoke tests.
+- The downloaded app passed 300 editor, 399 workspace, 31 equation, 12 ruled-text,
+  8 shortcut and 16 updater configuration checks, plus store/backup integration.
+  The compiler/SDK-dependent editor count differs from the local QA build's 301.
+  Its 49,127-node import took 1.008 seconds; folder query took 0.021 seconds.
+- The user reported installing this release through the built-in updater and
+  confirmed the updated app looks correct. This is user-reported end-to-end
+  upgrade evidence, distinct from automated artifact verification.
+
+The public DMG is 24,378,549 bytes, SHA-256
+`8eda79d38634d9cfa95dc430d2668e6dd61587dc2235091fc3333a342b2dd558`.
+The app has 29,546,789 regular-file bytes; neither size measures RAM. Public
+appcast SHA-256:
+`8dd628e8f5605f055f26f58f7b658b98e199b3659464a436d7a0e7d8f6e92e03`.
+Verification log: `/private/tmp/inotes-public-104-verification.log`; measurements:
+`/private/tmp/inotes-public-104/verification.json`. Tests used temporary libraries
+and did not replace the installed app. No new physical stylus/iPad, cloud-delivery,
+older-macOS, dependency-CVE, Developer ID or notarization result is claimed.
+
 ## Mac pasted images and annotations — 2 November 2026
 
 Working-tree feature based on `e7955c0`, including the sidebar contrast fix below.

@@ -56,7 +56,7 @@ shared local builds 1010–1012. Check both published and shared `CFBundleVersio
 values and use a larger number for every update, including same-version rebuilds.
 Development defaults (`1.0.4`, build 2012) are separate from the release workflow's
 `2001 + GITHUB_RUN_NUMBER`. The offset reserves manual build 2011 after workflow
-run 10 produced 2010; the next new run (11) therefore produces 2012.
+run 10 produced 2010; run 11 published v1.0.4 build 2012, and the next new run (12) will produce 2013.
 The feed points to the matching `v1.0.4` release's DMG. Never edit a signed appcast
 after generation. Re-run the script if its contents change. The last command
 checks valid signatures and rejects changed feeds, unsigned feeds, changed

@@ -48,8 +48,8 @@ The build script validates the property list, architecture, app signature, and D
 before publishing outputs. The verification script mounts it read-only and checks
 the packaged app and Applications shortcut.
 
-The defaults are version 1.0.4 and development build 2012. This exceeds public
-v1.0.3 build 2011 and the previously shared local builds. For every later update,
+The defaults are version 1.0.4 and development build 2012. This matches public
+v1.0.4 build 2012 and exceeds v1.0.3 build 2011 and earlier shared local builds. For every later update,
 check the actual public appcast and choose a greater `CFBundleVersion`; Sparkle
 compares build numbers, not just the displayed version. The release workflow
 uses `2001 + GITHUB_RUN_NUMBER`: release run 11 produces build 2012. A workflow

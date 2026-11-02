@@ -4,7 +4,7 @@ Version 1.0.4 adds pasted images that you can annotate directly on Mac sheets,
 with movement, proportional resizing, undo, and combined image/ink exports.
 Scenic sidebars have clearer labels and a quieter background.
 
-Release preparation targets version 1.0.4, build 2012. See [release notes](docs/releases/1.0.4.md)
+The current Mac release is version 1.0.4, build 2012. See [release notes](docs/releases/1.0.4.md)
 and [validation](docs/TESTING.md) for local results and separately recorded public-build verification.
 
 A small, native, open-source notebook for Apple silicon Macs, with a shared iPad app target. Built with SwiftUI, AppKit/UIKit, and PencilKit, with Sparkle for signed Mac updates and SwiftMath for offline equations. No Electron, cloud SDK, account, or telemetry.
