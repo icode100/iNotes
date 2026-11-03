@@ -1,5 +1,71 @@
 # Validation
 
+## Page numbering and tool-independent Select All candidate — 3 November 2026
+
+Implementation commit `7a379f0c4f43ccc601fd4508fdc31bada83abc4e`, based on
+published-build record `1f7cbd6`. This is an unpublished v1.0.4 / build 2016
+candidate. Active sheets are numbered consecutively in saved page order within
+their immediate chapter/topic. Deleting the middle page closes the gap; new
+pages append, and native list drag reordering updates the numbers. Valid older
+libraries with gaps normalize on load without changing IDs, titles, timestamps,
+stored array order or page payloads. Trash retains unique archival numbers for
+older-reader compatibility. Command-A from any page tool selects the whole mixed
+page while keeping the selected tool; unrelated focused text fields keep native
+Select All. Image-bearing iPad pages retain their existing read-only restriction.
+
+Local results on macOS 27.2 (26B123), Swift 6.4.2 Command Line Tools, macOS SDK 27.2:
+
+- `bash scripts/test.sh`: **122 standalone tests, zero failures, 3.60 seconds**.
+  Numbering regressions cover deletion/reset, reorder/move/update, restore,
+  duplication/import, formats 1/2/3, retained mixed payloads, invalid mutation
+  rollback, date/number tampering, stale counters and cross-parent Trash
+  collisions. The 10,000-sheet folder restore took 0.039 seconds; the 49,127-node
+  subtree query took 0.020 seconds. The first sandboxed run hit the existing
+  native file-coordination restriction in backup tests; the successful run used
+  native access with temporary test folders only.
+- The final native SwiftPM Debug Mac build passed with `--disable-sandbox`,
+  `--jobs 4`, and caches/scratch under `.build`. The final incremental compilation
+  took 3.71 seconds after the initial 32.39-second build. Existing workspace
+  concurrency and deprecated build-system warnings remain. The pinned SwiftMath
+  resource-lookup patch was applied only to the disposable dependency checkout.
+- The final isolated QA app passed plain `--smoke-test`, including **49 new
+  numbering/store checks** for delete/reset, native move offsets, folders/Trash,
+  invalid or filtered moves, retained sheet selection/content, exact archive
+  bytes and save/reopen. Existing store/updater and independent backup integration
+  checks passed too. Its 49,127-node import took 1.547 seconds and folder query
+  took 0.041 seconds. This command did not run the editor/UI harness.
+- Strict ad hoc bundle signature, ARM64 architecture, isolated bundle identity,
+  temporary library setting and absent updater keys were verified. Shell syntax,
+  iPad project plist syntax and `git diff --check` passed.
+
+The QA app is `/private/tmp/inotes-2016-qa-20261103/iNotes QA.app`, identity
+`io.inotes.combined-qa-20261103`, marketing version 1.0.4 and separate QA build 1.
+Its disposable library is `/private/tmp/inotes-2016-qa-20261103/library`; fresh
+fixtures include three pages plus body text, ink, a movable text box, equation
+and PNG image. It has separate preferences, no updater configuration and no
+connected production backup folders. The executable is 10,101,520 bytes, SHA-256
+`144250a5b241d086883bae067d577c599397c4150632e9e2edacd09eea79c3df`;
+the app contains 38,044,783 regular-file bytes. These Debug QA artifact sizes
+are not release-DMG or RAM measurements. QA instructions and a verification
+manifest are beside the app in `TESTING.txt` and `verification.json`.
+
+Evidence: `/private/tmp/inotes-sheet-number-core-final.log`,
+`/private/tmp/inotes-sheet-number-build.log`,
+`/private/tmp/inotes-combined-build-final.log`, and
+`/private/tmp/inotes-combined-qa-smoke.log`.
+
+`bash scripts/build-macos.sh` stopped at the missing full-Xcode `actool`
+preflight; the documented iPad simulator build stopped because `xcodebuild`
+requires full Xcode. DMG verification and local signed-appcast/signature
+regressions therefore remain deferred. No new DMG, signed update or public asset
+was published. Full Mac editor/responder diagnostics and opt-in iPad diagnostics
+were extended and compiled where supported, but **not executed**: the user
+requested manual UI testing and no computer control. No UI automation was used.
+Live Cmd-A/menu/drag behavior, cursor display and physical stylus/iPad checks
+remain unverified. Publication of build 2016 awaits the user's combined QA result,
+full hosted Native checks on the final source, and the release preflight/feed
+and workflow-counter recheck.
+
 ## Published v1.0.4 / build 2015 — 2 November 2026
 
 Released source [`7c62227`](https://github.com/icode100/iNotes/commit/7c6222769b5aa44cd985454396cdd39024aad746)
