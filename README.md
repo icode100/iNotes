@@ -7,10 +7,11 @@ Scenic sidebars have clearer labels and a quieter background.
 The current Mac release is version 1.0.4, build 2015. See [release notes](docs/releases/1.0.4.md)
 and [validation](docs/TESTING.md) for local results and separately recorded public-build verification.
 
-The pending v1.0.4 build 2016 keeps active sheets numbered consecutively after
+The v1.0.4 build 2016 candidate keeps active sheets numbered consecutively after
 deletion, restoration, moves, and drag reordering. It also makes **⌘A** select
-the whole page from every tool. Publication awaits the user's combined testing
-of an isolated local QA app.
+the whole page from every tool. The user confirmed combined testing of the
+isolated local QA app and authorized publication on 3 November 2026. Hosted
+checks and release verification remain pending.
 
 A small, native, open-source notebook for Apple silicon Macs, with a shared iPad app target. Built with SwiftUI, AppKit/UIKit, and PencilKit, with Sparkle for signed Mac updates and SwiftMath for offline equations. No Electron, cloud SDK, account, or telemetry.
 
@@ -69,7 +70,7 @@ Requires an Apple silicon Mac and macOS 14+. Building the installer requires ful
 open dist/iNotes.app
 ```
 
-The default local installer is `dist/iNotes-1.0.4-arm64.dmg` (version 1.0.4, candidate build 2016). This candidate is unpublished and awaits user QA; the latest recorded public build is 2015. Downloaded public builds are also ad hoc signed: **they are not Apple notarized**, so macOS may report that Apple could not verify iNotes is free of malware.
+The default local installer is `dist/iNotes-1.0.4-arm64.dmg` (version 1.0.4, candidate build 2016). User QA is confirmed and publication is authorized; hosted checks and release verification remain pending. The latest recorded public build is 2015. Downloaded public builds are also ad hoc signed: **they are not Apple notarized**, so macOS may report that Apple could not verify iNotes is free of malware.
 
 If you trust the download from the [official releases](https://github.com/icode100/iNotes/releases), follow Apple's [per-app first-open procedure](https://support.apple.com/en-us/102445):
 

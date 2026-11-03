@@ -1,5 +1,30 @@
 # Validation
 
+## Build 2016 publication preparation — 3 November 2026
+
+The user confirmed that both changes work in the isolated QA app and explicitly
+authorized publication on 3 November 2026. This satisfies the combined manual-QA
+gate recorded below; no local computer control or interactive UI automation was
+used. Physical stylus/iPad, older macOS and real cloud-delivery coverage are not
+established by that confirmation.
+
+[Native checks 41653405478](https://github.com/icode100/iNotes/actions/runs/41653405478)
+on `136353235a7a975960e07aba6ec28547159ffa88` passed 122 core tests, release
+packaging and the plain store/backup smoke checks, including 49 numbering checks.
+It stopped in the new Select All diagnostic at action dispatch from the Text
+responder; installer verification and iPad compilation were skipped. Publication
+has not started. The public feed still advertised 1.0.4/build 2015 and the latest
+release workflow counter remained 13 when checked. The next fresh release run
+14 is reserved for build 2016; exact-source checks must pass before dispatch.
+
+The diagnostic-only correction resolves the actual offscreen fixture's first
+responder and expected native action target, then uses AppKit responder-chain
+dispatch. The fixture cannot assume that it owns the application's global key
+window. Selection, payload, undo and unrelated-field assertions remain in place;
+no production input behavior or user-confirmed QA binary was changed by this
+correction. The local native Mac compilation passed; the interactive harness is
+left to hosted checks under the user's no-computer-control instruction.
+
 ## Page numbering and tool-independent Select All candidate — 3 November 2026
 
 Implementation commit `7a379f0c4f43ccc601fd4508fdc31bada83abc4e`, based on

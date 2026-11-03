@@ -955,6 +955,20 @@ enum EditorDiagnostics {
         try check(controller.commit(expected, action: "Earlier page edit"), "fixture retains a real earlier page undo action")
         let undoName = controller.history.undoActionName
         let selectAll = #selector(NSText.selectAll(_:))
+        func sendSelectAll(from expectedFirst: NSResponder, to expectedTarget: NSResponder, context: String) throws {
+            // Like the image Paste fixture below, this offscreen window need not
+            // be NSApp.keyWindow in a CLI/hosted run. Start at its actual first
+            // responder, assert the native chain's target, then use AppKit's own
+            // responder-chain dispatch. Do not activate the app or bypass focus.
+            try check(window.firstResponder === expectedFirst, "\(context) owns the fixture's actual first responder")
+            var target = window.firstResponder
+            while let responder = target, !responder.responds(to: selectAll) { target = responder.nextResponder }
+            try check(target === expectedTarget, "\(context) resolves Select All through the expected native responder chain")
+            let sender = NSMenuItem(title: "Select All", action: selectAll, keyEquivalent: "a")
+            sender.keyEquivalentModifierMask = .command
+            try check(window.firstResponder?.tryToPerform(selectAll, with: sender) == true,
+                      "\(context) dispatches Select All through its native responder chain")
+        }
         func allElementsSelected() -> Bool {
             controller.selection.strokes == Set(expected.strokes.map(\.id))
                 && controller.selection.nativeStrokes == [0]
@@ -966,7 +980,10 @@ enum EditorDiagnostics {
         for tool in InkTool.allCases {
             controller.perform(.clear)
             page.activeTool = tool; page.inkView.tool = tool == .text ? .pen : tool; page.focus(tool: tool)
-            try check(NSApp.sendAction(selectAll, to: nil, from: nil), "Select All resolves from \(tool.rawValue)'s native responder")
+            let selecting = tool == .select || tool == .lasso
+            let first: NSResponder = tool == .text ? page.textView : (selecting ? page.selectionView : page.inkView)
+            let target: NSResponder = tool == .text || selecting ? first : page
+            try sendSelectAll(from: first, to: target, context: tool.rawValue)
             try check(allElementsSelected(), "\(tool.rawValue) Select All includes body text, portable/native ink, text boxes, equations and images")
             try check(page.activeTool == tool && window.firstResponder === page.selectionView,
                       "\(tool.rawValue) keeps its chosen tool while page selection owns copy/cut/delete")
@@ -984,14 +1001,15 @@ enum EditorDiagnostics {
         page.activeTool = .text
         guard let boxEditor = page.textBoxViews[box.id]?.editor else { throw Failure(description: "Missing movable text editor") }
         window.makeFirstResponder(boxEditor)
-        try check(NSApp.sendAction(selectAll, to: nil, from: nil) && allElementsSelected(),
+        try sendSelectAll(from: boxEditor, to: boxEditor, context: "Movable text box")
+        try check(allElementsSelected(),
                   "Cmd-A from a movable native text box selects the whole page")
         page.selectionView.cancelOperation(nil)
         try check(controller.selection.isEmpty && page.activeTool == .text && window.firstResponder === page.textView,
                   "Escape clears temporary selection and restores the chosen Text tool")
 
         page.activeTool = .pen
-        _ = NSApp.sendAction(selectAll, to: nil, from: nil)
+        try sendSelectAll(from: page.inkView, to: page, context: "Pen before gesture")
         let point = NSPoint(x: 120, y: 220)
         guard let hover = NSEvent.mouseEvent(with: .mouseMoved, location: .zero, modifierFlags: [], timestamp: 0,
                                            windowNumber: window.windowNumber, context: nil, eventNumber: 0, clickCount: 0, pressure: 0),
@@ -1007,14 +1025,14 @@ enum EditorDiagnostics {
         let unrelated = RichTextEditor.makeNativeTextView()
         unrelated.frame = NSRect(x: 0, y: 0, width: 200, height: 40); unrelated.string = "Unrelated editor"
         host.addSubview(unrelated); window.makeFirstResponder(unrelated)
-        try check(NSApp.sendAction(selectAll, to: nil, from: nil)
-                  && unrelated.selectedRange() == NSRange(location: 0, length: (unrelated.string as NSString).length)
+        try sendSelectAll(from: unrelated, to: unrelated, context: "Unrelated text editor")
+        try check(unrelated.selectedRange() == NSRange(location: 0, length: (unrelated.string as NSString).length)
                   && controller.selection.isEmpty, "Unrelated text editors retain native Select All")
         let field = NSTextField(string: "Search, title or equation source")
         field.frame = NSRect(x: 0, y: 45, width: 300, height: 30); host.addSubview(field); window.makeFirstResponder(field)
         guard let fieldEditor = window.firstResponder as? NSTextView else { throw Failure(description: "Native field editor unavailable") }
-        try check(NSApp.sendAction(selectAll, to: nil, from: nil)
-                  && fieldEditor.selectedRange() == NSRange(location: 0, length: (field.stringValue as NSString).length)
+        try sendSelectAll(from: fieldEditor, to: fieldEditor, context: "Native search/title/equation field")
+        try check(fieldEditor.selectedRange() == NSRange(location: 0, length: (field.stringValue as NSString).length)
                   && controller.selection.isEmpty, "Native search/title/equation fields keep Select All scoped to their input")
 
         var noBody = expected; noBody.text = ""; noBody.rtfData = nil
@@ -1022,7 +1040,7 @@ enum EditorDiagnostics {
         let menuItem = NSMenuItem(title: "Select All", action: selectAll, keyEquivalent: "a")
         try check(page.textView.validateMenuItem(menuItem), "Select All stays enabled when the body is empty but page objects exist")
         controller.load(expected); controller.onRender?(expected); page.activeTool = .pen
-        _ = NSApp.sendAction(selectAll, to: nil, from: nil)
+        try sendSelectAll(from: page.inkView, to: page, context: "Pen before deletion")
         guard let deletion = NSEvent.keyEvent(with: .keyDown, location: .zero, modifierFlags: [], timestamp: 0,
                                              windowNumber: window.windowNumber, context: nil, characters: "\u{7f}",
                                              charactersIgnoringModifiers: "\u{7f}", isARepeat: false, keyCode: 51) else {

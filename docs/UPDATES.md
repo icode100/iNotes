@@ -45,9 +45,10 @@ does not publish a release.
 
 The 3 November 2026 candidate uses build 2016, keeps page numbers consecutive
 after deletion and reordering, and supports Command-A for the whole page from
-every tool. It is pending combined user testing in an isolated QA app (new
-identity, QA build 1, temporary library, updater disconnected). Publish only
-after the user confirms testing and authorizes it.
+every tool. The user confirmed combined testing in the isolated QA app (new
+identity, QA build 1, temporary library, updater disconnected) and authorized
+publication on 3 November 2026. Hosted checks and release verification remain
+pending.
 Recheck the public feed and workflow counter before publication.
 
 ```sh

@@ -262,13 +262,12 @@ Use temporary libraries (`INOTES_DATA_DIR` or explicit test directories) and an
 isolated QA app identity for manual work. Never use real notes for destructive tests.
 Use a dedicated simulator; do not erase or alter unrelated simulators.
 
-For the 3 November 2026 numbering and Select All fixes, the user performs
-combined manual QA and reports the result. Do not use computer control or
-interactive UI automation. Prepare
-an isolated QA app with a new bundle identity, QA build 1, temporary notes, and
-the updater disconnected. Planned public v1.0.4 build 2016 remains unpublished
-until the user confirms testing and authorizes publication; record the actual
-checks and any deferred gates in `docs/TESTING.md`.
+The user confirmed combined manual QA of the numbering and Select All fixes
+and authorized publication on 3 November 2026. The isolated QA app uses a new
+bundle identity, QA build 1, temporary notes, and a disconnected updater. Do not
+use computer control or interactive UI automation. Public v1.0.4 build 2016
+remains a candidate until exact-source hosted checks and release verification
+complete; record actual checks and any deferred gates in `docs/TESTING.md`.
 
 Google Drive and iCloud Drive integration writes versioned `.inotes` folder backups.
 Providers upload those files; iNotes does not provide CloudKit or bidirectional
