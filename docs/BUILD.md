@@ -48,15 +48,24 @@ The build script validates the property list, architecture, app signature, and D
 before publishing outputs. The verification script mounts it read-only and checks
 the packaged app and Applications shortcut.
 
-The defaults are version 1.0.4 and development build 2015, matching the published
-backup-retention update. This exceeds the
-original public v1.0.4 build 2012 and the isolated backup QA build 2013. For every
+The defaults are version 1.0.4 and candidate build 2016 for the pending
+sheet-numbering and Select All fixes. This exceeds published backup-retention build 2015,
+original public v1.0.4 build 2012, and isolated backup QA build 2013. For every
 later update, check the actual public appcast and choose a greater
 `CFBundleVersion`; Sparkle compares build numbers, not just the displayed version.
 The release workflow uses `2002 + GITHUB_RUN_NUMBER`: run 12 built
 2014 but failed a diagnostic coverage check before publishing; run 13 published
 2015, and run 14 produces 2016. A workflow rerun does not increase its build
 number; start a new dispatched run for a same-version rebuild.
+
+The 3 November 2026 changes keep active sheets numbered consecutively in page
+order, including after deletion and drag reordering, and make Command-A select
+all page content from every tool. Build 2016 is unpublished; publication is
+pending the user's combined manual testing and approval. Its local QA app
+uses a new bundle identity with QA build 1, a temporary library through
+`INOTES_DATA_DIR`, and no configured updater. Record local results separately
+from later hosted packaging and public assets.
+
 Build products stay under `dist`, module/package caches under `.build`, and the
 temporary native build scratch directory under `/private/tmp`. The scratch
 directory is removed after packaging. The script explicitly selects SwiftPM's

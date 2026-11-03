@@ -52,14 +52,27 @@ Use availability guards for APIs newer than the deployment target.
   they must not overwrite existing notebooks. Duplication preserves page payloads.
 - A sheet title may be empty; workbook/chapter/topic names must remain nonempty.
   Use `displayTitle` for visible/export fallbacks, not as a replacement stored title.
-- `sheetNumber` is allocated within the immediate chapter/topic. The parent's
-  `lastSheetNumber` is a high-water counter: Trash, restore, deletion, renaming,
-  search, and same-parent reordering must not renumber or reuse prior numbers.
-- Moving a sheet to another parent allocates that parent's next number. Folder
-  copies and whole-library imports keep independent numbering under their new IDs.
-- Legacy numbering migration orders by `createdAt`, then UUID for ties; it must
-  preserve content, IDs, timestamps, and stored array order. Reject nonfinite dates
-  before sorting. Content edits must not rewrite creation dates or numbering.
+- The user's 3 November 2026 sheet-numbering request supersedes the earlier
+  lifetime-allocation rule. Active `sheetNumber` values are contiguous page
+  numbers, starting at 1 within each immediate chapter/topic in saved page order.
+  Removing Sheet 2 from 1, 2, 3 immediately makes the former Sheet 3 become 2;
+  the next new sheet appends as 3. Removing all active sheets restarts at 1.
+- Creation, Trash, restoration, permanent deletion, duplication, moves, and
+  same-parent drag reordering must maintain that sequence. Dragging Sheet 3
+  between 1 and 2 makes it Sheet 2 and the former Sheet 2 become 3. Renaming,
+  content edits, and search do not change page order or numbers. Folder copies
+  and whole-library imports have independent sequences under their new IDs.
+- Trashed sheets are outside the active page sequence. Keep their stored
+  numbers unique among all siblings and keep `lastSheetNumber` covering the
+  stored maximum for older-reader compatibility. Neither archival Trash numbers
+  nor this compatibility counter may create gaps in the active sequence.
+  Restoring a sheet inserts it according to page order and normalizes the numbers.
+- Legacy numbering migration first assigns missing numbers by `createdAt`, then
+  UUID for ties; active numbers are then normalized by saved page order. Compact
+  gaps in valid older numbered libraries on load too. Preserve stored array order,
+  IDs, titles, timestamps, and all page payloads; reject nonfinite dates before
+  sorting. Incidental renumbering must not recreate the native editor or rewrite
+  content/creation metadata. Content edits alone must not change numbering.
 - Archive format 3 reads formats 1 and 2. Image-free new libraries default to format 2;
   adding positioned text/equations promotes format 1 to 2, and adding page images
   promotes to 3 without later downgrading. Add decoder defaults and legacy fixtures.
@@ -110,6 +123,12 @@ Do not treat callback-level cursor assertions alone as proof of the displayed cu
   Check width and zoom changes as well as switching from Text to ink.
 - Plain tool letters are text while a text field/editor has focus. Keep the modified
   tool shortcuts working without stealing note, search, title, or equation input.
+- The user's 3 November 2026 Select All request applies to every page tool.
+  Command-A / Select All from the page editor must select body text, ink,
+  positioned text boxes, equations, and images together, including from Text,
+  Pen, or other tools. Preserve native Select All within unrelated focused
+  search, title, equation-source, and other input fields; do not intercept it
+  globally. Keep the image-bearing iPad read-only restriction intact.
 - The user withdrew the new pressure experiment on 1 November 2026. Preserve
   the pre-experiment rendering and native PencilKit behavior; do not reintroduce
   the added 1×–2× pressure boost, completed-stroke width floor, portable native-width
@@ -243,6 +262,14 @@ Use temporary libraries (`INOTES_DATA_DIR` or explicit test directories) and an
 isolated QA app identity for manual work. Never use real notes for destructive tests.
 Use a dedicated simulator; do not erase or alter unrelated simulators.
 
+For the 3 November 2026 numbering and Select All fixes, the user performs
+combined manual QA and reports the result. Do not use computer control or
+interactive UI automation. Prepare
+an isolated QA app with a new bundle identity, QA build 1, temporary notes, and
+the updater disconnected. Planned public v1.0.4 build 2016 remains unpublished
+until the user confirms testing and authorizes publication; record the actual
+checks and any deferred gates in `docs/TESTING.md`.
+
 Google Drive and iCloud Drive integration writes versioned `.inotes` folder backups.
 Providers upload those files; iNotes does not provide CloudKit or bidirectional
 conflict merging. A successful folder write does not prove cloud delivery.
@@ -320,8 +347,9 @@ Sparkle compares build numbers: choose a value greater than the latest published
 `CFBundleVersion`; hosted release builds now use `2002 + GITHUB_RUN_NUMBER`.
 Run 10 shipped build 2010; the manual same-version security rebuild reserved 2011,
 and v1.0.4 run 11 published 2012. Backup QA used 2013; dispatched run 12 built
-2014 but failed verification before publishing. Run 13 published 2015, and the
-next new run (14) must produce 2016. A workflow rerun does not
+2014 but failed verification before publishing. Run 13 published 2015. Production
+candidate defaults now reserve 2016 for the numbering and Select All fixes; its separate QA
+identity uses build 1. The next new run (14) must produce 2016. A workflow rerun does not
 advance `GITHUB_RUN_NUMBER`. Never reuse its build number for an updated binary.
 The release workflow supports an explicit `workflow_dispatch` for the current
 stable version; wait for Native checks on its exact source commit first.

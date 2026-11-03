@@ -43,8 +43,15 @@ does not publish a release.
 
 ## Build and sign a local update
 
+The 3 November 2026 candidate uses build 2016, keeps page numbers consecutive
+after deletion and reordering, and supports Command-A for the whole page from
+every tool. It is pending combined user testing in an isolated QA app (new
+identity, QA build 1, temporary library, updater disconnected). Publish only
+after the user confirms testing and authorizes it.
+Recheck the public feed and workflow counter before publication.
+
 ```sh
-VERSION=1.0.4 BUILD_NUMBER=2015 bash scripts/build-macos.sh
+VERSION=1.0.4 BUILD_NUMBER=2016 bash scripts/build-macos.sh
 VERSION=1.0.4 bash scripts/verify-macos.sh
 VERSION=1.0.4 bash scripts/generate-appcast.sh
 VERSION=1.0.4 bash scripts/test-update-signatures.sh
@@ -56,7 +63,7 @@ using Apple CryptoKit and the committed public key. It does not upload anything.
 For v1.0.3, the security rebuild 2011 exceeds the initial public build 2010 and
 shared local builds 1010–1012. Check both published and shared `CFBundleVersion`
 values and use a larger number for every update, including same-version rebuilds.
-Development defaults (`1.0.4`, build 2015) are separate from the release workflow's
+Candidate defaults (`1.0.4`, build 2016) are separate from the release workflow's
 `2002 + GITHUB_RUN_NUMBER`. Run 11 published v1.0.4 build 2012; isolated backup QA
 used build 2013. Run 12 built 2014 but stopped at native diagnostic verification before publication.
 Run 13 published 2015, and run 14 must produce 2016 or higher. Failed build 2014

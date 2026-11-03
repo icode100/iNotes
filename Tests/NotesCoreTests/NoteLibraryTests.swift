@@ -116,7 +116,7 @@ final class NoteLibraryTests: XCTestCase {
         XCTAssertEqual(library.node(id: copy)?.sheetNumber, 3)
     }
 
-    func testSheetNumbersSurviveEditsTrashAndDeletionWithoutReuse() throws {
+    func testSheetNumbersFollowPageOrderAndReuseRemovedTail() throws {
         var (library, _, chapter, topic, first) = try hierarchy()
         let second = try library.create(kind: .sheet, parentID: topic)
         let otherScope = try library.create(kind: .sheet, parentID: chapter)
@@ -128,23 +128,144 @@ final class NoteLibraryTests: XCTestCase {
         try library.update(note)
         try library.rename(id: first, title: "Renamed")
         try library.move(id: second, to: topic, at: 0)
-        XCTAssertEqual(library.search("stable").first?.sheetNumber, 1)
+        XCTAssertEqual(library.search("stable").first?.sheetNumber, 2)
         XCTAssertEqual(library.node(id: first)?.createdAt, creation)
-        XCTAssertEqual(library.node(id: second)?.sheetNumber, 2)
+        XCTAssertEqual(library.node(id: second)?.sheetNumber, 1)
         try library.trash(id: second)
         let third = try library.create(kind: .sheet, parentID: topic)
-        XCTAssertEqual(library.node(id: third)?.sheetNumber, 3)
+        XCTAssertEqual(library.node(id: third)?.sheetNumber, 2)
+        XCTAssertEqual(library.node(id: third)?.displayTitle, "Sheet 2")
+        XCTAssertEqual(library.node(id: first)?.sheetNumber, 1)
+        XCTAssertEqual(library.node(id: otherScope)?.sheetNumber, 1)
         try library.restore(id: second)
-        XCTAssertEqual(library.node(id: second)?.sheetNumber, 2)
+        XCTAssertEqual(Set(library.children(of: topic).compactMap(\.sheetNumber)), Set([1, 2, 3]))
         try library.trash(id: third)
         try library.permanentlyDelete(id: third)
         try library.trash(id: second)
         library.emptyTrash()
         library = try LibraryArchive.decode(LibraryArchive.encode(library))
         let fourth = try library.create(kind: .sheet, parentID: topic)
-        XCTAssertEqual(library.node(id: fourth)?.sheetNumber, 4)
-        XCTAssertEqual(library.node(id: topic)?.lastSheetNumber, 4)
+        XCTAssertEqual(library.node(id: fourth)?.sheetNumber, 2)
         XCTAssertEqual(library.node(id: first)?.body, "Find stable numbering")
+        try library.validate()
+    }
+
+    func testMiddleDeletionCompactsPagesAndDraggingNewSheetRenumbersInPageOrder() throws {
+        var (library, _, _, topic, first) = try hierarchy()
+        let second = try library.create(kind: .sheet, parentID: topic)
+        let third = try library.create(kind: .sheet, title: "Third page", parentID: topic)
+        let originalThird = try XCTUnwrap(library.node(id: third))
+        try library.trash(id: second)
+        XCTAssertEqual(library.node(id: first)?.sheetNumber, 1)
+        XCTAssertEqual(library.node(id: third)?.sheetNumber, 2)
+        var compactedThird = try XCTUnwrap(library.node(id: third))
+        compactedThird.sheetNumber = originalThird.sheetNumber
+        XCTAssertEqual(compactedThird, originalThird)
+        let newSheet = try library.create(kind: .sheet, parentID: topic)
+        XCTAssertEqual(library.node(id: newSheet)?.sheetNumber, 3)
+        try library.move(id: newSheet, to: topic, at: 1)
+        XCTAssertEqual(library.children(of: topic).map(\.id), [first, newSheet, third])
+        XCTAssertEqual(library.children(of: topic).compactMap(\.sheetNumber), [1, 2, 3])
+        XCTAssertEqual(library.node(id: newSheet)?.displayTitle, "Sheet 2")
+        XCTAssertEqual(library.node(id: third)?.title, "Third page")
+        XCTAssertEqual(library.node(id: third)?.updatedAt, originalThird.updatedAt)
+        XCTAssertEqual(library.node(id: third)?.createdAt, originalThird.createdAt)
+        let reopened = try LibraryArchive.decode(LibraryArchive.encode(library))
+        XCTAssertEqual(reopened.children(of: topic).map(\.id), [first, newSheet, third])
+        XCTAssertEqual(reopened.children(of: topic).compactMap(\.sheetNumber), [1, 2, 3])
+        try reopened.validate()
+    }
+
+    func testRemovingAllSheetsRestartsAtOneWithOrWithoutRetainedTrash() throws {
+        for removal in ["trash", "permanent", "empty"] {
+            var (library, _, chapter, topic, first) = try hierarchy()
+            let second = try library.create(kind: .sheet, parentID: topic)
+            let otherScope = try library.create(kind: .sheet, parentID: chapter)
+            for id in [first, second] { try library.trash(id: id) }
+            if removal == "permanent" {
+                for id in [first, second] { try library.permanentlyDelete(id: id) }
+            } else if removal == "empty" { library.emptyTrash() }
+            library = try LibraryArchive.decode(LibraryArchive.encode(library))
+            let replacement = try library.create(kind: .sheet, parentID: topic)
+            XCTAssertEqual(library.node(id: replacement)?.sheetNumber, 1)
+            XCTAssertEqual(library.node(id: replacement)?.displayTitle, "Sheet 1")
+            XCTAssertEqual(library.node(id: otherScope)?.sheetNumber, 1)
+            XCTAssertEqual(library.children(of: topic).map(\.id), [replacement])
+            if removal == "trash" {
+                XCTAssertTrue(library.node(id: first)?.isTrashed == true)
+                XCTAssertTrue(library.node(id: second)?.isTrashed == true)
+            }
+            try library.validate()
+            _ = try LibraryArchive.decode(LibraryArchive.encode(library))
+        }
+    }
+
+    func testNumberReusePreservesTrashedAnnotatedPageAndArchiveCompatibility() throws {
+        var (library, _, _, topic, _) = try hierarchy()
+        let deleted = try library.create(kind: .sheet, title: "Annotated page", parentID: topic)
+        var page = try XCTUnwrap(library.node(id: deleted))
+        let png = try XCTUnwrap(Data(base64Encoded: "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR4nGP4z8DwHwAFAAH/iZk9HQAAAABJRU5ErkJggg=="))
+        page.pageContent = PageContent(text: "Keep this note — 日本語", rtfData: Data("{\\rtf1 preserved}".utf8),
+            strokes: [InkStroke(points: [InkPoint(x: 30, y: 50, pressure: 0.4)])],
+            pencilKitData: Data([0, 1, 127, 255]), textBoxes: [PageTextBox(text: "Caption")],
+            equations: [NoteEquation(latex: "x^2")], images: [PageImage(imageData: png)])
+        page.attachments = [NoteAttachment(filename: "keep.txt", data: Data([1, 2, 3]))]
+        page.tags = ["keep"]; page.isFavorite = true
+        try library.update(page)
+        try library.trash(id: deleted)
+        let archived = try XCTUnwrap(library.node(id: deleted))
+        let previousOrder = library.nodes.map(\.id)
+        let replacement = try library.create(kind: .sheet, parentID: topic)
+        XCTAssertEqual(library.node(id: replacement)?.sheetNumber, 2)
+        var displaced = try XCTUnwrap(library.node(id: deleted))
+        XCTAssertNotEqual(displaced.sheetNumber, library.node(id: replacement)?.sheetNumber)
+        // An archival number change must not look like a content edit or lose any payload.
+        displaced.sheetNumber = archived.sheetNumber
+        XCTAssertEqual(displaced, archived)
+        XCTAssertEqual(Array(library.nodes.dropLast()).map(\.id), previousOrder)
+        var reopened = try LibraryArchive.decode(LibraryArchive.encode(library))
+        XCTAssertEqual(reopened.formatVersion, 3)
+        XCTAssertEqual(reopened.node(id: deleted)?.pageContent, archived.pageContent)
+        try reopened.restore(id: deleted)
+        XCTAssertEqual(reopened.node(id: deleted)?.pageContent, archived.pageContent)
+        XCTAssertEqual(reopened.node(id: deleted)?.attachments, archived.attachments)
+        XCTAssertEqual(reopened.node(id: deleted)?.title, archived.title)
+        XCTAssertEqual(try XCTUnwrap(reopened.node(id: deleted)).createdAt.timeIntervalSince1970,
+                       archived.createdAt.timeIntervalSince1970, accuracy: 0.001)
+        let siblings = reopened.children(of: topic, includingTrash: true).filter { $0.kind == .sheet }
+        let numbers = siblings.compactMap(\.sheetNumber)
+        XCTAssertEqual(Set(numbers).count, siblings.count)
+        XCTAssertTrue(numbers.allSatisfy { $0 > 0 && $0 <= reopened.node(id: topic)!.lastSheetNumber })
+        try reopened.validate()
+    }
+
+    func testNumberReuseRejectsInvalidMovesAndUpdatesAtomically() throws {
+        var (library, workbook, chapter, _, sheet) = try hierarchy()
+        let deleted = try library.create(kind: .sheet, parentID: chapter)
+        try library.trash(id: deleted)
+        let before = library
+        var invalid = try XCTUnwrap(library.node(id: sheet))
+        invalid.parentID = chapter
+        invalid.strokes = [InkStroke(points: [InkPoint(x: .infinity, y: 0)])]
+        // The destination's trashed number must survive a rejected allocation/content edit.
+        XCTAssertThrowsError(try library.update(invalid))
+        XCTAssertEqual(library, before)
+        XCTAssertThrowsError(try library.move(id: sheet, to: workbook))
+        XCTAssertEqual(library, before)
+        var unsupported = library
+        unsupported.formatVersion = 999
+        let unsupportedBefore = unsupported
+        XCTAssertThrowsError(try unsupported.move(id: sheet, to: chapter))
+        XCTAssertEqual(unsupported, unsupportedBefore)
+
+        _ = try library.create(kind: .sheet, parentID: chapter)
+        let beforeRestore = library
+        invalid = try XCTUnwrap(library.node(id: deleted))
+        invalid.isTrashed = false
+        invalid.strokes = [InkStroke(points: [])]
+        XCTAssertThrowsError(try library.update(invalid))
+        XCTAssertEqual(library, beforeRestore)
+        try library.validate()
     }
 
     func testSheetMoveDuplicateAndImportKeepIndependentSequences() throws {
@@ -153,7 +274,7 @@ final class NoteLibraryTests: XCTestCase {
         try library.move(id: sheet, to: chapter)
         XCTAssertEqual(library.node(id: sheet)?.sheetNumber, 2)
         let topicNext = try library.create(kind: .sheet, parentID: topic)
-        XCTAssertEqual(library.node(id: topicNext)?.sheetNumber, 2)
+        XCTAssertEqual(library.node(id: topicNext)?.sheetNumber, 1)
         let sheetCopy = try library.duplicate(id: sheet)
         XCTAssertEqual(library.node(id: sheetCopy)?.sheetNumber, 3)
         let chapterCopy = try library.duplicate(id: chapter)
@@ -171,7 +292,189 @@ final class NoteLibraryTests: XCTestCase {
         try library.validate()
     }
 
-    func testLegacyNumberMigrationUsesCreationDateAndPreservesAllContent() throws {
+    func testStructuralUpdatesAndMovesReindexSourceAndDestinationPages() throws {
+        var (library, _, chapter, topic, first) = try hierarchy()
+        let second = try library.create(kind: .sheet, parentID: topic)
+        let third = try library.create(kind: .sheet, parentID: topic)
+        let destination = try library.create(kind: .sheet, parentID: chapter)
+        try library.move(id: second, to: chapter, at: 0)
+        XCTAssertEqual(library.children(of: topic).map(\.id), [first, third])
+        XCTAssertEqual(library.children(of: topic).compactMap(\.sheetNumber), [1, 2])
+        XCTAssertEqual(library.node(id: second)?.sheetNumber, 1)
+        XCTAssertEqual(library.node(id: destination)?.sheetNumber, 2)
+        try library.move(id: second, to: topic, at: 1)
+        XCTAssertEqual(library.children(of: topic).map(\.id), [first, second, third])
+        XCTAssertEqual(library.children(of: topic).compactMap(\.sheetNumber), [1, 2, 3])
+        XCTAssertEqual(library.node(id: destination)?.sheetNumber, 1)
+
+        var changed = try XCTUnwrap(library.node(id: third))
+        changed.order = -1
+        try library.update(changed)
+        XCTAssertEqual(library.children(of: topic).map(\.id), [third, first, second])
+        XCTAssertEqual(library.children(of: topic).compactMap(\.sheetNumber), [1, 2, 3])
+        changed = try XCTUnwrap(library.node(id: third)); changed.isTrashed = true
+        try library.update(changed)
+        XCTAssertEqual(library.children(of: topic).map(\.id), [first, second])
+        XCTAssertEqual(library.children(of: topic).compactMap(\.sheetNumber), [1, 2])
+        changed = try XCTUnwrap(library.node(id: third)); changed.isTrashed = false
+        try library.update(changed)
+        XCTAssertEqual(library.children(of: topic).map(\.id), [third, first, second])
+        XCTAssertEqual(library.children(of: topic).compactMap(\.sheetNumber), [1, 2, 3])
+        try library.validate()
+    }
+
+    func testRestoringSheetAncestorsAndFoldersReinstatesPageOrder() throws {
+        var (library, _, chapter, topic, first) = try hierarchy()
+        let second = try library.create(kind: .sheet, parentID: topic)
+        let outside = try library.create(kind: .sheet, parentID: chapter)
+        try library.trash(id: first)
+        XCTAssertEqual(library.node(id: second)?.sheetNumber, 1)
+        try library.trash(id: topic)
+        try library.restore(id: second)
+        XCTAssertFalse(library.node(id: topic)!.isTrashed)
+        XCTAssertTrue(library.node(id: first)!.isTrashed)
+        XCTAssertEqual(library.node(id: second)?.sheetNumber, 1)
+        try library.restore(id: topic)
+        XCTAssertEqual(library.children(of: topic).map(\.id), [first, second])
+        XCTAssertEqual(library.children(of: topic).compactMap(\.sheetNumber), [1, 2])
+        XCTAssertEqual(library.node(id: outside)?.sheetNumber, 1)
+        try library.validate()
+        _ = try LibraryArchive.decode(LibraryArchive.encode(library))
+    }
+
+    func testMovingTrashedSheetsAcrossParentsKeepsUniqueArchiveNumbersAndContent() throws {
+        for useContentUpdate in [false, true] {
+            var (library, _, chapter, topic, source) = try hierarchy()
+            let destination = try library.create(kind: .sheet, title: "Destination recovery page", parentID: chapter)
+            var sourcePage = try XCTUnwrap(library.node(id: source))
+            sourcePage.body = "Retain moved recovery text"
+            sourcePage.attachments = [NoteAttachment(filename: "keep.txt", data: Data([1, 2, 255]))]
+            try library.update(sourcePage)
+            try library.trash(id: source)
+            try library.trash(id: destination)
+            XCTAssertEqual(library.node(id: source)?.sheetNumber, 1)
+            XCTAssertEqual(library.node(id: destination)?.sheetNumber, 1)
+            let previousDestination = try XCTUnwrap(library.node(id: destination))
+            let previousSource = try XCTUnwrap(library.node(id: source))
+            if useContentUpdate {
+                var moved = previousSource
+                moved.parentID = chapter
+                try library.update(moved)
+            } else { try library.move(id: source, to: chapter) }
+            let siblings = library.children(of: chapter, includingTrash: true).filter { $0.kind == .sheet }
+            XCTAssertEqual(siblings.count, 2)
+            XCTAssertTrue(siblings.allSatisfy(\.isTrashed))
+            XCTAssertEqual(Set(siblings.compactMap(\.sheetNumber)).count, 2)
+            XCTAssertTrue(library.children(of: topic, includingTrash: true).isEmpty)
+            XCTAssertEqual(library.node(id: source)?.pageContent, previousSource.pageContent)
+            XCTAssertEqual(library.node(id: source)?.attachments, previousSource.attachments)
+            XCTAssertEqual(library.node(id: source)?.createdAt, previousSource.createdAt)
+            var retainedDestination = try XCTUnwrap(library.node(id: destination))
+            retainedDestination.sheetNumber = previousDestination.sheetNumber
+            XCTAssertEqual(retainedDestination, previousDestination)
+            library = try LibraryArchive.decode(LibraryArchive.encode(library))
+            try library.restore(id: source)
+            XCTAssertEqual(library.node(id: source)?.sheetNumber, 1)
+            XCTAssertEqual(library.node(id: source)?.body, previousSource.body)
+            XCTAssertTrue(library.node(id: destination)!.isTrashed)
+            try library.validate()
+        }
+    }
+
+    func testFolderDuplicateAndOldArchiveImportNormalizePageGaps() throws {
+        var (library, _, _, topic, first) = try hierarchy()
+        let second = try library.create(kind: .sheet, parentID: topic)
+        let third = try library.create(kind: .sheet, parentID: topic)
+        try library.trash(id: second)
+        let copy = try library.duplicate(id: topic)
+        XCTAssertEqual(library.children(of: copy).compactMap(\.sheetNumber), [1, 2])
+        let next = try library.create(kind: .sheet, parentID: copy)
+        XCTAssertEqual(library.node(id: next)?.sheetNumber, 3)
+
+        var archive = try XCTUnwrap(JSONSerialization.jsonObject(with: LibraryArchive.encode(library)) as? [String: Any])
+        var archivedNodes = try XCTUnwrap(archive["nodes"] as? [[String: Any]])
+        for index in archivedNodes.indices {
+            let id = archivedNodes[index]["id"] as? String
+            if id == topic.uuidString { archivedNodes[index]["lastSheetNumber"] = 99 }
+            if id == first.uuidString { archivedNodes[index]["sheetNumber"] = 7 }
+            if id == third.uuidString { archivedNodes[index]["sheetNumber"] = 19 }
+            if id == second.uuidString { archivedNodes[index]["sheetNumber"] = 55 }
+        }
+        archive["nodes"] = archivedNodes
+        for version in [1, 2, 3] {
+            archive["formatVersion"] = version
+            let compatible = try LibraryArchive.decode(JSONSerialization.data(withJSONObject: archive))
+            XCTAssertEqual(compatible.formatVersion, version)
+            XCTAssertEqual(compatible.children(of: topic).compactMap(\.sheetNumber), [1, 2])
+        }
+        let reopened = try LibraryArchive.decode(JSONSerialization.data(withJSONObject: archive))
+        XCTAssertEqual(reopened.children(of: topic).map(\.id), [first, third])
+        XCTAssertEqual(reopened.children(of: topic).compactMap(\.sheetNumber), [1, 2])
+        XCTAssertEqual(reopened.node(id: topic)?.lastSheetNumber, 99)
+        XCTAssertEqual(reopened.nodes.map(\.id), library.nodes.map(\.id))
+        XCTAssertEqual(reopened.node(id: first)?.body, library.node(id: first)?.body)
+        XCTAssertEqual(try XCTUnwrap(reopened.node(id: first)).createdAt.timeIntervalSince1970,
+                       try XCTUnwrap(library.node(id: first)).createdAt.timeIntervalSince1970, accuracy: 0.001)
+        var destination = NoteLibrary.sample()
+        let originalNodes = destination.nodes
+        let roots = try destination.merge(reopened)
+        XCTAssertEqual(Array(destination.nodes.prefix(originalNodes.count)), originalNodes)
+        for node in roots.flatMap({ destination.descendants(of: $0) }) where node.kind == .chapter || node.kind == .topic {
+            let sheets = destination.children(of: node.id).filter { $0.kind == .sheet }
+            XCTAssertEqual(sheets.compactMap(\.sheetNumber), (0..<sheets.count).map { $0 + 1 })
+        }
+        try destination.validate()
+    }
+
+    func testLargeFolderRestoreReindexesInOneBoundedPass() throws {
+        let count = 10_000
+        let date = Date(timeIntervalSince1970: 1_700_000_000)
+        let workbook = NoteNode(kind: .workbook, title: "Large restore", createdAt: date, updatedAt: date)
+        let chapter = NoteNode(parentID: workbook.id, kind: .chapter, title: "Pages", isTrashed: true,
+                               createdAt: date, updatedAt: date, lastSheetNumber: count)
+        let pages = (1...count).map { number in
+            NoteNode(parentID: chapter.id, kind: .sheet, title: "", body: "Page \(number)", isTrashed: true,
+                     createdAt: date, updatedAt: date, order: number, sheetNumber: number)
+        }
+        var library = NoteLibrary(nodes: pages + [chapter, workbook])
+        let storedOrder = library.nodes.map(\.id)
+        let started = ProcessInfo.processInfo.systemUptime
+        try library.restore(id: chapter.id)
+        let elapsed = ProcessInfo.processInfo.systemUptime - started
+        let restored = library.children(of: chapter.id)
+        XCTAssertEqual(restored.map(\.id), pages.map(\.id))
+        XCTAssertEqual(restored.compactMap(\.sheetNumber), Array(1...count))
+        XCTAssertEqual(restored.map(\.body), pages.map(\.body))
+        XCTAssertEqual(library.nodes.map(\.id), storedOrder)
+        XCTAssertLessThan(elapsed, 5.0)
+        try library.validate()
+        print("Large folder restore: \(count) pages, \(String(format: "%.3f", elapsed))s")
+    }
+
+    func testPageNumberOrderTiesUseCreationDateThenUUIDWithoutChangingStoredOrder() throws {
+        let date = Date(timeIntervalSince1970: 100)
+        let workbook = NoteNode(kind: .workbook, title: "Ties", createdAt: date, updatedAt: date)
+        let chapter = NoteNode(parentID: workbook.id, kind: .chapter, title: "Pages", createdAt: date, updatedAt: date)
+        let low = NoteNode(id: UUID(uuidString: "00000000-0000-0000-0000-000000000001")!, parentID: chapter.id,
+                           kind: .sheet, title: "Low UUID", createdAt: date, updatedAt: date, order: 7)
+        let high = NoteNode(id: UUID(uuidString: "00000000-0000-0000-0000-000000000002")!, parentID: chapter.id,
+                            kind: .sheet, title: "High UUID", createdAt: date, updatedAt: date, order: 7)
+        let earlier = NoteNode(parentID: chapter.id, kind: .sheet, title: "Earlier", createdAt: date.addingTimeInterval(-1),
+                               updatedAt: date, order: 7)
+        let stored = [high, chapter, earlier, low, workbook]
+        let library = NoteLibrary(nodes: stored)
+        let reversed = NoteLibrary(nodes: stored.reversed())
+        for candidate in [library, reversed] {
+            XCTAssertEqual(candidate.node(id: earlier.id)?.sheetNumber, 1)
+            XCTAssertEqual(candidate.node(id: low.id)?.sheetNumber, 2)
+            XCTAssertEqual(candidate.node(id: high.id)?.sheetNumber, 3)
+            try candidate.validate()
+        }
+        XCTAssertEqual(library.nodes.map(\.id), stored.map(\.id))
+        XCTAssertEqual(reversed.nodes.map(\.id), stored.reversed().map(\.id))
+    }
+
+    func testLegacyNumberMigrationUsesPageOrderAndPreservesAllContent() throws {
         let workbook = NoteNode(kind: .workbook, title: "Old workbook")
         let chapter = NoteNode(parentID: workbook.id, kind: .chapter, title: "Old chapter")
         let firstID = UUID(uuidString: "00000000-0000-0000-0000-000000000001")!
@@ -192,9 +495,9 @@ final class NoteLibraryTests: XCTestCase {
         archive["nodes"] = archivedNodes
         let legacyBytes = try JSONSerialization.data(withJSONObject: archive)
         var migrated = try LibraryArchive.decode(legacyBytes)
-        XCTAssertEqual(migrated.node(id: first.id)?.sheetNumber, 1)
-        XCTAssertEqual(migrated.node(id: second.id)?.sheetNumber, 2)
-        XCTAssertEqual(migrated.node(id: third.id)?.sheetNumber, 3)
+        XCTAssertEqual(migrated.node(id: first.id)?.sheetNumber, 2)
+        XCTAssertEqual(migrated.node(id: second.id)?.sheetNumber, 3)
+        XCTAssertEqual(migrated.node(id: third.id)?.sheetNumber, 1)
         XCTAssertEqual(migrated.node(id: first.id)?.body, first.body)
         XCTAssertEqual(migrated.node(id: first.id)?.strokes, first.strokes)
         XCTAssertEqual(migrated.node(id: first.id)?.createdAt, first.createdAt)
@@ -205,6 +508,8 @@ final class NoteLibraryTests: XCTestCase {
         let reversed = try LibraryArchive.decode(JSONSerialization.data(withJSONObject: archive))
         for node in migrated.nodes { XCTAssertEqual(reversed.node(id: node.id)?.sheetNumber, node.sheetNumber) }
         try migrated.restore(id: second.id)
+        XCTAssertEqual(migrated.children(of: chapter.id).map(\.id), [second.id, third.id, first.id])
+        XCTAssertEqual(migrated.children(of: chapter.id).compactMap(\.sheetNumber), [1, 2, 3])
         let fourth = try migrated.create(kind: .sheet, parentID: chapter.id)
         XCTAssertEqual(migrated.node(id: fourth)?.sheetNumber, 4)
         var destination = NoteLibrary()
@@ -212,8 +517,8 @@ final class NoteLibraryTests: XCTestCase {
         XCTAssertEqual(destination.descendants(of: try XCTUnwrap(importedRoots.first)).filter { $0.kind == .sheet }.compactMap(\.sheetNumber).sorted(), [1, 2, 3])
     }
 
-    func testNumberTamperingAndExhaustionCannotPartiallyMutateLibrary() throws {
-        var (library, _, chapter, topic, sheet) = try hierarchy()
+    func testNumberTamperingCannotPartiallyMutateLibrary() throws {
+        var (library, _, _, topic, sheet) = try hierarchy()
         let before = library
         var note = try XCTUnwrap(library.node(id: sheet)); note.sheetNumber = 99
         XCTAssertThrowsError(try library.update(note))
@@ -222,30 +527,51 @@ final class NoteLibraryTests: XCTestCase {
         var folder = try XCTUnwrap(library.node(id: topic)); folder.lastSheetNumber = 0
         XCTAssertThrowsError(try library.update(folder))
         XCTAssertEqual(library, before)
-        var fullNodes = library.nodes
-        let chapterIndex = try XCTUnwrap(fullNodes.firstIndex { $0.id == chapter })
-        fullNodes[chapterIndex].lastSheetNumber = Int.max
-        library = NoteLibrary(nodes: fullNodes)
-        let full = library
-        XCTAssertThrowsError(try library.create(kind: .sheet, parentID: chapter))
-        XCTAssertThrowsError(try library.move(id: sheet, to: chapter))
-        note = try XCTUnwrap(library.node(id: sheet)); note.parentID = chapter
-        XCTAssertThrowsError(try library.update(note))
-        XCTAssertEqual(library, full)
         let duplicateNumber = NoteNode(parentID: topic, kind: .sheet, title: "Collision", sheetNumber: 1)
         XCTAssertThrowsError(try NoteLibrary(nodes: before.nodes + [duplicateNumber]).validate())
         let negativeNumber = NoteNode(parentID: topic, kind: .sheet, title: "Invalid", sheetNumber: -1)
         XCTAssertThrowsError(try NoteLibrary(nodes: before.nodes + [negativeNumber]).validate())
         for invalidDate in [Double.nan, .infinity, -.infinity] {
-            var legacyNodes = before.nodes
-            legacyNodes.append(NoteNode(parentID: topic, kind: .sheet, title: "Bad date", createdAt: Date(timeIntervalSince1970: invalidDate)))
-            legacyNodes.append(NoteNode(parentID: topic, kind: .sheet, title: "Keep this note", createdAt: .distantPast))
-            for index in legacyNodes.indices { legacyNodes[index].sheetNumber = nil; legacyNodes[index].lastSheetNumber = 0 }
-            let invalid = NoteLibrary(nodes: legacyNodes)
-            XCTAssertThrowsError(try invalid.validate())
-            XCTAssertEqual(invalid.nodes.map(\.id), legacyNodes.map(\.id))
-            XCTAssertTrue(invalid.nodes.allSatisfy { $0.sheetNumber == nil })
+            for invalidCreation in [true, false] {
+                var legacyNodes = before.nodes
+                var badDate = NoteNode(parentID: topic, kind: .sheet, title: "Bad date")
+                if invalidCreation { badDate.createdAt = Date(timeIntervalSince1970: invalidDate) }
+                else { badDate.updatedAt = Date(timeIntervalSince1970: invalidDate) }
+                legacyNodes.append(badDate)
+                legacyNodes.append(NoteNode(parentID: topic, kind: .sheet, title: "Keep this note", createdAt: .distantPast))
+                for index in legacyNodes.indices { legacyNodes[index].sheetNumber = nil; legacyNodes[index].lastSheetNumber = 0 }
+                let invalid = NoteLibrary(nodes: legacyNodes)
+                XCTAssertThrowsError(try invalid.validate())
+                XCTAssertEqual(invalid.nodes.map(\.id), legacyNodes.map(\.id))
+                XCTAssertTrue(invalid.nodes.allSatisfy { $0.sheetNumber == nil })
+            }
         }
+    }
+
+    func testHistoricalMaximumCounterDoesNotBlockAvailableSheetNumbers() throws {
+        let (original, _, chapter, topic, sheet) = try hierarchy()
+        var nodes = original.nodes
+        for index in nodes.indices where nodes[index].id == chapter || nodes[index].id == topic {
+            nodes[index].lastSheetNumber = Int.max
+        }
+        var library = try LibraryArchive.decode(LibraryArchive.encode(NoteLibrary(nodes: nodes)))
+        let created = try library.create(kind: .sheet, parentID: chapter)
+        XCTAssertEqual(library.node(id: created)?.sheetNumber, 1)
+        try library.move(id: sheet, to: chapter)
+        XCTAssertEqual(library.node(id: sheet)?.sheetNumber, 2)
+        let sourceReplacement = try library.create(kind: .sheet, parentID: topic)
+        XCTAssertEqual(library.node(id: sourceReplacement)?.sheetNumber, 1)
+        var movedByUpdate = try XCTUnwrap(library.node(id: sourceReplacement))
+        movedByUpdate.parentID = chapter
+        movedByUpdate.order = 99
+        try library.update(movedByUpdate)
+        XCTAssertEqual(library.node(id: sourceReplacement)?.sheetNumber, 3)
+        let sourceNext = try library.create(kind: .sheet, parentID: topic)
+        XCTAssertEqual(library.node(id: sourceNext)?.sheetNumber, 1)
+        XCTAssertEqual(library.node(id: chapter)?.lastSheetNumber, Int.max)
+        XCTAssertEqual(library.node(id: topic)?.lastSheetNumber, Int.max)
+        try library.validate()
+        _ = try LibraryArchive.decode(LibraryArchive.encode(library))
     }
 
     func testMoveRejectsCycleAndAllowsReordering() throws {

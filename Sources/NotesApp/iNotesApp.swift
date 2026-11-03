@@ -40,6 +40,7 @@ struct iNotesApp: App {
                     print(try WorkspaceDiagnostics.run())
                 }
                 print(try StoreDiagnostics.run())
+                print(try StoreDiagnostics.runSheetNumberingChecks())
                 print(try StoreDiagnostics.runHierarchyChecks())
                 print(try BackupDiagnostics.run())
                 print("iNotes self-check passed: hierarchy, atomic save, reload, archive round-trip; \(ProcessInfo.processInfo.operatingSystemVersionString)")
@@ -88,6 +89,132 @@ struct iNotesApp: App {
 #if os(macOS)
 @MainActor
 enum StoreDiagnostics {
+    /// Exercise numbering and native-list move offsets without creating a UI window.
+    static func runSheetNumberingChecks() throws -> String {
+        let directory = FileManager.default.temporaryDirectory.appendingPathComponent("iNotes-numbering-check-\(UUID())")
+        let suite = "io.inotes.numbering-diagnostics.\(UUID())"
+        let preferences = UserDefaults(suiteName: suite)!
+        defer {
+            try? FileManager.default.removeItem(at: directory)
+            preferences.removePersistentDomain(forName: suite)
+        }
+        var checks = 0
+        func require(_ condition: @autoclosure () -> Bool, _ reason: String) throws {
+            guard condition() else {
+                throw NSError(domain: "iNotes.NumberingDiagnostics", code: 1, userInfo: [NSLocalizedDescriptionKey: reason])
+            }
+            checks += 1
+        }
+        let store = NotesStore(directory: directory, preferences: preferences)
+        guard let workbook = store.library.roots.first?.id else { throw LibraryError.nodeNotFound }
+        func createSheet(in parent: UUID) throws -> UUID {
+            store.create(.sheet, parent: parent)
+            guard store.errorMessage == nil, let id = store.sheetID,
+                  store.library.node(id: id)?.parentID == parent else { throw LibraryError.nodeNotFound }
+            return id
+        }
+        func checkSequence(_ ids: [UUID], in parent: UUID) throws {
+            let sheets = store.library.children(of: parent).filter { $0.kind == .sheet }
+            try require(sheets.map(\.id) == ids, "Sheet order follows the requested page positions")
+            try require(sheets.compactMap(\.sheetNumber) == Array(1...ids.count), "Active page numbers remain contiguous")
+        }
+        func rejectMove(_ offsets: IndexSet, to destination: Int, _ reason: String) throws {
+            let before = store.library
+            let selection = store.sheetID, folder = store.folderID
+            try require(!store.reorderSheets(fromOffsets: offsets, toOffset: destination), reason)
+            try require(store.library == before && store.sheetID == selection && store.folderID == folder,
+                        "Rejected reordering preserves notes and navigation")
+        }
+
+        store.create(.chapter, title: "Page numbering", parent: workbook)
+        guard let chapter = store.folderID else { throw LibraryError.nodeNotFound }
+        let first = try createSheet(in: chapter)
+        let second = try createSheet(in: chapter)
+        let third = try createSheet(in: chapter)
+        let png = Data(base64Encoded: "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR4nGP4z8DwHwAFAAH/iZk9HQAAAABJRU5ErkJggg==")!
+        store.update(first) {
+            $0.pageContent = PageContent(text: "Keep these notes — नमस्ते",
+                strokes: [InkStroke(points: [InkPoint(x: 30, y: 40), InkPoint(x: 80, y: 60)])],
+                textBoxes: [PageTextBox(x: 50, y: 70, text: "Caption")],
+                equations: [NoteEquation(latex: "x^2")],
+                images: [PageImage(x: 40, y: 50, width: 100, height: 100, imageData: png)])
+        }
+        store.rename(third, to: "A named page")
+        guard let original = store.library.node(id: first) else { throw LibraryError.nodeNotFound }
+        store.trash(second)
+        try checkSequence([first, third], in: chapter)
+        try require(store.library.node(id: second)?.isTrashed == true, "Deleted page remains recoverable in Trash")
+        let appended = try createSheet(in: chapter)
+        try checkSequence([first, third, appended], in: chapter)
+        store.sheetID = first
+        try require(store.reorderSheets(fromOffsets: IndexSet(integer: 2), toOffset: 1), "Page 3 can move between pages 1 and 2")
+        try checkSequence([first, appended, third], in: chapter)
+        try require(store.reorderSheets(fromOffsets: IndexSet(integer: 1), toOffset: 3), "A page can move downward to the end")
+        try checkSequence([first, third, appended], in: chapter)
+        try require(store.reorderSheets(fromOffsets: IndexSet(integer: 0), toOffset: 3), "The first page can move to the end")
+        try checkSequence([third, appended, first], in: chapter)
+        try require(store.reorderSheets(fromOffsets: IndexSet(integer: 2), toOffset: 0), "The final page can move to the start")
+        try checkSequence([first, third, appended], in: chapter)
+        try require(store.sheetID == first && store.folderID == chapter, "Reordering retains the selected editor identity")
+        try require(store.library.node(id: first)?.pageContent == original.pageContent
+                    && store.library.node(id: first)?.createdAt == original.createdAt
+                    && store.library.node(id: third)?.title == "A named page",
+                    "Reordering preserves text, ink, objects, image bytes, creation dates and titles")
+        for id in [first, third, appended] { store.trash(id) }
+        let restarted = try createSheet(in: chapter)
+        try checkSequence([restarted], in: chapter)
+        try require(store.library.node(id: first)?.pageContent == original.pageContent, "Restarting at Sheet 1 keeps deleted page content")
+
+        store.create(.chapter, title: "Mixed siblings", parent: workbook)
+        guard let mixed = store.folderID else { throw LibraryError.nodeNotFound }
+        let mixedFirst = try createSheet(in: mixed)
+        store.create(.topic, title: "Nested topic", parent: mixed)
+        guard let topic = store.folderID else { throw LibraryError.nodeNotFound }
+        let retained = try createSheet(in: mixed)
+        let mixedSecond = try createSheet(in: mixed)
+        let mixedThird = try createSheet(in: mixed)
+        store.trash(retained)
+        store.chooseFolder(mixed)
+        store.sheetID = mixedSecond
+        try require(store.reorderSheets(fromOffsets: IndexSet(integer: 2), toOffset: 1), "Visible offsets account for hidden folder and Trash siblings")
+        try checkSequence([mixedFirst, mixedThird, mixedSecond], in: mixed)
+        try require(store.library.children(of: mixed, includingTrash: true).map(\.id)
+                    == [mixedFirst, topic, retained, mixedThird, mixedSecond], "Full sibling insertion keeps the folder and Trash positions")
+        try require(store.reorderSheets(fromOffsets: IndexSet(integer: 0), toOffset: 3), "End insertion accounts for full sibling positions")
+        try checkSequence([mixedThird, mixedSecond, mixedFirst], in: mixed)
+        try require(store.sheetID == mixedSecond, "Mixed-sibling moves preserve selection")
+        try rejectMove(IndexSet([0, 1]), to: 3, "Multiple-sheet drag is rejected")
+        try rejectMove(IndexSet(integer: 99), to: 0, "Invalid source offset is rejected")
+        try rejectMove(IndexSet(integer: 0), to: -1, "Negative destination is rejected")
+        try rejectMove(IndexSet(integer: 0), to: 99, "Invalid destination offset is rejected")
+        store.search = "Caption"
+        try rejectMove(IndexSet(integer: 0), to: 1, "Search results cannot reorder a visible subset")
+        store.search = ""
+        store.filter = .favorites
+        try rejectMove(IndexSet(integer: 0), to: 1, "Favorites cannot reorder a visible subset")
+        store.filter = .trash
+        try rejectMove(IndexSet(integer: 0), to: 1, "Trash cannot reorder active pages")
+        store.filter = .all
+        let nested = try createSheet(in: topic)
+        store.chooseFolder(mixed)
+        store.sheetID = mixedSecond
+        let displayed = store.visibleSheets
+        guard let source = displayed.firstIndex(where: { $0.id == mixedFirst }),
+              let destination = displayed.firstIndex(where: { $0.id == nested }) else { throw LibraryError.nodeNotFound }
+        try rejectMove(IndexSet(integer: source), to: destination, "Cross-parent drag in a descendant-inclusive list is rejected")
+        let archive = try store.archiveData()
+        try require(store.flush() && store.errorMessage == nil, "Numbering and reordering save successfully")
+        let saved = try LibraryArchive.read(from: store.libraryURL)
+        try require(saved == archive, "Persistence writes the exact validated archive bytes")
+        let reopened = NotesStore(directory: directory, preferences: preferences)
+        try require(reopened.errorMessage == nil
+                    && reopened.library.children(of: mixed).filter { $0.kind == .sheet }.map(\.id) == [mixedThird, mixedSecond, mixedFirst]
+                    && reopened.library.node(id: mixedFirst)?.sheetNumber == 3
+                    && reopened.library.node(id: first)?.pageContent == original.pageContent,
+                    "Reopening preserves page positions, numbering and retained image-bearing notes")
+        return "Sheet numbering/store checks passed: \(checks), including delete/reset, native move offsets, mixed siblings, rejection, selection/content preservation and exact save/reopen"
+    }
+
     /// Exercise the real import-to-navigation path using a disposable library.
     static func runHierarchyChecks() throws -> String {
         let directory = FileManager.default.temporaryDirectory.appendingPathComponent("iNotes-hierarchy-check-\(UUID())")

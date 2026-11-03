@@ -83,6 +83,10 @@ final class NotesStore: ObservableObject {
     }
 
     var selectedSheet: NoteNode? { library.nodes.first { $0.id == sheetID } }
+    var canReorderSheets: Bool {
+        canSave && filter == .all && folderID != nil
+            && search.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
+    }
     func sheetNumber(_ id: UUID) -> Int? { library.node(id: id)?.sheetNumber }
     func sheetHeading(_ id: UUID) -> String {
         guard let sheet = library.node(id: id), sheet.kind == .sheet,
@@ -104,7 +108,11 @@ final class NotesStore: ObservableObject {
             }
             if let hits { return hits.contains(node.id) }
             return scopedIDs?.contains(node.id) ?? true
-        }.sorted { $0.order == $1.order ? $0.createdAt < $1.createdAt : $0.order < $1.order }
+        }.sorted {
+            if $0.order != $1.order { return $0.order < $1.order }
+            if $0.createdAt != $1.createdAt { return $0.createdAt < $1.createdAt }
+            return $0.id.uuidString < $1.id.uuidString
+        }
     }
 
     func children(_ parent: UUID?) -> [NoteNode] {
@@ -177,6 +185,8 @@ final class NotesStore: ObservableObject {
             let predicted = serializedBytes + delta
             // The small reserve covers envelope timestamp changes. Check the entire archive near the limit.
             let needsFullCheck = committedNode.parentID != library.nodes[index].parentID
+                || committedNode.isTrashed != library.nodes[index].isTrashed
+                || committedNode.order != library.nodes[index].order
                 || predicted > LibraryArchive.maximumBytes - 1024
             if mutate({ $0 = updatedLibrary }, checkSize: needsFullCheck) {
                 if !needsFullCheck { serializedBytes = predicted }
@@ -207,6 +217,25 @@ final class NotesStore: ObservableObject {
             chooseFolder(parent)
             if library.node(id: id)?.kind == .sheet { sheetID = id }
         }
+    }
+
+    /// Native list offsets refer to the displayed sheets, while core move positions
+    /// include every immediate sibling, including folders and retained Trash items.
+    /// Reordering never changes the selected sheet or its native editor identity.
+    @discardableResult
+    func reorderSheets(fromOffsets offsets: IndexSet, toOffset destination: Int) -> Bool {
+        guard canReorderSheets, offsets.count == 1, let source = offsets.first else { return false }
+        let displayed = visibleSheets
+        guard displayed.indices.contains(source), (0...displayed.count).contains(destination) else { return false }
+        if destination == source || destination == source + 1 { return true }
+        let moving = displayed[source]
+        let insertAfter = destination == displayed.count
+        let target = displayed[insertAfter ? displayed.count - 1 : destination]
+        guard let parent = moving.parentID, moving.parentID == target.parentID,
+              !moving.isTrashed, !target.isTrashed else { return false }
+        let siblings = library.children(of: parent, includingTrash: true).filter { $0.id != moving.id }
+        guard let targetPosition = siblings.firstIndex(where: { $0.id == target.id }) else { return false }
+        return mutate { try $0.move(id: moving.id, to: parent, at: targetPosition + (insertAfter ? 1 : 0)) }
     }
 
     @discardableResult private func mutate(_ work: (inout NoteLibrary) throws -> Void, checkSize: Bool = true) -> Bool {

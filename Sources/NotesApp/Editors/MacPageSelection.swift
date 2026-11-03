@@ -87,6 +87,7 @@ final class MacPageSelectionController: NSObject {
     private var observer: NSObjectProtocol?
     private var isApplying = false
     private var transientContent: PageContent?
+    private(set) var hasToolIndependentSelection = false
 
     override init() {
         super.init()
@@ -106,6 +107,17 @@ final class MacPageSelectionController: NSObject {
         guard !isApplying, self.content != content else { return }
         self.content = content
         transientContent = nil
+        selection = MacPageSelection()
+        hasToolIndependentSelection = false
+        page?.selectionView.needsDisplay = true
+    }
+
+    /// Cmd-A temporarily focuses the page selection while retaining the chosen
+    /// tool. The next page gesture or explicit tool choice resumes that tool.
+    func clearToolIndependentSelection() {
+        guard hasToolIndependentSelection else { return }
+        hasToolIndependentSelection = false
+        cancelPreview()
         selection = MacPageSelection()
         page?.selectionView.needsDisplay = true
     }
@@ -339,6 +351,7 @@ final class MacPageSelectionController: NSObject {
 
     func perform(_ command: PageSelectionCommand) {
         guard let page, page.inkView.isInputEnabled else { return }
+        let hadToolIndependentSelection = hasToolIndependentSelection
         if command == .paste {
             let board = NSPasteboard.general
             if let data = board.data(forType: NSPasteboard.PasteboardType(PageClipboardPayload.pasteboardType))
@@ -378,6 +391,12 @@ final class MacPageSelectionController: NSObject {
         case .redo: history.redo()
         case .clear: cancelPreview(); selection = MacPageSelection()
         case .selectAll:
+            page.textView.breakUndoCoalescing()
+            for box in page.textBoxViews.values { box.editor.breakUndoCoalescing() }
+            // Resigning the native editor can commit marked/composed text and
+            // update content. Select only after it accepts the focus change.
+            if let window = page.window, !window.makeFirstResponder(page.selectionView) { return }
+            hasToolIndependentSelection = page.activeTool != .select && page.activeTool != .lasso
             selection = MacPageSelection(strokes: Set(content.strokes.map(\.id)), nativeStrokes: Set(nativeDrawing(content)?.strokes.indices ?? 0..<0),
                                          textBoxes: Set(content.textBoxes.map(\.id)), equations: Set(content.equations.map(\.id)),
                                          images: Set(content.images.map(\.id)),
@@ -393,7 +412,12 @@ final class MacPageSelectionController: NSObject {
                 paste(PageClipboardPayload(textBoxes: [box]), offset: 0, action: "Paste Text")
             }
         }
-        page.window?.makeFirstResponder(page.selectionView)
+        if selection.isEmpty { hasToolIndependentSelection = false }
+        if hadToolIndependentSelection && selection.isEmpty {
+            page.focus(tool: page.activeTool)
+        } else {
+            page.window?.makeFirstResponder(page.selectionView)
+        }
         page.selectionView.needsDisplay = true
     }
 
@@ -622,7 +646,9 @@ final class MacPageSelectionView: NSView {
                 // too, so subsequent model refreshes keep this editor active.
                 page.activeTool = .text
                 ToolShortcuts.activate(.text)
-                window?.makeFirstResponder(view.editor); view.editor.selectAll(nil); return
+                window?.makeFirstResponder(view.editor)
+                view.editor.setSelectedRange(NSRange(location: 0, length: (view.editor.string as NSString).length))
+                return
             }
         }
         window?.makeFirstResponder(self)

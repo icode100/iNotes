@@ -76,6 +76,8 @@ extension UnifiedMacPageView {
                 view.editor.pageCursorProvider = { [weak self] in self?.activePageCursor }
                 view.editor.onPagePaste = { [weak self] in self?.handlePagePaste() ?? false }
                 view.editor.canPastePage = { [weak self] in self?.canPastePage() ?? false }
+                view.editor.onPageSelectAll = { [weak self] in self?.selectAllPageContent() ?? false }
+                view.editor.canSelectAllPage = { [weak self] in self?.inkView.isInputEnabled == true && self?.selectionController != nil }
                 view.editor.allowsPageTextUndo = { [weak self] in self?.inkView.isInputEnabled == true }
                 addSubview(view, positioned: .below, relativeTo: inkView)
                 textBoxViews[box.id] = view

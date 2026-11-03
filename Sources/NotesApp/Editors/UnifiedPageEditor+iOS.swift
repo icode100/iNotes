@@ -137,6 +137,13 @@ struct UnifiedPageEditor: UIViewRepresentable {
             self.view = view
             selection.page = view.page
             view.page.selectionView.controller = selection
+            view.page.prepareForPageSelection = { [weak self, weak view] in
+                guard let self, let view, self.parent.images.isEmpty, !self.nativeToolActive,
+                      !self.rejectedDrawing, view.page.isUserInteractionEnabled else { return false }
+                self.persistInk(view.page.canvas)
+                self.picker.setVisible(false, forFirstResponder: view.page.canvas)
+                return true
+            }
             selection.onRender = { [weak self, weak view] content in
                 guard let self, let view else { return }
                 self.render(content, on: view, theme: self.appliedTheme ?? self.parent.theme)
@@ -205,8 +212,8 @@ struct UnifiedPageEditor: UIViewRepresentable {
             let selecting = parent.tool == .select || parent.tool == .lasso
             view.page.selectionEnabled = selecting
             view.page.selectionView.tool = parent.tool
-            view.page.selectionView.isUserInteractionEnabled = enabled && selecting
-            view.page.selectionView.isHidden = !selecting
+            view.page.selectionInputAllowed = enabled
+            view.page.refreshSelectionPresentation()
             view.panGestureRecognizer.minimumNumberOfTouches = parent.tool == .text || selecting ? 2 : 1
             view.page.paper.style = parent.paper
             view.page.paper.theme = theme
@@ -245,7 +252,8 @@ struct UnifiedPageEditor: UIViewRepresentable {
             configureTool(on: view.page.canvas, theme: theme)
             view.page.canvas.drawingGestureRecognizer.isEnabled = enabled && !rejectedDrawing && parent.tool != .text && parent.tool != .line && !selecting
             lineGesture?.isEnabled = enabled && !rejectedDrawing && parent.tool == .line
-            view.page.selectionView.isUserInteractionEnabled = enabled && selecting && !rejectedDrawing
+            view.page.selectionInputAllowed = enabled && !rejectedDrawing
+            view.page.refreshSelectionPresentation()
             renderObjects(content, on: view, theme: theme, enabled: enabled)
             if !content.images.isEmpty {
                 showingImageWarning = true
@@ -268,11 +276,12 @@ struct UnifiedPageEditor: UIViewRepresentable {
             guard view.window != nil else { pendingFocus = tool; return }
             pendingFocus = nil
             let page = view.page
+            selection.dismissTemporarySelection()
             page.textToolSelected = tool == .text
             page.selectionEnabled = tool == .select || tool == .lasso
             page.selectionView.tool = tool
-            page.selectionView.isHidden = !page.selectionEnabled
-            page.selectionView.isUserInteractionEnabled = page.selectionEnabled
+            page.selectionInputAllowed = !rejectedDrawing
+            page.refreshSelectionPresentation()
             view.panGestureRecognizer.minimumNumberOfTouches = tool == .text || page.selectionEnabled ? 2 : 1
             page.canvas.drawingGestureRecognizer.isEnabled = !rejectedDrawing && tool != .text && tool != .line && !page.selectionEnabled
             lineGesture?.isEnabled = !rejectedDrawing && tool == .line
@@ -348,6 +357,7 @@ struct UnifiedPageEditor: UIViewRepresentable {
             view.page.canvas.undoManager?.removeAllActions(withTarget: view.page.canvas)
             linePreview.removeFromSuperlayer()
             view.page.onPencil = nil
+            view.page.prepareForPageSelection = nil
             selection.onRender = nil
             selection.onCommit = nil
             selection.page = nil
@@ -713,11 +723,12 @@ struct UnifiedPageEditor: UIViewRepresentable {
                 checks += try runV1Diagnostics()
                 checks += try runThemeDiagnostics()
                 checks += try runSelectionDiagnostics()
+                checks += try runSelectAllRoutingDiagnostics()
                 checks += try runRuledDiagnostics()
                 checks += try runToolShortcutDiagnostics()
                 checks += try runInputRoutingDiagnostics()
                 checks += try runNativeTypingUndoDiagnostics()
-                result = ["passed": true, "checks": checks, "message": "iPad straight lines, themes, ruled text baselines, canonical ink, mixed text/ink/equation selection, native metadata, clipboard duplication, and atomic undo/redo passed"]
+                result = ["passed": true, "checks": checks, "message": "iPad straight lines, themes, ruled text baselines, canonical ink, mixed page selection and Select All routing from every tool, native metadata, clipboard duplication, and atomic undo/redo passed"]
             } catch { result = ["passed": false, "checks": checks, "message": error.localizedDescription] }
             isLoading = true
             canvas.drawing = original
@@ -1054,6 +1065,105 @@ struct UnifiedPageEditor: UIViewRepresentable {
             return checks
         }
 
+        private func runSelectAllRoutingDiagnostics() throws -> Int {
+            guard let originalView = view, let originalWindow = originalView.window, let scene = originalWindow.windowScene else {
+                throw CocoaError(.featureUnsupported)
+            }
+            var checks = 0
+            func require(_ condition: @autoclosure () -> Bool, _ message: String) throws {
+                if !condition() { throw NSError(domain: "iNotes.iPadSelectAllDiagnostics", code: 1, userInfo: [NSLocalizedDescriptionKey: message]) }
+                checks += 1
+            }
+            let ink = [InkStroke(points: [InkPoint(x: 80, y: 140), InkPoint(x: 240, y: 160)])]
+            let drawing = PortableInkConverter.drawing(from: ink)
+            let source = PageContent(text: "Select all नमस्ते 👋", strokes: ink, pencilKitData: drawing.dataRepresentation(),
+                                     textBoxes: [PageTextBox(x: 420, y: 220, text: "Movable text")],
+                                     equations: [NoteEquation(latex: "x^2", x: 350, y: 350)])
+            var saved = source, writes = 0
+            let editor = UnifiedPageEditor(text: .constant(source.text), rtfData: .constant(source.rtfData),
+                                          strokes: .constant(source.strokes), pencilKitData: .constant(source.pencilKitData),
+                                          textBoxes: .constant(source.textBoxes), equations: .constant(source.equations),
+                                          tool: .pen, onPageChange: { saved = $0; writes += 1 })
+            let coordinator = Coordinator(editor)
+            let testView = UnifiedPageScrollView()
+            let host = UIViewController()
+            let window = UIWindow(windowScene: scene)
+            window.frame = scene.coordinateSpace.bounds
+            window.rootViewController = host
+            window.windowLevel = originalWindow.windowLevel + 1
+            host.view.addSubview(testView)
+            testView.frame = host.view.bounds
+            coordinator.attach(testView)
+            window.makeKeyAndVisible()
+            defer {
+                coordinator.detach(testView)
+                window.isHidden = true
+                window.rootViewController = nil
+                originalWindow.makeKey()
+                focus(parent.tool, in: originalView)
+            }
+            let page = testView.page
+            let controller = coordinator.selection
+            for tool in InkTool.allCases {
+                coordinator.parent.tool = tool
+                coordinator.update(testView, enabled: true)
+                coordinator.focus(tool, in: testView)
+                if tool == .text { page.textView.selectAll(nil) }
+                else if tool == .select || tool == .lasso { page.selectionView.selectAll(nil) }
+                else { page.canvas.selectAll(nil) }
+                try require(controller.selection.strokes == Set(source.strokes.map(\.id)) && controller.selection.nativeStrokes == [0],
+                            "Select All from \(tool.rawValue) includes portable and native ink")
+                try require(controller.selection.textBoxes == Set(source.textBoxes.map(\.id)) && controller.selection.equations == Set(source.equations.map(\.id)),
+                            "Select All from \(tool.rawValue) includes positioned text and equations")
+                try require(controller.selection.textRanges == [NSRange(location: 0, length: (source.text as NSString).length)],
+                            "Select All from \(tool.rawValue) includes the complete UTF-16 body")
+                try require(!page.selectionView.isHidden && page.selectionView.isFirstResponder && coordinator.parent.tool == tool,
+                            "Select All from \(tool.rawValue) shows the selection and preserves the chosen tool")
+                try require(controller.content == source && saved == source && writes == 0,
+                            "Select All from \(tool.rawValue) must not save or rewrite page content")
+                let command = page.keyCommands?.first { $0.input == "a" && $0.modifierFlags == .command }
+                try require(command?.action == #selector(UnifiedPencilPage.selectAll(_:)) && command?.wantsPriorityOverSystemBehavior == true,
+                            "Every page tool exposes the page-local Command-A action")
+                page.beginPageInteraction()
+                if tool != .select && tool != .lasso {
+                    try require(controller.selection.isEmpty && page.selectionView.isHidden,
+                                "The next ordinary \(tool.rawValue) gesture clears temporary selection")
+                } else {
+                    try require(!controller.selection.isEmpty && !page.selectionView.isHidden,
+                                "Select and Lasso retain their normal draggable selection")
+                }
+            }
+            coordinator.parent.tool = .text
+            coordinator.update(testView, enabled: true)
+            coordinator.focus(.text, in: testView)
+            guard let box = page.textBoxViews[source.textBoxes[0].id] else { throw CocoaError(.featureUnsupported) }
+            try require(box.editor.becomeFirstResponder(), "Movable-text Select All uses a native focused editor")
+            box.editor.selectAll(nil)
+            try require(controller.selection.textBoxes == Set(source.textBoxes.map(\.id)) && controller.selection.nativeStrokes == [0],
+                        "Select All inside movable text selects the entire mixed page")
+            controller.perform(.delete)
+            try require(saved.text.isEmpty && saved.strokes.isEmpty && saved.textBoxes.isEmpty && saved.equations.isEmpty,
+                        "Delete after Select All removes the whole mixed page atomically")
+            controller.history.undo()
+            try require(saved == source, "One undo restores every page element after Select All and Delete")
+            controller.perform(.clear)
+            let outside = UITextField(frame: CGRect(x: 20, y: 20, width: 300, height: 40))
+            outside.text = "Search and title text"
+            host.view.addSubview(outside)
+            try require(outside.becomeFirstResponder(), "External input safety uses a real text-field responder")
+            outside.selectAll(nil)
+            try require(outside.selectedTextRange.map { outside.offset(from: $0.start, to: $0.end) } == outside.text!.utf16.count
+                && controller.selection.isEmpty, "Search/title Select All stays in its focused field")
+            let equationInput = UITextView(frame: CGRect(x: 20, y: 80, width: 300, height: 80))
+            equationInput.text = "\\frac{1}{2}"
+            host.view.addSubview(equationInput)
+            try require(equationInput.becomeFirstResponder(), "Equation-source safety uses a real external text editor")
+            equationInput.selectAll(nil)
+            try require(equationInput.selectedRange == NSRange(location: 0, length: equationInput.text.utf16.count)
+                && controller.selection.isEmpty && saved == source, "Equation-source Select All preserves ordinary native behavior")
+            return checks
+        }
+
         private func runRuledDiagnostics() throws -> Int {
             var checks = 0
             func require(_ condition: @autoclosure () -> Bool, _ message: String) throws {
@@ -1148,7 +1258,7 @@ struct UnifiedPageEditor: UIViewRepresentable {
             try require(plain(page.keyCommands ?? []).count == ToolShortcuts.all.count, "Focused drawing page must expose plain tool letters")
             try require(page.textView.becomeFirstResponder(), "Shortcut safety must be tested with a real native text responder")
             let bodyCommands = page.keyCommands ?? []
-            try require(plain(bodyCommands).isEmpty && bodyCommands.count == ToolShortcuts.all.count, "Typing in body text must preserve ordinary letters and expose only Command-Option shortcuts")
+            try require(plain(bodyCommands).isEmpty && bodyCommands.count == ToolShortcuts.all.count + 1, "Typing in body text must preserve ordinary letters and expose modified tools plus page Select All")
             page.textToolSelected = true
             page.textView.resignFirstResponder()
             page.canvas.becomeFirstResponder()
@@ -1172,7 +1282,7 @@ struct UnifiedPageEditor: UIViewRepresentable {
             }
             try require(box.editor.becomeFirstResponder(), "Shortcut safety must cover a native movable-text editor")
             let boxCommands = page.keyCommands ?? []
-            try require(plain(boxCommands).isEmpty && boxCommands.count == ToolShortcuts.all.count, "Typing in a movable textbox must preserve ordinary letters")
+            try require(plain(boxCommands).isEmpty && boxCommands.count == ToolShortcuts.all.count + 1, "Typing in a movable textbox must preserve ordinary letters")
             try require(page.textView.text == previousText && richTextCoordinator.lastRTF == previousRTF && box.editor.text == "Typing safety", "Inspecting tool shortcuts must not edit native text or rich-text bytes")
             return checks
         }
@@ -1430,21 +1540,41 @@ final class UnifiedPageScrollView: UIScrollView {
 @MainActor
 final class UnifiedPencilPage: UIView {
     let paper = UnifiedPaperView()
-    let canvas = PKCanvasView()
-    let textView = UITextView()
+    let canvas = IOSPageCanvasView()
+    let textView = IOSPageTextView()
     let selectionView = IOSPageSelectionView()
     var textBoxViews: [UUID: IOSTextBoxView] = [:]
     var equationViews: [UUID: EquationDisplayView] = [:]
     var textToolSelected = false
     var selectionEnabled = false
+    var selectionInputAllowed = true
+    var prepareForPageSelection: (() -> Bool)?
     var theme: PageTheme { paper.theme }
     var activeTextView: UITextView? {
         if textView.isFirstResponder { return textView }
         return textBoxViews.values.first(where: { $0.editor.isFirstResponder })?.editor
     }
     override var keyCommands: [UIKeyCommand]? {
-        ToolShortcuts.keyCommands(includePlain: !textToolSelected && activeTextView == nil, action: #selector(activateToolShortcut(_:)))
+        let selectAll = UIKeyCommand(input: "a", modifierFlags: .command, action: #selector(selectAll(_:)))
+        selectAll.discoverabilityTitle = "Select All Page Content"
+        selectAll.wantsPriorityOverSystemBehavior = true
+        return ToolShortcuts.keyCommands(includePlain: !textToolSelected && activeTextView == nil, action: #selector(activateToolShortcut(_:))) + [selectAll]
     }
+    override func selectAll(_ sender: Any?) { selectionView.controller?.perform(.selectAll) }
+    override func canPerformAction(_ action: Selector, withSender sender: Any?) -> Bool {
+        if action == #selector(selectAll(_:)) {
+            return isUserInteractionEnabled && selectionInputAllowed && selectionView.controller != nil
+        }
+        return super.canPerformAction(action, withSender: sender)
+    }
+
+    func refreshSelectionPresentation() {
+        let temporary = selectionView.controller.map { $0.selectionIsTemporary && !$0.selection.isEmpty } ?? false
+        selectionView.isHidden = !selectionEnabled && !temporary
+        selectionView.isUserInteractionEnabled = isUserInteractionEnabled && selectionInputAllowed && !selectionView.isHidden
+    }
+
+    func beginPageInteraction() { selectionView.controller?.dismissTemporarySelection() }
     @objc func activateToolShortcut(_ command: UIKeyCommand) {
         if let tool = ToolShortcuts.tool(for: command) { ToolShortcuts.activate(tool) }
     }
@@ -1486,6 +1616,9 @@ final class UnifiedPencilPage: UIView {
     /// diagnostics supply the type without fabricating private UITouch objects.
     func inputHitTest(at point: CGPoint, isPencil: Bool, event: UIEvent? = nil) -> UIView? {
         guard isUserInteractionEnabled, !isHidden, alpha > 0.01, self.point(inside: point, with: event) else { return nil }
+        if event?.allTouches?.contains(where: { $0.phase == .began }) == true {
+            beginPageInteraction()
+        }
         if textToolSelected {
             for object in equationViews.values.reversed() where object.frame.contains(point) {
                 if let hit = object.hitTest(convert(point, to: object), with: event) { return hit }
@@ -1504,6 +1637,47 @@ final class UnifiedPencilPage: UIView {
         textView.isUserInteractionEnabled = false
         defer { textView.isUserInteractionEnabled = textWasInteractive }
         return super.hitTest(point, with: event)
+    }
+}
+
+/// Only note-page native responders share the page-wide Select All action.
+/// Search, titles, and equation-source editors use their normal UIKit behavior.
+@MainActor
+final class IOSPageTextView: UITextView {
+    override func canPerformAction(_ action: Selector, withSender sender: Any?) -> Bool {
+        if action == #selector(selectAll(_:)), let page = enclosingNotePage {
+            return page.canPerformAction(action, withSender: sender)
+        }
+        return super.canPerformAction(action, withSender: sender)
+    }
+    override func selectAll(_ sender: Any?) {
+        if let page = enclosingNotePage { page.selectAll(sender) }
+        else { super.selectAll(sender) }
+    }
+}
+
+@MainActor
+final class IOSPageCanvasView: PKCanvasView {
+    override func canPerformAction(_ action: Selector, withSender sender: Any?) -> Bool {
+        if action == #selector(selectAll(_:)), let page = enclosingNotePage {
+            return page.canPerformAction(action, withSender: sender)
+        }
+        return super.canPerformAction(action, withSender: sender)
+    }
+    override func selectAll(_ sender: Any?) {
+        if let page = enclosingNotePage { page.selectAll(sender) }
+        else { super.selectAll(sender) }
+    }
+}
+
+private extension UIView {
+    var enclosingNotePage: UnifiedPencilPage? {
+        var ancestor = superview
+        while let view = ancestor {
+            if let page = view as? UnifiedPencilPage { return page }
+            ancestor = view.superview
+        }
+        return nil
     }
 }
 

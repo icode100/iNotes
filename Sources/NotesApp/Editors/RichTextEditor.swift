@@ -236,6 +236,8 @@ struct RichTextEditor: NSViewRepresentable {
 final class NotesTextView: NSTextView {
     // Late native cursor updates must follow the tool that owns the page.
     var pageCursorProvider: (() -> NSCursor?)?
+    var onPageSelectAll: (() -> Bool)?
+    var canSelectAllPage: (() -> Bool)?
     var allowsPageTextUndo: (() -> Bool)?
     var onPageUndoComplete: (() -> Void)?
 
@@ -307,11 +309,16 @@ final class NotesTextView: NSTextView {
     var canPastePage: (() -> Bool)?
     override func validateMenuItem(_ menuItem: NSMenuItem) -> Bool {
         if menuItem.action == #selector(paste(_:)), canPastePage?() == true { return true }
+        if menuItem.action == #selector(selectAll(_:)), canSelectAllPage?() == true { return true }
         return super.validateMenuItem(menuItem)
     }
     override func paste(_ sender: Any?) {
         if onPagePaste?() == true { return }
         super.paste(sender)
+    }
+    override func selectAll(_ sender: Any?) {
+        if onPageSelectAll?() == true { return }
+        super.selectAll(sender)
     }
     var onTabletProximity: ((NSEvent) -> Void)?
     override func becomeFirstResponder() -> Bool {

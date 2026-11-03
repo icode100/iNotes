@@ -115,9 +115,9 @@ public struct NoteNode: Identifiable, Codable, Equatable, Sendable {
     public var isTrashed: Bool
     public var createdAt: Date
     public var updatedAt: Date
-    /// Allocated once within the sheet's chapter/topic; moving to another container allocates a new number.
+    /// One-based page position among active sheets in the immediate chapter/topic.
     public var sheetNumber: Int?
-    /// Highest number allocated by a chapter/topic, including sheets that have since been deleted.
+    /// Compatibility upper bound for active and Trash numbers, not the next page-number source.
     public var lastSheetNumber: Int
     public var order: Int
     public var paperStyle: PaperStyle

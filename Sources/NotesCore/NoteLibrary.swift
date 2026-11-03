@@ -29,7 +29,7 @@ public struct NoteLibrary: Codable, Equatable, Sendable {
 
     public func children(of parentID: UUID?, includingTrash: Bool = false) -> [NoteNode] {
         nodes.filter { $0.parentID == parentID && (includingTrash || !$0.isTrashed) }
-            .sorted { $0.order == $1.order ? $0.createdAt < $1.createdAt : $0.order < $1.order }
+            .sorted(by: Self.pageOrder)
     }
 
     public var roots: [NoteNode] { children(of: nil) }
@@ -81,9 +81,12 @@ public struct NoteLibrary: Codable, Equatable, Sendable {
             throw LibraryError.invalidData("Topics are nested more than 128 levels deep.")
         }
         let nextOrder = try nextOrder(in: parentID)
-        let number = kind == .sheet ? try reserveSheetNumber(in: parentID) : nil
+        let number = kind == .sheet ? 1 : nil
         let node = NoteNode(parentID: parentID, kind: kind, title: clean, order: nextOrder, sheetNumber: number)
-        nodes.append(node); touch(); return node.id
+        var candidate = self
+        candidate.nodes.append(node)
+        if kind == .sheet, let parentID { try candidate.resequenceSheets(in: [parentID]) }
+        candidate.touch(); self = candidate; return node.id
     }
 
     public mutating func rename(id: UUID, title: String) throws {
@@ -107,7 +110,6 @@ public struct NoteLibrary: Codable, Equatable, Sendable {
         replacement.title = try Self.cleanTitle(replacement.title, kind: replacement.kind)
         if replacement.kind == .sheet, replacement.parentID != previous.parentID {
             try candidate.validateParent(kind: .sheet, parentID: replacement.parentID)
-            replacement.sheetNumber = try candidate.reserveSheetNumber(in: replacement.parentID)
         }
         replacement.updatedAt = Date()
         candidate.nodes[index] = replacement
@@ -120,6 +122,9 @@ public struct NoteLibrary: Codable, Equatable, Sendable {
             // Existing structure is unchanged. Avoid scanning every other sheet's ink on each keypress.
             try Self.validatePayload(replacement, previous: previous)
         } else {
+            if replacement.kind == .sheet {
+                try candidate.resequenceSheets(in: Set([previous.parentID, replacement.parentID].compactMap { $0 }))
+            }
             try candidate.validate()
         }
         candidate.touch(); self = candidate
@@ -127,7 +132,7 @@ public struct NoteLibrary: Codable, Equatable, Sendable {
 
     public mutating func move(id: UUID, to parentID: UUID?, at order: Int? = nil) throws {
         guard let node = node(id: id) else { throw LibraryError.nodeNotFound }
-        if parentID == id || descendants(of: id).contains(where: { $0.id == parentID }) { throw LibraryError.cycle }
+        if parentID == id || parentID.map({ subtreeIDs(rootID: id).contains($0) }) == true { throw LibraryError.cycle }
         try validateParent(kind: node.kind, parentID: parentID)
         let siblings = children(of: parentID, includingTrash: true).filter { $0.id != id }
         let destination = max(0, min(order ?? siblings.count, siblings.count))
@@ -135,13 +140,12 @@ public struct NoteLibrary: Codable, Equatable, Sendable {
         sorted.insert(id, at: destination)
         var candidate = self
         try candidate.mutate(id) { $0.parentID = parentID }
-        if node.kind == .sheet, node.parentID != parentID,
-           let index = candidate.nodes.firstIndex(where: { $0.id == id }) {
-            let number = try candidate.reserveSheetNumber(in: parentID)
-            candidate.nodes[index].sheetNumber = number
-        }
+        let indices = Dictionary(uniqueKeysWithValues: candidate.nodes.indices.map { (candidate.nodes[$0].id, $0) })
         for (position, siblingID) in sorted.enumerated() {
-            if let index = candidate.nodes.firstIndex(where: { $0.id == siblingID }) { candidate.nodes[index].order = position }
+            if let index = indices[siblingID] { candidate.nodes[index].order = position }
+        }
+        if node.kind == .sheet {
+            try candidate.resequenceSheets(in: Set([node.parentID, parentID].compactMap { $0 }))
         }
         try candidate.validate(); self = candidate
     }
@@ -163,11 +167,14 @@ public struct NoteLibrary: Codable, Equatable, Sendable {
             if oldID == id {
                 if !item.title.isEmpty { item.title = String(item.title.prefix(249)) + " (copy)" }
                 item.order = copyOrder
-                if item.kind == .sheet { item.sheetNumber = try candidate.reserveSheetNumber(in: item.parentID) }
+                if item.kind == .sheet { item.sheetNumber = 1 }
             }
             // Attachment/stroke IDs are local to a sheet, so their bytes need no rewriting.
             candidate.nodes.append(item)
         }
+        let copiedIDs = Set(mapping.values)
+        let parents = Set(candidate.nodes.filter { copiedIDs.contains($0.id) && $0.kind == .sheet }.compactMap(\.parentID))
+        try candidate.resequenceSheets(in: parents)
         candidate.touch()
         _ = try LibraryArchive.encode(candidate)
         self = candidate
@@ -176,27 +183,36 @@ public struct NoteLibrary: Codable, Equatable, Sendable {
 
     public mutating func trash(id: UUID) throws {
         guard node(id: id) != nil else { throw LibraryError.nodeNotFound }
-        let ids = Set([id] + descendants(of: id).map(\.id))
+        let ids = subtreeIDs(rootID: id)
         let now = Date()
-        for index in nodes.indices where ids.contains(nodes[index].id) {
-            nodes[index].isTrashed = true; nodes[index].updatedAt = now
+        var candidate = self
+        var parents = Set<UUID>()
+        for index in candidate.nodes.indices where ids.contains(candidate.nodes[index].id) {
+            if candidate.nodes[index].kind == .sheet, let parent = candidate.nodes[index].parentID { parents.insert(parent) }
+            candidate.nodes[index].isTrashed = true; candidate.nodes[index].updatedAt = now
         }
-        touch()
+        try candidate.resequenceSheets(in: parents)
+        candidate.touch(); self = candidate
     }
 
     public mutating func restore(id: UUID) throws {
         guard node(id: id) != nil else { throw LibraryError.nodeNotFound }
-        let ids = Set(path(to: id).map(\.id) + descendants(of: id).map(\.id))
+        let ids = Set(path(to: id).map(\.id)).union(subtreeIDs(rootID: id))
         let now = Date()
-        for index in nodes.indices where ids.contains(nodes[index].id) {
-            nodes[index].isTrashed = false; nodes[index].updatedAt = now
+        var candidate = self
+        var parents = Set<UUID>()
+        for index in candidate.nodes.indices where ids.contains(candidate.nodes[index].id) {
+            if candidate.nodes[index].kind == .sheet, let parent = candidate.nodes[index].parentID { parents.insert(parent) }
+            candidate.nodes[index].isTrashed = false; candidate.nodes[index].updatedAt = now
         }
-        touch()
+        try candidate.resequenceSheets(in: parents)
+        try candidate.validate()
+        candidate.touch(); self = candidate
     }
 
     public mutating func permanentlyDelete(id: UUID) throws {
         guard let existing = node(id: id), existing.isTrashed else { throw LibraryError.invalidData("Only items in Trash can be permanently deleted.") }
-        let ids = Set([id] + descendants(of: id).map(\.id))
+        let ids = subtreeIDs(rootID: id)
         nodes.removeAll { ids.contains($0.id) }; touch()
     }
 
@@ -370,13 +386,49 @@ public struct NoteLibrary: Codable, Equatable, Sendable {
 
     private mutating func touch() { modifiedAt = Date() }
 
-    private mutating func reserveSheetNumber(in parentID: UUID?) throws -> Int {
-        guard let parentID, let index = nodes.firstIndex(where: { $0.id == parentID }),
-              nodes[index].kind == .chapter || nodes[index].kind == .topic else { throw LibraryError.invalidParent }
-        let (number, overflow) = nodes[index].lastSheetNumber.addingReportingOverflow(1)
-        guard !overflow, number > 0 else { throw LibraryError.invalidData("This chapter or topic has reached its sheet number limit.") }
-        nodes[index].lastSheetNumber = number
-        return number
+    private static func pageOrder(_ first: NoteNode, _ second: NoteNode) -> Bool {
+        if first.order != second.order { return first.order < second.order }
+        if first.createdAt != second.createdAt { return first.createdAt < second.createdAt }
+        return first.id.uuidString < second.id.uuidString
+    }
+
+    /// Number active pages in visible sibling order. Work from one index for all affected
+    /// parents, including whole-folder restore; never rescan the library for each sheet.
+    /// Only numbering metadata changes here, leaving content, dates and array order intact.
+    private mutating func resequenceSheets(in parents: Set<UUID>? = nil) throws {
+        var groups: [UUID: [Int]] = [:]
+        var folderIndices: [UUID: Int] = [:]
+        for index in nodes.indices {
+            let node = nodes[index]
+            if node.kind == .chapter || node.kind == .topic { folderIndices[node.id] = index }
+            if node.kind == .sheet, let parent = node.parentID, parents?.contains(parent) ?? true {
+                guard node.createdAt.timeIntervalSince1970.isFinite else { throw LibraryError.invalidData("Invalid note date.") }
+                groups[parent, default: []].append(index)
+            }
+        }
+        for (parent, siblings) in groups {
+            guard let folder = folderIndices[parent] else { throw LibraryError.invalidParent }
+            let active = siblings.filter { !nodes[$0].isTrashed }.sorted { Self.pageOrder(nodes[$0], nodes[$1]) }
+            let trashed = siblings.filter { nodes[$0].isTrashed }
+            for (offset, index) in active.enumerated() { nodes[index].sheetNumber = offset + 1 }
+            // Keep stored sibling numbers unique for previous archive readers. Trash is
+            // outside the active page sequence and never prevents it starting at Sheet 1.
+            var occupied = Set(trashed.compactMap { nodes[$0].sheetNumber }.filter { $0 > active.count })
+            var assignedArchiveNumbers = Set<Int>()
+            var nextArchiveNumber = active.count + 1
+            for index in trashed.sorted(by: { Self.pageOrder(nodes[$0], nodes[$1]) }) {
+                if let number = nodes[index].sheetNumber, number > active.count,
+                   assignedArchiveNumbers.insert(number).inserted { continue }
+                else {
+                    while occupied.contains(nextArchiveNumber) { nextArchiveNumber += 1 }
+                    nodes[index].sheetNumber = nextArchiveNumber
+                    occupied.insert(nextArchiveNumber)
+                    assignedArchiveNumbers.insert(nextArchiveNumber)
+                }
+            }
+            let highest = max(active.count, occupied.max() ?? 0)
+            nodes[folder].lastSheetNumber = max(nodes[folder].lastSheetNumber, highest)
+        }
     }
 
     /// Older archives have neither field. Allocate in creation order, not array, edit, or
@@ -415,6 +467,10 @@ public struct NoteLibrary: Codable, Equatable, Sendable {
             counters[parent] = number
         }
         for (id, counter) in counters { if let index = indices[id] { nodes[index].lastSheetNumber = counter } }
+        // Reject corrupt numbering/graphs before normalizing valid older gaps. This keeps
+        // migration from disguising duplicate numbers or invalid dates as a repaired file.
+        try validate()
+        try resequenceSheets()
     }
 
     private func nextOrder(in parentID: UUID?) throws -> Int {

@@ -320,6 +320,7 @@ struct ContentView: View {
                     }
                     .contentShape(Rectangle())
                     .tag(sheet.id)
+                    .moveDisabled(!store.canReorderSheets)
                     .contextMenu {
                         if sheet.isTrashed { Button("Restore sheet") { store.restore(sheet.id) } }
                         else {
@@ -331,6 +332,9 @@ struct ContentView: View {
                             Button("Move to Trash", role: .destructive) { store.trash(sheet.id) }
                         }
                     }
+                }
+                .onMove { offsets, destination in
+                    _ = store.reorderSheets(fromOffsets: offsets, toOffset: destination)
                 }
             }.listStyle(.inset).scrollContentBackground(workspaceTheme == "classic" ? .visible : .hidden)
             if store.visibleSheets.isEmpty {

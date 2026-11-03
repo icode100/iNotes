@@ -905,8 +905,145 @@ enum EditorDiagnostics {
         selector.history.endUndoGrouping()
         try check(editableBox.text == "Changed again" && editableView.isEditable,
                   "textbox editing continues after a model refresh in Text mode")
+        checks += try selectAllChecks(window: window)
         checks += try imageChecks(window: window)
         return "\(checks) native editor integration checks passed (shared text/ink page, straight lines, formatting, pressure, dark/light, searchable export, mixed text/ink lasso, atomic move/delete/undo, canonical rich text, native PencilKit masks and clipboard validation)."
+    }
+
+    /// Responder-chain checks complement manual Cmd-A/menu testing; no global
+    /// event injection or changes to the user's clipboard are needed here.
+    private static func selectAllChecks(window: NSWindow) throws -> Int {
+        var checks = 0
+        func check(_ condition: @autoclosure () -> Bool, _ message: String) throws {
+            guard condition() else { throw Failure(description: "Select All diagnostic failed: \(message)") }
+            checks += 1
+        }
+        let host = NSView(frame: NSRect(x: 0, y: 0, width: 640, height: 480))
+        let scroll = NSScrollView(frame: host.bounds)
+        let page = UnifiedMacPageView(frame: NSRect(origin: .zero, size: InkExport.paperSize))
+        let controller = MacPageSelectionController()
+        controller.page = page; page.selectionController = controller; page.selectionView.controller = controller
+        page.textView.pageUndoManager = controller.history; page.inkView.pageSelectionHistory = controller.history
+        controller.history.groupsByEvent = false
+        scroll.documentView = page; host.addSubview(scroll); window.contentView = host
+        let rich = RichTextEditor.Coordinator(RichTextEditor(text: .constant(""), rtfData: .constant(nil)))
+        page.textView.delegate = rich
+        let ink = InkStroke(points: [InkPoint(x: 40, y: 180), InkPoint(x: 110, y: 200)])
+        let native = PortableInkConverter.drawing(from: [ink])
+        let box = PageTextBox(x: 80, y: 100, text: "Movable caption")
+        let equation = NoteEquation(latex: "x^2", x: 200, y: 240)
+        let png = Data(base64Encoded: "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR4nGP4z8DwHwAFAAH/iZk9HQAAAABJRU5ErkJggg==")!
+        let image = PageImage(x: 30, y: 340, width: 160, height: 120, imageData: png)
+        let original = PageContent(text: "Body text — नमस्ते", strokes: PortableInkConverter.strokes(from: native),
+                                   pencilKitData: native.dataRepresentation(), textBoxes: [box], equations: [equation], images: [image])
+        var saved = original, writes = 0
+        rich.parent.onChange = { text, rtf in
+            controller.content.text = text; controller.content.rtfData = rtf
+        }
+        controller.onRender = { content in
+            if rich.lastText != content.text || rich.lastRTF != content.rtfData {
+                rich.load(text: content.text, rtf: content.rtfData, into: page.textView)
+            }
+            page.inkView.strokes = content.strokes
+            page.displayObjects(textBoxes: content.textBoxes, equations: content.equations, images: content.images,
+                                editable: true, onTextBoxChange: { _,_,_ in }, onEquationEdit: nil)
+            page.resizePaperToContent()
+        }
+        controller.onCommit = { saved = $0; writes += 1 }
+        controller.load(original); controller.onRender?(original)
+        var expected = original; expected.text += "!"
+        try check(controller.commit(expected, action: "Earlier page edit"), "fixture retains a real earlier page undo action")
+        let undoName = controller.history.undoActionName
+        let selectAll = #selector(NSText.selectAll(_:))
+        func allElementsSelected() -> Bool {
+            controller.selection.strokes == Set(expected.strokes.map(\.id))
+                && controller.selection.nativeStrokes == [0]
+                && controller.selection.textBoxes == [box.id]
+                && controller.selection.equations == [equation.id]
+                && controller.selection.images == [image.id]
+                && controller.selection.textRanges == [NSRange(location: 0, length: (expected.text as NSString).length)]
+        }
+        for tool in InkTool.allCases {
+            controller.perform(.clear)
+            page.activeTool = tool; page.inkView.tool = tool == .text ? .pen : tool; page.focus(tool: tool)
+            try check(NSApp.sendAction(selectAll, to: nil, from: nil), "Select All resolves from \(tool.rawValue)'s native responder")
+            try check(allElementsSelected(), "\(tool.rawValue) Select All includes body text, portable/native ink, text boxes, equations and images")
+            try check(page.activeTool == tool && window.firstResponder === page.selectionView,
+                      "\(tool.rawValue) keeps its chosen tool while page selection owns copy/cut/delete")
+            try check(controller.content == expected && saved == expected && writes == 1
+                      && controller.history.canUndo && controller.history.undoActionName == undoName,
+                      "\(tool.rawValue) Select All preserves content and prior undo history")
+            try check(page.textView.isEditable == (tool == .text) && page.textView.isSelectable == (tool == .text),
+                      "\(tool.rawValue) preserves native text interaction and ink cursor ownership")
+        }
+        let payload = controller.clipboardPayload()
+        try check(payload?.images == [image] && payload?.equations == [equation]
+                  && payload?.textBoxes.contains(where: { $0.text == expected.text }) == true
+                  && payload?.pencilKitData != nil, "Whole-page copy payload contains every selected content type")
+        controller.perform(.clear)
+        page.activeTool = .text
+        guard let boxEditor = page.textBoxViews[box.id]?.editor else { throw Failure(description: "Missing movable text editor") }
+        window.makeFirstResponder(boxEditor)
+        try check(NSApp.sendAction(selectAll, to: nil, from: nil) && allElementsSelected(),
+                  "Cmd-A from a movable native text box selects the whole page")
+        page.selectionView.cancelOperation(nil)
+        try check(controller.selection.isEmpty && page.activeTool == .text && window.firstResponder === page.textView,
+                  "Escape clears temporary selection and restores the chosen Text tool")
+
+        page.activeTool = .pen
+        _ = NSApp.sendAction(selectAll, to: nil, from: nil)
+        let point = NSPoint(x: 120, y: 220)
+        guard let hover = NSEvent.mouseEvent(with: .mouseMoved, location: .zero, modifierFlags: [], timestamp: 0,
+                                           windowNumber: window.windowNumber, context: nil, eventNumber: 0, clickCount: 0, pressure: 0),
+              let down = NSEvent.mouseEvent(with: .leftMouseDown, location: .zero, modifierFlags: [], timestamp: 0,
+                                          windowNumber: window.windowNumber, context: nil, eventNumber: 0, clickCount: 1, pressure: 0) else {
+            throw Failure(description: "Cannot construct page-local selection events")
+        }
+        _ = page.inputView(at: point, event: hover)
+        try check(allElementsSelected(), "Ordinary hover keeps the temporary selection visible")
+        try check(page.inputView(at: point, event: down) === page.inkView && controller.selection.isEmpty
+                  && page.activeTool == .pen && writes == 1, "The next page gesture resumes Pen without modifying content")
+
+        let unrelated = RichTextEditor.makeNativeTextView()
+        unrelated.frame = NSRect(x: 0, y: 0, width: 200, height: 40); unrelated.string = "Unrelated editor"
+        host.addSubview(unrelated); window.makeFirstResponder(unrelated)
+        try check(NSApp.sendAction(selectAll, to: nil, from: nil)
+                  && unrelated.selectedRange() == NSRange(location: 0, length: (unrelated.string as NSString).length)
+                  && controller.selection.isEmpty, "Unrelated text editors retain native Select All")
+        let field = NSTextField(string: "Search, title or equation source")
+        field.frame = NSRect(x: 0, y: 45, width: 300, height: 30); host.addSubview(field); window.makeFirstResponder(field)
+        guard let fieldEditor = window.firstResponder as? NSTextView else { throw Failure(description: "Native field editor unavailable") }
+        try check(NSApp.sendAction(selectAll, to: nil, from: nil)
+                  && fieldEditor.selectedRange() == NSRange(location: 0, length: (field.stringValue as NSString).length)
+                  && controller.selection.isEmpty, "Native search/title/equation fields keep Select All scoped to their input")
+
+        var noBody = expected; noBody.text = ""; noBody.rtfData = nil
+        controller.load(noBody); controller.onRender?(noBody); page.activeTool = .text; page.focus(tool: .text)
+        let menuItem = NSMenuItem(title: "Select All", action: selectAll, keyEquivalent: "a")
+        try check(page.textView.validateMenuItem(menuItem), "Select All stays enabled when the body is empty but page objects exist")
+        controller.load(expected); controller.onRender?(expected); page.activeTool = .pen
+        _ = NSApp.sendAction(selectAll, to: nil, from: nil)
+        guard let deletion = NSEvent.keyEvent(with: .keyDown, location: .zero, modifierFlags: [], timestamp: 0,
+                                             windowNumber: window.windowNumber, context: nil, characters: "\u{7f}",
+                                             charactersIgnoringModifiers: "\u{7f}", isARepeat: false, keyCode: 51) else {
+            throw Failure(description: "Cannot construct selection delete key")
+        }
+        controller.onValidate = { _ in false }
+        page.selectionView.keyDown(with: deletion)
+        try check(saved == expected && writes == 1 && allElementsSelected(), "Rejected whole-page deletion retains content and selection")
+        controller.onValidate = nil
+        page.selectionView.keyDown(with: deletion)
+        try check(saved.text.isEmpty && saved.strokes.isEmpty && saved.textBoxes.isEmpty && saved.equations.isEmpty
+                  && saved.images.isEmpty && writes == 2 && controller.history.undoActionName == "Delete Selection",
+                  "Delete after tool-independent Select All commits one atomic mixed-page change")
+        controller.history.undo()
+        try check(saved == expected && writes == 3, "One undo restores every byte of the mixed page")
+        controller.history.redo(); controller.history.undo()
+        try check(saved == expected && writes == 5 && page.activeTool == .pen, "Whole-page delete redo/undo retains the selected drawing tool")
+        controller.perform(.clear); page.inkView.isInputEnabled = false
+        page.selectAll(nil)
+        try check(controller.selection.isEmpty && saved == expected, "Disabled page input does not create an editable page selection")
+        return checks
     }
 
     /// Uses a private pasteboard and disposable native page; never replaces the

@@ -4,18 +4,24 @@ Version 1.0.4 adds pasted images that you can annotate directly on Mac sheets,
 with movement, proportional resizing, undo, and combined image/ink exports.
 Scenic sidebars have clearer labels and a quieter background.
 
-The current Mac release is version 1.0.4, build 2012. See [release notes](docs/releases/1.0.4.md)
+The current Mac release is version 1.0.4, build 2015. See [release notes](docs/releases/1.0.4.md)
 and [validation](docs/TESTING.md) for local results and separately recorded public-build verification.
+
+The pending v1.0.4 build 2016 keeps active sheets numbered consecutively after
+deletion, restoration, moves, and drag reordering. It also makes **⌘A** select
+the whole page from every tool. Publication awaits the user's combined testing
+of an isolated local QA app.
 
 A small, native, open-source notebook for Apple silicon Macs, with a shared iPad app target. Built with SwiftUI, AppKit/UIKit, and PencilKit, with Sparkle for signed Mac updates and SwiftMath for offline equations. No Electron, cloud SDK, account, or telemetry.
 
 ## What works
 
 - Workbooks → chapters → nested topics → sheets, with distinct sidebar icons, renaming, moving, duplication, and recoverable Trash. Create workbooks using **New workbook** in the sidebar.
-- Resize the sheets pane or hide it independently of the workbook sidebar. Sheet numbers are assigned within each chapter or topic and appear with creation dates in the list and page header; sheet titles are optional. Numbers stay fixed through edits, Trash, and deletion; moving to another chapter or topic assigns the next destination number. The header shows the nearest containing chapter or topic and can be hidden to make more room for the page.
+- Resize the sheets pane or hide it independently of the workbook sidebar. Sheet numbers appear with creation dates in the list and page header; sheet titles are optional. In the pending fix, active sheets are numbered 1, 2, 3… in each chapter or topic's page order. Deleting Sheet 2 from three sheets immediately changes the former Sheet 3 to 2, and the next new sheet is 3. Dragging a sheet between others updates their page numbers; removing all sheets restarts at 1. Restored and moved sheets join the destination's page sequence. Renaming, editing, and searching preserve numbers. The header shows the nearest containing chapter or topic and can be hidden to make more room for the page.
 - Text and handwriting share one scrollable, zoomable page. Select Text, pen, straight line, pencil, marker, highlighter, or eraser without hiding either text or ink. Native rich text includes headings, formatting, lists, links, spell checking, and undo/redo.
 - **Text** routes every pointer, including a pen tablet or Apple Pencil, to the text caret and text selection. Choose a drawing tool for handwriting. Typing in Text mode keeps ordinary letters as text.
 - **Select** draws a rectangular selection; **Lasso** follows a freehand outline. Select typed text, pen strokes, positioned text boxes, and equations together, then move, copy, cut, paste, duplicate, delete, or undo the selection. Moving or pasting selected typed text creates a positioned rich-text box on the same paper.
+- In the pending fix, **⌘A / Select All** from the page editor selects body text, ink, text boxes, equations, and images together with any tool selected. Search, title, and equation-source fields retain their own native Select All behavior.
 - On Mac, paste a copied image or image file with **⌘V** into the open sheet, then write or draw over it with Text or the ink tools. Use **Select** to move an image, or drag its lower-right selection handle to resize it proportionally. Images and annotations can be selected and moved together; resizing an image alone leaves annotations independent. Images save with the sheet and appear in combined PDF/PNG exports. PNG, TIFF, JPEG, HEIC, GIF (first frame), and BMP clipboard images are accepted within the 10 MiB, 16-megapixel, and 8192-pixel-per-side limits. Image pasting is currently Mac-only.
 - Editable LaTeX equations with a native live preview, fractions, roots, powers, Greek symbols, sums, integrals, and matrices. Equations share the page with text and handwriting and adapt to light/dark paper. Rendering uses the pinned, open-source SwiftMath 1.7.3 library entirely on the device.
 - Straight-line pen tool for table borders, with near-horizontal/vertical snapping and Shift axis constraints on Mac.
@@ -63,7 +69,7 @@ Requires an Apple silicon Mac and macOS 14+. Building the installer requires ful
 open dist/iNotes.app
 ```
 
-The default local installer is `dist/iNotes-1.0.4-arm64.dmg` (version 1.0.4, build 2012). Downloaded public builds are also ad hoc signed: **they are not Apple notarized**, so macOS may report that Apple could not verify iNotes is free of malware.
+The default local installer is `dist/iNotes-1.0.4-arm64.dmg` (version 1.0.4, candidate build 2016). This candidate is unpublished and awaits user QA; the latest recorded public build is 2015. Downloaded public builds are also ad hoc signed: **they are not Apple notarized**, so macOS may report that Apple could not verify iNotes is free of malware.
 
 If you trust the download from the [official releases](https://github.com/icode100/iNotes/releases), follow Apple's [per-app first-open procedure](https://support.apple.com/en-us/102445):
 

@@ -29,6 +29,7 @@ final class IOSPageSelectionController: NSObject {
     private var transientContent: PageContent?
     var displayedContent: PageContent { transientContent ?? content }
     var hasPreview: Bool { transientContent != nil }
+    private(set) var selectionIsTemporary = false
 
     override init() {
         super.init()
@@ -49,7 +50,19 @@ final class IOSPageSelectionController: NSObject {
         self.content = content
         transientContent = nil
         selection = IOSPageSelection()
+        selectionIsTemporary = false
         history.removeAllActions()
+        page?.refreshSelectionPresentation()
+        page?.selectionView.setNeedsDisplay()
+    }
+
+    /// Cmd+A keeps the chosen writing tool. Its next ordinary page gesture starts
+    /// that tool normally; Select and Lasso keep their regular draggable selection.
+    func dismissTemporarySelection() {
+        guard selectionIsTemporary else { return }
+        selectionIsTemporary = false
+        selection = IOSPageSelection()
+        page?.refreshSelectionPresentation()
         page?.selectionView.setNeedsDisplay()
     }
 
@@ -211,6 +224,10 @@ final class IOSPageSelectionController: NSObject {
 
     func perform(_ command: PageSelectionCommand) {
         guard content.images.isEmpty, let page, page.isUserInteractionEnabled else { return }
+        if command == .selectAll {
+            guard page.prepareForPageSelection?() ?? true else { return }
+            page.endEditing(true)
+        }
         if command == .paste {
             let board = UIPasteboard.general
             if let data = board.data(forPasteboardType: PageClipboardPayload.pasteboardType)
@@ -236,8 +253,9 @@ final class IOSPageSelectionController: NSObject {
         switch command {
         case .undo: history.undo()
         case .redo: history.redo()
-        case .clear: cancelPreview(); selection = IOSPageSelection()
+        case .clear: cancelPreview(); selection = IOSPageSelection(); selectionIsTemporary = false
         case .selectAll:
+            selectionIsTemporary = !page.selectionEnabled
             selection = IOSPageSelection(strokes: Set(content.strokes.map(\.id)), nativeStrokes: Set(nativeDrawing(content)?.strokes.indices ?? 0..<0),
                                          textBoxes: Set(content.textBoxes.map(\.id)), equations: Set(content.equations.map(\.id)),
                                          textRanges: content.text.isEmpty ? [] : [NSRange(location: 0, length: (content.text as NSString).length)])
@@ -256,6 +274,7 @@ final class IOSPageSelectionController: NSObject {
                 paste(PageClipboardPayload(textBoxes: [box]), offset: 0, action: "Paste Text")
             }
         }
+        page.refreshSelectionPresentation()
         page.selectionView.becomeFirstResponder()
         page.selectionView.setNeedsDisplay()
     }
@@ -481,6 +500,13 @@ final class IOSPageSelectionView: UIView, UIContextMenuInteractionDelegate {
     override var canBecomeFirstResponder: Bool { true }
     override var undoManager: UndoManager? { controller?.history }
 
+    override func hitTest(_ point: CGPoint, with event: UIEvent?) -> UIView? {
+        // A keyboard selection is visible in every tool, but its next pointer or
+        // Pencil gesture belongs to the chosen tool rather than a hidden mode.
+        guard controller?.page?.selectionEnabled == true else { return nil }
+        return super.hitTest(point, with: event)
+    }
+
     override func touchesBegan(_ touches: Set<UITouch>, with event: UIEvent?) {
         guard event?.allTouches?.filter({ $0.phase != .ended && $0.phase != .cancelled }).count ?? 1 == 1,
               let touch = touches.first, let controller else { cancelGesture(); return }
@@ -592,7 +618,7 @@ final class IOSPageSelectionView: UIView, UIContextMenuInteractionDelegate {
 
 @MainActor
 final class IOSTextBoxView: UIView {
-    let editor = UITextView()
+    let editor = IOSPageTextView()
     private let richText: RichTextEditor.Coordinator
     private var box: PageTextBox
     var onChange: ((PageTextBox) -> Void)?

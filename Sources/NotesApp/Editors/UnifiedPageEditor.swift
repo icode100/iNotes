@@ -277,6 +277,8 @@ final class UnifiedMacPageView: NSView {
         textView.allowsPageTextUndo = { [weak self] in self?.inkView.isInputEnabled == true }
         textView.onPagePaste = { [weak self] in self?.handlePagePaste() ?? false }
         textView.canPastePage = { [weak self] in self?.canPastePage() ?? false }
+        textView.onPageSelectAll = { [weak self] in self?.selectAllPageContent() ?? false }
+        textView.canSelectAllPage = { [weak self] in self?.inkView.isInputEnabled == true && self?.selectionController != nil }
         textView.onPageUndoComplete = { [weak self] in self?.refreshToolCursor() }
         inkView.onTipCursorChange = { [weak self] in self?.updateDocumentCursor() }
         positionLayers()
@@ -324,6 +326,9 @@ final class UnifiedMacPageView: NSView {
     func inputView(at location: NSPoint, event: NSEvent?) -> NSView? {
         guard bounds.contains(location) else { return nil }
         if activeTool == .select || activeTool == .lasso { return selectionView }
+        if event?.type == .leftMouseDown {
+            selectionController?.clearToolIndependentSelection()
+        }
         // The active tool owns pointer routing. Text accepts mouse and tablet
         // caret selection; an attached or hovering pen never changes the tool.
         // Both native text and handwriting remain visible on the same paper.
@@ -337,6 +342,7 @@ final class UnifiedMacPageView: NSView {
     }
 
     func focus(tool: InkTool) {
+        selectionController?.clearToolIndependentSelection()
         textView.breakUndoCoalescing()
         for box in textBoxViews.values { box.editor.breakUndoCoalescing() }
         // NSTextView's internal hover tracking also sets an I-beam. Retire
@@ -389,6 +395,17 @@ final class UnifiedMacPageView: NSView {
     // The ink view's responder chain reaches this shared document, so Cmd-V
     // also inserts an image while Pen/Pencil/Marker is the active tool.
     @objc func paste(_ sender: Any?) { selectionController?.perform(.paste) }
+
+    /// Ink and page objects use this responder-chain action; native body and
+    /// movable-text editors explicitly delegate here without affecting other fields.
+    override func selectAll(_ sender: Any?) { _ = selectAllPageContent() }
+
+    @discardableResult
+    func selectAllPageContent() -> Bool {
+        guard inkView.isInputEnabled, let selectionController else { return false }
+        selectionController.perform(.selectAll)
+        return true
+    }
 
     func resizePaperToContent() {
         RuledTextLayout.attach(to: textView, paper: paperView.paper, pageOriginY: textView.frame.minY)
