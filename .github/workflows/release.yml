@@ -61,7 +61,7 @@ jobs:
           printf 'VERSION=%s\n' "${release_tag#v}" >> "$GITHUB_ENV"
           printf 'RELEASE_TAG=%s\n' "$release_tag" >> "$GITHUB_ENV"
           # Public run 11 shipped 2012; the isolated backup QA build used 2013.
-          # Run 12 failed verification; run 13 published 2015. Run 14 reserves 2016.
+          # Run 12 failed verification; runs 13/14 published 2015/2016. Run 15 uses 2017.
           printf 'BUILD_NUMBER=%s\n' "$((2002 + GITHUB_RUN_NUMBER))" >> "$GITHUB_ENV"
       - name: Check existing release before rebuilding
         if: github.event_name == 'workflow_dispatch'

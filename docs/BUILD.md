@@ -48,21 +48,24 @@ The build script validates the property list, architecture, app signature, and D
 before publishing outputs. The verification script mounts it read-only and checks
 the packaged app and Applications shortcut.
 
-The defaults are version 1.0.4 and candidate build 2016 for the
-sheet-numbering and Select All fixes. This exceeds published backup-retention build 2015,
+The defaults are version 1.0.4 and build 2016, matching the published
+sheet-numbering and Select All update. This exceeds backup-retention build 2015,
 original public v1.0.4 build 2012, and isolated backup QA build 2013. For every
 later update, check the actual public appcast and choose a greater
 `CFBundleVersion`; Sparkle compares build numbers, not just the displayed version.
 The release workflow uses `2002 + GITHUB_RUN_NUMBER`: run 12 built
 2014 but failed a diagnostic coverage check before publishing; run 13 published
-2015, and run 14 produces 2016. A workflow rerun does not increase its build
-number; start a new dispatched run for a same-version rebuild.
+2015, and run 14 published 2016. The next new release run (15) produces 2017.
+A workflow rerun does not increase its build number; start a new dispatched run
+for a same-version rebuild.
 
 The 3 November 2026 changes keep active sheets numbered consecutively in page
 order, including after deletion and drag reordering, and make Command-A select
-all page content from every tool. The user confirmed combined manual QA and
-authorized publication on 3 November 2026. Hosted checks and release verification
-remain pending. The local QA app uses a new bundle identity with QA build 1,
+all page content from every tool. User QA and exact-source Native checks passed.
+The release workflow failed at its cached-feed readback after publication;
+independent downloaded-asset verification confirmed build 2016. See
+[validation](TESTING.md) for the measured results and limits. The local QA app
+uses a separate bundle identity with QA build 1,
 a temporary library through `INOTES_DATA_DIR`, and no configured updater.
 Record local results separately from later hosted packaging and public assets.
 

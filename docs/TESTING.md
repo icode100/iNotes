@@ -1,5 +1,66 @@
 # Validation
 
+## Published v1.0.4 / build 2016 — 3 November 2026
+
+The user confirmed both fixes in the isolated QA app and authorized publication.
+Released source [`c3e7069`](https://github.com/icode100/iNotes/commit/c3e7069e8b5f82455629d33c1b23e14c8515a9bd)
+passed [Native checks 41655595986](https://github.com/icode100/iNotes/actions/runs/41655595986):
+122 XCTest tests, Mac release packaging, **392 editor, 406 workspace, 31 equation,
+12 ruled-text, 8 shortcut and 49 numbering/store checks**, existing store/updater
+and backup integrations, mounted installer verification, and ARM64/x86_64 iPad
+simulator compilation. Hosted tools were macOS 26.6.2 (25G83), Swift 6.3.3,
+Xcode 26.6 and iPhoneSimulator SDK 26.5. The corrected Select All fixture checks
+the actual offscreen window's responder chain without assuming global key-window
+ownership; it retains the content, undo and unrelated-field assertions.
+
+[Signed release run 41657334792](https://github.com/icode100/iNotes/actions/runs/41657334792)
+was fresh counter 14, producing build `2002 + 14 = 2016`. It repeated 122 tests,
+packaging, the complete native suite, mounted verification and all five
+update-signature checks, then uploaded and verified the distinct installer and
+checksum, recorded the source commit, and replaced the signed feed last.
+**The workflow concluded failure:** its bounded 120-second readback continued
+receiving cached feed bytes. No binary was rebuilt or reuploaded, no new release
+run was started, and no signed feed was edited to work around that result.
+Independent downloaded-public-asset checks subsequently established successful
+publication:
+
+- Both versioned and default latest feed URLs returned identical bytes matching
+  GitHub's new asset digest and advertising **1.0.4 / build 2016** with the exact
+  build-numbered HTTPS installer enclosure and byte length.
+- The downloaded installer matched its SHA-256 file and API asset digest.
+  Ed25519 feed/archive verification and all five valid, tampered, unsigned and
+  wrong-key signature checks passed against the committed public key.
+- Read-only mounted verification passed ARM64, strict ad hoc bundle/helper
+  signatures, deployment target, Applications link, adaptive icon, scenery
+  hashes, math resources/licenses and plain persistence/store/backup smoke
+  checks. A separate metadata check explicitly asserted the app's version 1.0.4,
+  build 2016 and `io.inotes.app` identity. The downloaded binary's 49,127-node
+  import took 1.033 seconds and folder query took 0.020 seconds.
+- Preservation checks confirmed the original annotated v1.0.4 tag object
+  `3c1121e75bb1588127c48be7729333676631619b` still peels to
+  `d7338419042a4512c569af992ab2384fc088762d`. All four previous build-2012 and
+  build-2015 installer/checksum asset IDs, sizes and SHA-256 digests remained
+  unchanged; only the new installer/checksum were added and the feed replaced.
+
+Public installer `iNotes-1.0.4-build2016-arm64.dmg`: **24,648,457 bytes**, SHA-256
+`fb6cb2bb73b3da2b43ec55f2681e8693eb765b213222eccc1babf708cd24f215`.
+The app contains 30,164,149 regular-file bytes; its executable is 6,164,768 bytes,
+SHA-256 `88064745ca56bebbfaf8fd556ceb28d30c477a108d1edad017b9addd6363ab8c`.
+The 1,278-byte appcast SHA-256 is
+`ecc78a7e9c0fec299d592721c25e1f3862b9f9408e07162f3b8b5725e2acf728`.
+These are artifact sizes, not RAM measurements.
+
+Independent verification used macOS 27.2 (26B123), Swift 6.4.2 and disposable
+libraries. Evidence is under `/private/tmp/inotes-release2016`: hosted logs in
+`logs-41655595986` and `logs-41657334792`, downloaded files in `public`, and
+`public-signatures.log`, `public-installer.log`, `verification.json` and
+`preservation.json`. No local interactive UI harness or computer control was
+used; the installed app and real notes were not modified. Actual updater
+installation, physical stylus/iPad, older macOS and real provider delivery remain
+unverified for this build. Distribution remains ad hoc signed, not Apple
+notarized. The next fresh signed-release run is 15 and must produce build 2017
+or higher; build 2016 remains reserved despite its workflow's cache timeout.
+
 ## Build 2016 publication preparation — 3 November 2026
 
 The user confirmed that both changes work in the isolated QA app and explicitly

@@ -43,13 +43,14 @@ does not publish a release.
 
 ## Build and sign a local update
 
-The 3 November 2026 candidate uses build 2016, keeps page numbers consecutive
+The 3 November 2026 release uses build 2016, keeps page numbers consecutive
 after deletion and reordering, and supports Command-A for the whole page from
-every tool. The user confirmed combined testing in the isolated QA app (new
-identity, QA build 1, temporary library, updater disconnected) and authorized
-publication on 3 November 2026. Hosted checks and release verification remain
-pending.
-Recheck the public feed and workflow counter before publication.
+every tool. User QA and exact-source Native checks passed. Release run 14
+published the installer and signed feed, then failed its cached-feed readback.
+Independent downloaded-asset verification confirmed the published bytes and
+signatures; see [validation](TESTING.md). The isolated QA app uses a separate
+identity, QA build 1, temporary library, and disconnected updater. Recheck the
+public feed and workflow counter before any later publication.
 
 ```sh
 VERSION=1.0.4 BUILD_NUMBER=2016 bash scripts/build-macos.sh
@@ -64,10 +65,11 @@ using Apple CryptoKit and the committed public key. It does not upload anything.
 For v1.0.3, the security rebuild 2011 exceeds the initial public build 2010 and
 shared local builds 1010–1012. Check both published and shared `CFBundleVersion`
 values and use a larger number for every update, including same-version rebuilds.
-Candidate defaults (`1.0.4`, build 2016) are separate from the release workflow's
+Development defaults (`1.0.4`, build 2016) are separate from the release workflow's
 `2002 + GITHUB_RUN_NUMBER`. Run 11 published v1.0.4 build 2012; isolated backup QA
 used build 2013. Run 12 built 2014 but stopped at native diagnostic verification before publication.
-Run 13 published 2015, and run 14 must produce 2016 or higher. Failed build 2014
+Run 13 published 2015, and run 14 published 2016. The next new release run (15)
+must produce 2017 or higher. Failed build 2014
 remains reserved alongside the original installer and QA slot.
 The feed points to the matching `v1.0.4` release's DMG. Never edit a signed appcast
 after generation. Re-run the script if its contents change. The last command

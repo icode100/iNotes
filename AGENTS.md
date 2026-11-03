@@ -263,11 +263,12 @@ isolated QA app identity for manual work. Never use real notes for destructive t
 Use a dedicated simulator; do not erase or alter unrelated simulators.
 
 The user confirmed combined manual QA of the numbering and Select All fixes
-and authorized publication on 3 November 2026. The isolated QA app uses a new
-bundle identity, QA build 1, temporary notes, and a disconnected updater. Do not
-use computer control or interactive UI automation. Public v1.0.4 build 2016
-remains a candidate until exact-source hosted checks and release verification
-complete; record actual checks and any deferred gates in `docs/TESTING.md`.
+on 3 November 2026. Exact-source Native checks passed, and public v1.0.4 build
+2016 was independently verified after publication. The release workflow failed
+its cached-feed readback after publishing; do not describe that workflow as
+passed. See `docs/TESTING.md` for actual checks and remaining limits. The
+isolated QA app uses a separate bundle identity, QA build 1, temporary notes,
+and a disconnected updater. Do not use computer control or interactive UI automation.
 
 Google Drive and iCloud Drive integration writes versioned `.inotes` folder backups.
 Providers upload those files; iNotes does not provide CloudKit or bidirectional
@@ -346,9 +347,10 @@ Sparkle compares build numbers: choose a value greater than the latest published
 `CFBundleVersion`; hosted release builds now use `2002 + GITHUB_RUN_NUMBER`.
 Run 10 shipped build 2010; the manual same-version security rebuild reserved 2011,
 and v1.0.4 run 11 published 2012. Backup QA used 2013; dispatched run 12 built
-2014 but failed verification before publishing. Run 13 published 2015. Production
-candidate defaults now reserve 2016 for the numbering and Select All fixes; its separate QA
-identity uses build 1. The next new run (14) must produce 2016. A workflow rerun does not
+2014 but failed verification before publishing. Run 13 published 2015, and run 14
+published 2016. Defaults match build 2016 for the numbering and Select All fixes;
+its separate QA identity uses build 1. The next new release run (15) must produce
+2017. A workflow rerun does not
 advance `GITHUB_RUN_NUMBER`. Never reuse its build number for an updated binary.
 The release workflow supports an explicit `workflow_dispatch` for the current
 stable version; wait for Native checks on its exact source commit first.
