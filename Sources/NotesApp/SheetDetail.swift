@@ -36,7 +36,7 @@ enum InkNibPreset: String, CaseIterable {
         case .fine: return tool == .marker ? 0.7 : 0.45
         case .medium: return tool == .marker ? 1 : 0.7
         case .broad: return tool == .marker ? 1.5 : 1
-        case .extraBroad: return tool == .marker ? 2 : 1.3
+        case .extraBroad: return tool == .marker ? 2 : tool == .pen ? 1.5 : 1.3
         case .highlighter: return 4.5 * InkStyle.highlighter.widthMultiplier / Self.pointsPerMillimeter
         }
     }

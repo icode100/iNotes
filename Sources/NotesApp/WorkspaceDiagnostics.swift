@@ -145,7 +145,8 @@ enum WorkspaceDiagnostics {
                 ? [.fine, .medium, .broad, .highlighter] : [.extraFine, .fine, .medium, .broad, .extraBroad]
             try check(InkNibPreset.presets(for: tool) == expectedPresets,
                       "\(tool.rawValue) keeps the requested nib menu order and Highlighter choices")
-            let expectedMillimeters: [Double] = tool == .marker ? [0.5, 0.7, 1, 1.5, 2] : [0.3, 0.45, 0.7, 1, 1.3]
+            let expectedMillimeters: [Double] = tool == .marker
+                ? [0.5, 0.7, 1, 1.5, 2] : [0.3, 0.45, 0.7, 1, tool == .pen ? 1.5 : 1.3]
             for (index, preset) in InkNibPreset.presets(for: tool).enumerated() {
                 let width = preset.width(for: tool)
                 preferences.set(width, forKey: "inkWidth")

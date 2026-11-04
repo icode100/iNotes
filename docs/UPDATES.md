@@ -43,8 +43,9 @@ does not publish a release.
 
 ## Build and sign a local update
 
-The v1.1 candidate uses version **1.1.0** and planned build **2017**. User
-manual QA and exact-source Native checks must pass before pushing `v1.1.0`.
+The v1.1 candidate uses version **1.1.0** and planned build **2017**. The user
+passed local manual QA and requested the final Pen width correction. Exact-source
+Native checks must pass before pushing `v1.1.0`.
 The local QA app has separate notes/preferences, QA build 1 and no updater.
 No local computer control or interactive UI automation is permitted.
 

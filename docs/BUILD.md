@@ -50,7 +50,8 @@ the packaged app and Applications shortcut.
 
 The defaults prepare v1.1 (version 1.1.0), planned build 2017, with four new
 scenery themes replacing Forest and an Extra Broad nib preset. This is an
-unpublished candidate pending user manual QA and exact-source hosted checks.
+unpublished candidate. The user passed local manual QA and requested the final
+Pen width correction; exact-source hosted checks are pending.
 The public feed advertised 1.0.4/build 2016 on 4 November 2026. For every later
 update, recheck the actual public appcast and choose a greater `CFBundleVersion`;
 Sparkle compares build numbers, not just the displayed version.

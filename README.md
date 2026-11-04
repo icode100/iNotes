@@ -2,8 +2,8 @@
 
 The v1.1 candidate (version 1.1.0, planned build 2017) adds Arctic, Open Skyscape,
 Ruby Hills, and Nature scenery, replaces Forest, and adds Extra Broad nibs.
-Coast and Alpine remain available. Local user QA and hosted release checks are
-required before publication; see [candidate notes](docs/releases/1.1.0.md).
+Coast and Alpine remain available. The user passed local QA and requested Pen
+Extra Broad at 1.5 mm. Final hosted checks are required before publication; see [candidate notes](docs/releases/1.1.0.md).
 
 The current Mac release is version 1.0.4, build 2016. [Download the Mac installer](https://github.com/icode100/iNotes/releases/download/v1.0.4/iNotes-1.0.4-build2016-arm64.dmg). See [release notes](docs/releases/1.0.4.md)
 and [validation](docs/TESTING.md) for local results and separately recorded public-build verification.
@@ -26,7 +26,7 @@ A small, native, open-source notebook for Apple silicon Macs, with a shared iPad
 - Editable LaTeX equations with a native live preview, fractions, roots, powers, Greek symbols, sums, integrals, and matrices. Equations share the page with text and handwriting and adapt to light/dark paper. Rendering uses the pinned, open-source SwiftMath 1.7.3 library entirely on the device.
 - Straight-line pen tool for table borders, with near-horizontal/vertical snapping and Shift axis constraints on Mac.
 - Mac pen and pencil cursors show a nib dot sized for the selected width and page zoom. The highlighter uses a slanted chisel-tip cursor.
-- Extra Fine/Fine/Medium/Broad/Extra Broad nominal nibs: Pen, Pencil, and Straight Line use 0.3/0.45/0.7/1/1.3 mm; Brush (Marker) uses 0.5/0.7/1/1.5/2 mm. Selecting a writing tool starts at Fine; existing notes keep their stored widths. Highlighter retains its prior choices. Nib, paper, line, template, and theme menus show the selected choice, including custom saved nib widths.
+- Extra Fine/Fine/Medium/Broad/Extra Broad nominal nibs: Pen uses 0.3/0.45/0.7/1/1.5 mm; Pencil and Straight Line use 0.3/0.45/0.7/1/1.3 mm; Brush (Marker) uses 0.5/0.7/1/1.5/2 mm. Selecting a writing tool starts at Fine; existing notes keep their stored widths. Highlighter retains its prior choices. Nib, paper, line, template, and theme menus show the selected choice, including custom saved nib widths.
 - Pressure-aware pen-tablet input on Mac, including stylus proximity and hardware eraser events. Read-only HID presence detection excludes touchpads; the input indicator confirms actual pen activity. No global input capture or tablet SDK is required.
 - Apple Pencil and native PencilKit tools on iPad, with palm rejection and actual Pencil touch detection. Basic ink paths and instrument styles transfer between Mac and iPad; native PencilKit data is retained. Grid, ruled, dotted, and blank paper save with each sheet.
 - Ruled paper aligns typed baselines with its guides, including wrapped paragraphs, headings, and moved text boxes. The native layout follows whole ruled rows while preserving saved rich-text formatting and colors.

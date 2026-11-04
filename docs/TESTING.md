@@ -1,5 +1,33 @@
 # Validation
 
+## v1.1.0 final Pen width correction — 4 November 2026
+
+The user reported **all manual checks passed** in the isolated local candidate,
+then requested only Pen Extra Broad increase from 1.3 to **1.5 mm**. Pencil and
+Straight Line remain **1.3 mm**; Brush/Marker remains **2 mm**. The final numeric
+mapping and the existing native width diagnostic were updated. The user's
+manual result applies to the tested candidate before this final Pen correction;
+it is not a claim of a second manual pass or physical-stylus validation.
+
+The original QA app and its test notes remain intact. The corrected source
+compiled incrementally in **2.32 s**. `dist/iNotes v1.1 QA 2.app` has isolated
+identity `io.inotes.v110-qa2-20261104`, QA build **2**, disposable notes and no
+updater. Its strict app/helper signatures, ARM64 architecture and 12 artwork
+hashes passed, along with plain storage/backup smoke checks and 49 numbering
+checks. The 49,127-node import took **1.520 s**, query **0.043 s**. The executable
+is 10,104,512 bytes, SHA-256
+`72ad1a6ef3d082b32572bc895cbe05796ff9e9077e8272614137349ed819988c`;
+the app contains 43,572,662 regular-file bytes. These are Debug artifact sizes,
+not RAM measurements. No local UI diagnostics or computer control ran.
+
+Evidence is `/private/tmp/inotes-v110-final-build.log`,
+`/private/tmp/inotes-v110-final-package.log`,
+`/private/tmp/inotes-v110-final-smoke.log` and
+`/private/tmp/inotes-v110-qa2-20261104/{verification,source-inputs}.json`.
+Exact-source hosted checks and release publication remain pending. The release
+build reservation is still 2017; Native checks do not advance the signed-release
+workflow counter.
+
 ## v1.1.0 / planned build 2017 candidate — 4 November 2026
 
 Candidate based on `ec903e4e3f57b07cb4d3697a6ded78e6fddc99d2`, with the compiled
