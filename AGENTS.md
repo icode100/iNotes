@@ -14,13 +14,16 @@ creation metadata, independent pane controls, a workspace sheet-number badge,
 and clearer themed controls/cards. Consult the versioned validation record before
 claiming that a source change, local build, or separately built public release passed.
 
-The v1.1 update uses version **1.1.0**, planned release build **2017** (fresh
-release run 15). It replaces Forest with Arctic, Open Skyscape, Ruby Hills, and
-Nature, while retaining Coast, Alpine, and Classic. Existing `forest` scenery
+The published v1.1 update uses version **1.1.0**, build **2017** (release run 15),
+from source `7946a931c8283e5fc0429fbd1d400f22d76312a5`. It replaces Forest with
+Arctic, Open Skyscape, Ruby Hills, and Nature, while retaining Coast, Alpine,
+and Classic. Existing `forest` scenery
 preferences resolve to Nature. Extra Broad follows Broad: 1.3 mm for
 Pencil and Straight Line, 1.5 mm for Pen, and 2 mm for Brush/Marker. The user
 passed the local candidate QA, then requested the Pen-only increase on 4 November
-2026. Exact-source checks and publication are still pending; do not claim it is published.
+2026. Exact-source Native checks, signed release run 15 and independent public
+asset verification passed. The final numeric correction did not receive a
+second manual QA pass; consult `docs/TESTING.md` for precise evidence and limits.
 
 ## Priorities
 
@@ -359,10 +362,12 @@ Sparkle compares build numbers: choose a value greater than the latest published
 Run 10 shipped build 2010; the manual same-version security rebuild reserved 2011,
 and v1.0.4 run 11 published 2012. Backup QA used 2013; dispatched run 12 built
 2014 but failed verification before publishing. Run 13 published 2015, and run 14
-published 2016. Defaults now prepare v1.1.0/build 2017; the public feed still
-advertises 1.0.4/build 2016 as checked on 4 November 2026. The v1.1.0 local QA
-identity uses separate QA builds 1 and 2 (final Pen correction). The next new release run (15) must produce
-2017; recheck both feed and counter immediately before publication. A workflow rerun does not
+published 2016. Run 15 published v1.1.0/build 2017 from `7946a931`; its exact-source
+Native checks and separately downloaded public assets passed on 4 November 2026.
+Defaults match the published version and build. The v1.1.0 local QA
+identities use separate QA builds 1 and 2 (final Pen correction). The next new
+signed-release run (16) must produce 2018; recheck both feed and counter
+immediately before publication. A workflow rerun does not
 advance `GITHUB_RUN_NUMBER`. Never reuse its build number for an updated binary.
 The release workflow supports an explicit `workflow_dispatch` for the current
 stable version; wait for Native checks on its exact source commit first.

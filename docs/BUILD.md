@@ -48,17 +48,20 @@ The build script validates the property list, architecture, app signature, and D
 before publishing outputs. The verification script mounts it read-only and checks
 the packaged app and Applications shortcut.
 
-The defaults prepare v1.1 (version 1.1.0), planned build 2017, with four new
-scenery themes replacing Forest and an Extra Broad nib preset. This is an
-unpublished candidate. The user passed local manual QA and requested the final
-Pen width correction; exact-source hosted checks are pending.
-The public feed advertised 1.0.4/build 2016 on 4 November 2026. For every later
+The defaults match published v1.1 (version 1.1.0), build 2017, with four new
+scenery themes replacing Forest and an Extra Broad nib preset. Source
+`7946a931c8283e5fc0429fbd1d400f22d76312a5` passed exact-source Native checks and
+signed release run 15. Independently downloaded public assets passed signatures,
+checksum, bundle and plain persistence checks; see [validation](TESTING.md).
+The public feed advertised 1.1.0/build 2017 on 4 November 2026. For every later
 update, recheck the actual public appcast and choose a greater `CFBundleVersion`;
 Sparkle compares build numbers, not just the displayed version.
 The release workflow uses `2002 + GITHUB_RUN_NUMBER`: run 12 built 2014 but failed
-before publishing; runs 13/14 published 2015/2016. The next fresh run 15 produces
-2017. A rerun does not increase its build number. The local v1.1.0 QA app uses a
-separate identity, QA build 1, a temporary library, and a disconnected updater.
+before publishing; runs 13/14/15 published 2015/2016/2017. The next fresh run 16
+produces 2018. A rerun does not increase its build number. The local v1.1.0 QA
+apps use separate identities, QA builds 1 and 2, temporary libraries and
+disconnected updaters. User QA passed the initial candidate; the final Pen-only
+1.5 mm correction received compilation, plain smoke and hosted native checks.
 
 The 3 November 2026 changes keep active sheets numbered consecutively in page
 order, including after deletion and drag reordering, and make Command-A select

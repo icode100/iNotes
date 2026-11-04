@@ -1,5 +1,75 @@
 # Validation
 
+## Published v1.1.0 / build 2017 — 4 November 2026
+
+Released source [`7946a931`](https://github.com/icode100/iNotes/commit/7946a931c8283e5fc0429fbd1d400f22d76312a5)
+passed [exact-source Native checks 41830398706](https://github.com/icode100/iNotes/actions/runs/41830398706):
+**122 XCTest tests, zero failures** (12.378 seconds), Mac release packaging,
+**392 editor, 448 workspace, 31 equation, 12 ruled-text, 8 shortcut and 49
+numbering/store checks**, plus 16 updater-configuration checks, store and
+independent backup integration.
+The mounted installer passed its signature, resource and persistence checks,
+including all 12 original scenery hashes. iPad simulator compilation passed for
+ARM64 and x86_64. Native-check tools were macOS 26.6.2 (25G83), Swift 6.3.3,
+Xcode 26.6 and iPhoneSimulator SDK 26.5. Sheet-switch diagnostics retained their
+minimum 12 post-turn samples and reported zero observed drift/collapse events;
+logged sampling gaps, including the injected first-turn stall, do not establish
+continuity across the unsampled intervals.
+
+[Signed release run 41831928682](https://github.com/icode100/iNotes/actions/runs/41831928682)
+**passed**, using fresh counter 15 and build `2002 + 15 = 2017`. It repeated
+122 XCTest tests with zero failures (9.822 seconds), packaging, 392 editor/448
+workspace/31 equation/12 ruled-text/8 shortcut/49 numbering checks, existing
+store/updater and backup integrations, mounted verification and all five
+update-signature probes before publishing the new v1.1.0 release. Its runner
+logged macOS 26.6.2 (25G83), image `macos-26-arm64` version `20261026.0455.2`;
+the release log did not print exact compiler/SDK versions. The tag points to
+`7946a931c8283e5fc0429fbd1d400f22d76312a5`.
+
+Independent downloaded-public-asset verification on macOS 27.2 (26B123) passed:
+
+- The versioned and default latest feeds matched the release asset bytes on
+  their first readback, advertised **1.1.0 / build 2017**, and enclosed the
+  matching HTTPS installer with its exact byte length.
+- The public installer matched its published SHA-256 checksum and GitHub asset
+  digest. Feed/archive Ed25519 verification and all five valid, changed-feed,
+  unsigned-feed, changed-archive and wrong-key probes passed against the
+  committed public key.
+- Read-only mounted verification passed strict ad hoc app/framework/helper
+  signatures, ARM64 architecture, deployment target, Applications link, native
+  adaptive icon, all 12 scenery hashes, math resources/licenses and plain
+  store/backup smoke checks. Version **1.1.0**, build **2017** and identity
+  `io.inotes.app` were explicitly verified. The downloaded binary's 49,127-node
+  import took **1.116 s**, with indexed folder query **0.021 s**.
+- The original v1.0.4 tag and all seven prior release assets retained their
+  recorded identities, sizes and digests. The new release added separate
+  assets; no old installer or signed feed was replaced.
+
+Public installer `iNotes-1.1.0-arm64.dmg`: **34,410,451 bytes**, SHA-256
+`61d36bfec975170f84eda29d8a1958499c2de359d303bd97335ed74237a8a117`.
+The app contains **41,133,627 regular-file bytes**; its executable is
+**6,166,608 bytes**, SHA-256
+`17bf11650c76fde7c989b4d09ecd932f563b53e8fd00f7b0670226c7c3955353`.
+The **1,268-byte** appcast SHA-256 is
+`82e88cdaacac613b516465ebdc241749b8ed0d769054740103dedf7c1f489f73`.
+These artifact sizes do not measure RAM. The verified public installer/checksum
+were copied to `dist/iNotes-1.1.0-arm64.dmg` and its `.sha256` companion; this is
+the downloaded public build, separate from the locally compiled QA apps.
+
+Evidence is `/private/tmp/inotes-v110-ci-final-logs`,
+`/private/tmp/inotes-v110-ci-final-verification.json` and
+`/private/tmp/inotes-v110-release/{verification.json,hosted-complete-log.txt,signature-probes.log,mounted-dmg-verification.log}`.
+The user passed the initial local candidate QA and then requested the Pen-only
+Extra Broad increase to 1.5 mm. That numeric correction received compilation,
+plain smoke and hosted native checks; no second manual pass is claimed. The
+candidate and correction records below preserve their status at the time.
+No local computer control, interactive UI automation, editor harness or simulator
+launch was used. The installed app and real notes were not modified. Actual
+updater installation, physical stylus/iPad, older macOS and real provider
+delivery remain unverified for this build. Distribution remains ad hoc signed,
+not Apple notarized. The next fresh signed-release run is **16**, producing
+build **2018**; build 2017 remains reserved.
+
 ## v1.1.0 final Pen width correction — 4 November 2026
 
 The user reported **all manual checks passed** in the isolated local candidate,

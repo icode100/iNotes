@@ -43,10 +43,13 @@ does not publish a release.
 
 ## Build and sign a local update
 
-The v1.1 candidate uses version **1.1.0** and planned build **2017**. The user
-passed local manual QA and requested the final Pen width correction. Exact-source
-Native checks must pass before pushing `v1.1.0`.
-The local QA app has separate notes/preferences, QA build 1 and no updater.
+The published v1.1 update uses version **1.1.0** and build **2017**, from source
+`7946a931c8283e5fc0429fbd1d400f22d76312a5`. The user passed local manual QA and
+requested the final Pen-only 1.5 mm correction. Exact-source
+[Native checks](https://github.com/icode100/iNotes/actions/runs/41830398706),
+[release run 15](https://github.com/icode100/iNotes/actions/runs/41831928682) and
+independent public-asset verification passed; see [validation](TESTING.md).
+Local QA apps have separate notes/preferences, QA builds 1 and 2 and no updater.
 No local computer control or interactive UI automation is permitted.
 
 The 3 November 2026 release uses build 2016, keeps page numbers consecutive
@@ -71,13 +74,14 @@ using Apple CryptoKit and the committed public key. It does not upload anything.
 For v1.0.3, the security rebuild 2011 exceeds the initial public build 2010 and
 shared local builds 1010–1012. Check both published and shared `CFBundleVersion`
 values and use a larger number for every update, including same-version rebuilds.
-Development defaults (`1.1.0`, planned build 2017) are separate from the release workflow's
+Development defaults (`1.1.0`, build 2017) match the current public release and
+are separate from the release workflow's
 `2002 + GITHUB_RUN_NUMBER`. Run 11 published v1.0.4 build 2012; isolated backup QA
 used build 2013. Run 12 built 2014 but stopped at native diagnostic verification before publication.
-Run 13 published 2015, and run 14 published 2016. The next new release run (15)
-must produce 2017 or higher. Failed build 2014
+Runs 13, 14 and 15 published 2015, 2016 and 2017. The next new release run (16)
+must produce 2018 or higher. Failed build 2014
 remains reserved alongside the original installer and QA slot.
-The candidate feed will point to the matching `v1.1.0` release's DMG. Never edit a signed appcast
+The public feed points to the matching `v1.1.0` release's DMG. Never edit a signed appcast
 after generation. Re-run the script if its contents change. The last command
 checks valid signatures and rejects changed feeds, unsigned feeds, changed
 archives, and a different public key.

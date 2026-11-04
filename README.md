@@ -1,15 +1,15 @@
 # iNotes
 
-The v1.1 candidate (version 1.1.0, planned build 2017) adds Arctic, Open Skyscape,
+Version 1.1.0 (v1.1), build 2017, adds Arctic, Open Skyscape,
 Ruby Hills, and Nature scenery, replaces Forest, and adds Extra Broad nibs.
-Coast and Alpine remain available. The user passed local QA and requested Pen
-Extra Broad at 1.5 mm. Final hosted checks are required before publication; see [candidate notes](docs/releases/1.1.0.md).
+Coast and Alpine remain available. Extra Broad uses 1.5 mm for Pen, 1.3 mm for
+Pencil and Straight Line, and 2 mm for Brush/Marker.
 
-The current Mac release is version 1.0.4, build 2016. [Download the Mac installer](https://github.com/icode100/iNotes/releases/download/v1.0.4/iNotes-1.0.4-build2016-arm64.dmg). See [release notes](docs/releases/1.0.4.md)
+The current Mac release is version 1.1.0, build 2017. [Download the Mac installer](https://github.com/icode100/iNotes/releases/download/v1.1.0/iNotes-1.1.0-arm64.dmg). See [release notes](docs/releases/1.1.0.md)
 and [validation](docs/TESTING.md) for local results and separately recorded public-build verification.
 
-Build 2016 keeps active sheets numbered consecutively after
-deletion, restoration, moves, and drag reordering. It also makes **⌘A** select
+The existing fixes keep active sheets numbered consecutively after
+deletion, restoration, moves, and drag reordering. They also make **⌘A** select
 the whole page from every tool.
 
 A small, native, open-source notebook for Apple silicon Macs, with a shared iPad app target. Built with SwiftUI, AppKit/UIKit, and PencilKit, with Sparkle for signed Mac updates and SwiftMath for offline equations. No Electron, cloud SDK, account, or telemetry.
@@ -70,7 +70,7 @@ Requires an Apple silicon Mac and macOS 14+. Building the installer requires ful
 open dist/iNotes.app
 ```
 
-The default local installer is `dist/iNotes-1.1.0-arm64.dmg` (version 1.1.0, build 2017). This candidate is not yet published. Downloaded public builds are also ad hoc signed: **they are not Apple notarized**, so macOS may report that Apple could not verify iNotes is free of malware.
+The default local installer is `dist/iNotes-1.1.0-arm64.dmg` (version 1.1.0, build 2017), matching the published release. Downloaded public builds are also ad hoc signed: **they are not Apple notarized**, so macOS may report that Apple could not verify iNotes is free of malware.
 
 If you trust the download from the [official releases](https://github.com/icode100/iNotes/releases), follow Apple's [per-app first-open procedure](https://support.apple.com/en-us/102445):
 
