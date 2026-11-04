@@ -1,5 +1,72 @@
 # Validation
 
+## v1.1.0 / planned build 2017 candidate — 4 November 2026
+
+Candidate based on `ec903e4e3f57b07cb4d3697a6ded78e6fddc99d2`, with the compiled
+source snapshot identified by `/private/tmp/inotes-v110-qa-20261104/source-inputs.json`.
+Arctic, Open Skyscape, Ruby Hills and Nature replace Forest; Coast and Alpine
+remain. A persisted Forest preference resolves to Nature throughout the scenery,
+accent and checked-menu paths. Extra Broad follows Broad at 1.3 mm for
+Pen/Pencil/Straight Line and 2 mm for Brush/Marker. Existing Fine defaults,
+Highlighter choices, custom widths and stored strokes retain their prior paths.
+No production storage, numbering, selection, undo, cursor/input or native pane
+layout code changed. This scope review is not proof of absence of regressions.
+
+Local results on macOS 27.2 (26B123), Swift 6.4.2 Command Line Tools:
+
+- `bash scripts/test.sh`: **122 standalone tests, zero failures, 3.85 seconds**
+  with native file access and temporary test directories. The first sandboxed
+  attempt reported 25 backup-file-coordination failures; no test or safety
+  assertion was weakened. Numbering, archive compatibility, mixed payloads,
+  backup retention, bounded file reads and hierarchy-query regressions remain.
+- Native SwiftPM Debug compilation of the frozen source passed in **34.44 s**,
+  using `--disable-sandbox`, `--jobs 4` and the pinned SwiftMath resource lookup
+  patch only in the disposable dependency checkout. Existing Sendable warnings
+  in tool shortcuts/workspace restoration and the native-build-system
+  deprecation warning remain. No dependencies or deployment targets changed.
+- The signed isolated QA app passed plain `--smoke-test`: store/updater checks,
+  **49 numbering/store checks**, independent backup integration, exact
+  save/reopen and mixed-payload preservation. Its 49,127-node leaf-first import
+  took **1.541 s** and indexed folder query **0.041 s**. No editor/UI harness ran.
+- Strict ad hoc app/framework/helper signatures, ARM64 executable, QA bundle
+  identity, temporary-library setting and absent updater keys passed. The
+  artwork verifier passed all **12** bundled original PNG hashes/dimensions;
+  the eight new images match the supplied files byte-for-byte. Scenery is
+  **30,143,035 bytes**, an increase of **10,965,704 bytes** from the six old
+  images. The bounded native image cache remains unchanged.
+- Shell syntax, iPad project/Info plist syntax and `git diff --check` passed.
+  Full `build-macos.sh` stopped at missing full-Xcode `actool`; the iPad build
+  stopped because `xcodebuild` requires full Xcode. Local DMG verification and
+  signed-appcast/signature regression checks are deferred until a full package
+  exists. The QA icon needed native tool access after sandboxed `iconutil`
+  rejected its otherwise valid iconset; final native packaging/signing passed.
+
+The local app is `dist/iNotes v1.1 QA.app`, identity
+`io.inotes.v110-qa-20261104`, version **1.1.0**, separate **QA build 1**. It has
+a fresh mixed-content notebook in `/private/tmp/inotes-v110-qa-20261104/library`,
+separate preferences and disconnected updater. The app was not opened for UI
+testing. Launch and manual instructions are in `dist/Launch iNotes v1.1 QA.command`
+and `dist/v1.1-QA.txt`. The executable is **10,104,512 bytes**, SHA-256
+`13519627426d55cd3e36879de491d3ed829e01d77280c12cc7b16449a7e1bd61`;
+the app has **43,572,656 regular-file bytes**. These Debug QA sizes do not measure
+release installer size or RAM. The manifest is
+`/private/tmp/inotes-v110-qa-20261104/verification.json`.
+
+Evidence: `/private/tmp/inotes-v110-core-native.log`, `inotes-v110-build.log`,
+`inotes-v110-qa-smoke.log`, `inotes-v110-package-qa-native.log`,
+`inotes-v110-packaging.log` and `inotes-v110-ipad.log` in the same `/private/tmp`
+directory. Mac/iPad scenery and nib diagnostics were extended and Mac diagnostics
+compiled, but no local `--editor-test`, simulator launch, computer control or
+interactive UI automation was used. Actual displayed cursor, menu checkmarks,
+theme transitions, pane geometry, stylus/iPad, older macOS and provider delivery
+remain unverified for this candidate.
+
+User manual QA and exact-source hosted Native checks are pending; **v1.1.0 has
+not been published**. Public-feed/workflow preflight on 4 November 2026 confirmed
+1.0.4/build 2016 and release counter 14. Fresh run 15 reserves build 2017; recheck
+before publication. Existing release tags, installers and signed feeds remain
+unchanged.
+
 ## Published v1.0.4 / build 2016 — 3 November 2026
 
 The user confirmed both fixes in the isolated QA app and authorized publication.

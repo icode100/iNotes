@@ -14,6 +14,13 @@ creation metadata, independent pane controls, a workspace sheet-number badge,
 and clearer themed controls/cards. Consult the versioned validation record before
 claiming that a source change, local build, or separately built public release passed.
 
+The v1.1 update uses version **1.1.0**, planned release build **2017** (fresh
+release run 15). It replaces Forest with Arctic, Open Skyscape, Ruby Hills, and
+Nature, while retaining Coast, Alpine, and Classic. Existing `forest` scenery
+preferences resolve to Nature. Extra Broad follows Broad: 1.3 mm for Pen,
+Pencil, and Straight Line, and 2 mm for Brush/Marker. Publication awaits the
+user's manual QA and exact-source hosted checks; do not claim it is published.
+
 ## Priorities
 
 - Protect saved notes, archive compatibility, undo history, and recoverability.
@@ -135,8 +142,8 @@ Do not treat callback-level cursor assertions alone as proof of the displayed cu
   metadata, or pressure-sized cursor. Earlier tablet/PencilKit handling already
   consumed pressure; restoring it is not a guarantee of pressure-free native ink.
 - Every writing-tool selection defaults to Fine. The latest requested nominal
-  presets are Extra Fine/Fine/Medium/Broad: Pen, Pencil, and Straight line use
-  0.3/0.45/0.7/1 mm; Brush (Marker) uses 0.5/0.7/1/1.5 mm. Highlighter retains its
+  presets are Extra Fine/Fine/Medium/Broad/Extra Broad: Pen, Pencil, and Straight line use
+  0.3/0.45/0.7/1/1.3 mm; Brush (Marker) uses 0.5/0.7/1/1.5/2 mm. Highlighter retains its
   existing width choices. Extra Fine was explicitly requested again after the
   pressure experiment was withdrawn; it does not restore pressure enhancements.
   Convert mm using 72/25.4 points per mm and divide by the existing tool multiplier
@@ -246,10 +253,12 @@ templates, selection, equations, and combined exports when modifying rendering.
 Page color is a global preference, distinct from scenic workspace appearance.
 Light/dark or vintage changes must not rewrite canonical stored text/ink colors.
 
-The six supplied Coast/Forest/Alpine PNGs live in
+The twelve supplied Coast/Alpine/Arctic/Open Skyscape/Ruby Hills/Nature PNGs live in
 `Sources/NotesApp/Resources/WorkspaceThemes`. Preserve their light/dark mapping,
 Mac relocated-resource-bundle lookup, iPad main-bundle lookup, and bounded native
-image caching. Scenery must not intercept input or replace the editor.
+image caching. Forest is no longer selectable or bundled; resolve its legacy
+preference to Nature consistently across scenery, accents, and checked menus.
+Scenery must not intercept input or replace the editor.
 Avoid web runtimes, cloud SDKs, unnecessary image duplication, and unbounded caches.
 Measure app/DMG file bytes separately from RAM; an artifact size is not a memory benchmark.
 
@@ -348,9 +357,10 @@ Sparkle compares build numbers: choose a value greater than the latest published
 Run 10 shipped build 2010; the manual same-version security rebuild reserved 2011,
 and v1.0.4 run 11 published 2012. Backup QA used 2013; dispatched run 12 built
 2014 but failed verification before publishing. Run 13 published 2015, and run 14
-published 2016. Defaults match build 2016 for the numbering and Select All fixes;
-its separate QA identity uses build 1. The next new release run (15) must produce
-2017. A workflow rerun does not
+published 2016. Defaults now prepare v1.1.0/build 2017; the public feed still
+advertises 1.0.4/build 2016 as checked on 4 November 2026. The v1.1.0 local QA
+identity uses separate QA build 1. The next new release run (15) must produce
+2017; recheck both feed and counter immediately before publication. A workflow rerun does not
 advance `GITHUB_RUN_NUMBER`. Never reuse its build number for an updated binary.
 The release workflow supports an explicit `workflow_dispatch` for the current
 stable version; wait for Native checks on its exact source commit first.

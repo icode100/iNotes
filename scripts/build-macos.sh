@@ -4,8 +4,8 @@ set -euo pipefail
 # Direct distribution for Apple silicon, with a native signed Sparkle updater.
 ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 cd "$ROOT"
-VERSION="${VERSION:-1.0.4}"
-BUILD_NUMBER="${BUILD_NUMBER:-2016}"
+VERSION="${VERSION:-1.1.0}"
+BUILD_NUMBER="${BUILD_NUMBER:-2017}"
 SIGNING_IDENTITY="${SIGNING_IDENTITY:--}"
 export UPDATE_FEED_URL="${UPDATE_FEED_URL-https://github.com/icode100/iNotes/releases/latest/download/appcast.xml}"
 if [[ ! ${UPDATE_PUBLIC_ED_KEY+x} && -f Resources/UpdatePublicEDKey.txt ]]; then

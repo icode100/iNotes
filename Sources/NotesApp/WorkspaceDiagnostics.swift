@@ -24,10 +24,18 @@ enum WorkspaceDiagnostics {
 
         // Exercise the installed resource lookup, not a source-tree path. This
         // catches missing SwiftPM bundles and Xcode resource-phase omissions.
+        try check(WorkspaceTheme(rawValue: "forest") == nil
+                  && WorkspaceTheme(preferenceValue: "forest") == .nature
+                  && WorkspaceTheme(preferenceValue: "unrecognized") == .classic,
+                  "removed Forest preferences resolve to Nature and unknown preferences fall back to Classic")
+        try check(WorkspaceTheme.photographicThemes.count == 6
+                  && WorkspaceTheme.openSkyscape.title == "Open Skyscape"
+                  && WorkspaceTheme.rubyHills.title == "Ruby Hills",
+                  "the six scenery choices use their displayed names")
         try check(WorkspaceArtwork.url(theme: .classic, isDark: false) == nil
                   && WorkspaceArtwork.url(theme: .classic, isDark: true) == nil,
                   "Classic does not load a photographic background")
-        for theme in [WorkspaceTheme.coast, .forest, .alpine] {
+        for theme in WorkspaceTheme.photographicThemes {
             var variants: [Data] = []
             for dark in [false, true] {
                 guard let url = WorkspaceArtwork.url(theme: theme, isDark: dark) else {
@@ -120,7 +128,8 @@ enum WorkspaceDiagnostics {
         let penFine = 0.45 * 72 / 25.4
         try check(abs(page.inkView.lineWidth - penFine) < 0.000001, "fresh workspace uses the 0.45 mm Fine pen nib")
         for tool in [InkTool.pen, .line, .pencil, .marker, .highlighter] {
-            preferences.set(InkNibPreset.broad.width(for: tool), forKey: "inkWidth")
+            let widestPreset: InkNibPreset = tool == .highlighter ? .broad : .extraBroad
+            preferences.set(widestPreset.width(for: tool), forKey: "inkWidth")
             preferences.set("#B14D55", forKey: "inkColor")
             settle(0.1)
             NotificationCenter.default.post(name: .noteToolShortcut, object: tool)
@@ -128,11 +137,15 @@ enum WorkspaceDiagnostics {
             waitPassively { page.activeTool == tool && abs(page.inkView.lineWidth - fine) < 0.000001 }
             try check(page.activeTool == tool && abs(page.inkView.lineWidth - fine) < 0.000001
                       && abs(preferences.double(forKey: "inkWidth") - fine) < 0.000001,
-                      "selecting \(tool.rawValue) resets a broad nib to that tool's Fine preset")
+                      "selecting \(tool.rawValue) resets \(widestPreset.title) to that tool's Fine preset")
             let expectedColor = tool == .line ? "#30343B" : tool == .highlighter ? "#E2B84D" : "#B14D55"
             try check(page.inkView.colorHex == expectedColor && !editor.isEditable && !editor.isSelectable,
                       "selecting \(tool.rawValue) preserves its original color policy and native ink routing")
-            let expectedMillimeters: [Double] = tool == .marker ? [0.5, 0.7, 1, 1.5] : [0.3, 0.45, 0.7, 1]
+            let expectedPresets: [InkNibPreset] = tool == .highlighter
+                ? [.fine, .medium, .broad, .highlighter] : [.extraFine, .fine, .medium, .broad, .extraBroad]
+            try check(InkNibPreset.presets(for: tool) == expectedPresets,
+                      "\(tool.rawValue) keeps the requested nib menu order and Highlighter choices")
+            let expectedMillimeters: [Double] = tool == .marker ? [0.5, 0.7, 1, 1.5, 2] : [0.3, 0.45, 0.7, 1, 1.3]
             for (index, preset) in InkNibPreset.presets(for: tool).enumerated() {
                 let width = preset.width(for: tool)
                 preferences.set(width, forKey: "inkWidth")
@@ -457,7 +470,7 @@ enum WorkspaceDiagnostics {
         settle()
 
         let contentBeforeScenery = store.selectedSheet?.pageContent
-        for theme in [WorkspaceTheme.coast, .forest, .alpine] {
+        for theme in WorkspaceTheme.photographicThemes {
             preferences.set(theme.rawValue, forKey: "workspaceTheme")
             for appearance in [ColorScheme.light, .dark] {
                 host.rootView = ContentView(presentation: presentation)

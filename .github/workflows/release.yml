@@ -8,7 +8,7 @@ on:
       version:
         description: 'Existing visible version to rebuild without moving its tag'
         required: true
-        default: '1.0.4'
+        default: '1.1.0'
         type: string
       source_commit:
         description: 'Full source commit that passed Native checks'

@@ -514,15 +514,37 @@ final class WorkspaceNavigationProbe: NSView {
 #endif
 
 enum WorkspaceTheme: String, CaseIterable, Identifiable {
-    case classic, alpine, coast, forest
+    case classic, alpine, coast, arctic
+    case openSkyscape = "open-skyscape"
+    case rubyHills = "ruby-hills"
+    case nature
     var id: String { rawValue }
-    var title: String { rawValue.capitalized }
+    var title: String {
+        switch self {
+        case .openSkyscape: return "Open Skyscape"
+        case .rubyHills: return "Ruby Hills"
+        default: return rawValue.capitalized
+        }
+    }
+
+    /// Keep an older Forest preference scenic without retaining the removed
+    /// artwork or changing notebook data. All appearance consumers use this
+    /// resolver so the menu selection, accents, and background agree.
+    init(preferenceValue: String) {
+        self = preferenceValue == "forest" ? .nature : (Self(rawValue: preferenceValue) ?? .classic)
+    }
+
+    static var photographicThemes: [Self] { allCases.filter { $0 != .classic } }
+
     func accent(isDark: Bool) -> Color {
         switch self {
         case .classic: return .accentColor
         case .alpine: return Color(hex: isDark ? "#BDB3F5" : "#6653AA")
         case .coast: return Color(hex: isDark ? "#81CFE3" : "#14758F")
-        case .forest: return Color(hex: isDark ? "#A5D3A7" : "#39754D")
+        case .arctic: return Color(hex: isDark ? "#8DD9ED" : "#19728A")
+        case .openSkyscape: return Color(hex: isDark ? "#A5CFF5" : "#286DA8")
+        case .rubyHills: return Color(hex: isDark ? "#E8A6B4" : "#A3444E")
+        case .nature: return Color(hex: isDark ? "#BBD39A" : "#56713A")
         }
     }
     func surface(isDark: Bool) -> Color {
@@ -530,7 +552,10 @@ enum WorkspaceTheme: String, CaseIterable, Identifiable {
         case .classic: return .clear
         case .alpine: return Color(hex: isDark ? "#252330" : "#F1EFF8")
         case .coast: return Color(hex: isDark ? "#1D2A31" : "#ECF5F7")
-        case .forest: return Color(hex: isDark ? "#212C25" : "#EEF4ED")
+        case .arctic: return Color(hex: isDark ? "#192A35" : "#EDF5F8")
+        case .openSkyscape: return Color(hex: isDark ? "#1C2839" : "#EEF5FC")
+        case .rubyHills: return Color(hex: isDark ? "#302229" : "#F8EEEE")
+        case .nature: return Color(hex: isDark ? "#252C20" : "#F1F3E8")
         }
     }
 
@@ -543,7 +568,7 @@ enum WorkspaceTheme: String, CaseIterable, Identifiable {
     }
 }
 
-/// Shared native-image cache keeps the six full-quality photographs out of the
+/// Shared native-image cache keeps the full-quality photographs out of the
 /// notebook model and avoids decoding another copy for each navigation pane.
 @MainActor
 enum WorkspaceArtwork {
@@ -600,7 +625,7 @@ struct WorkspaceScenery: View {
     @AppStorage("workspaceTheme") private var selectedTheme = "classic"
     @Environment(\.colorScheme) private var colorScheme
     @Environment(\.colorSchemeContrast) private var contrast
-    private var theme: WorkspaceTheme { WorkspaceTheme(rawValue: selectedTheme) ?? .classic }
+    private var theme: WorkspaceTheme { WorkspaceTheme(preferenceValue: selectedTheme) }
 
     var body: some View {
         GeometryReader { geometry in
@@ -679,7 +704,7 @@ struct AppearanceMenu: View {
             }
             Menu("Workspace scenery") {
                 ForEach(WorkspaceTheme.allCases) { theme in
-                    CheckedMenuButton(title: theme.title, isSelected: workspaceTheme == theme.rawValue) { workspaceTheme = theme.rawValue }
+                    CheckedMenuButton(title: theme.title, isSelected: WorkspaceTheme(preferenceValue: workspaceTheme) == theme) { workspaceTheme = theme.rawValue }
                 }
             }
         } label: { Label("Appearance", systemImage: "paintpalette") }

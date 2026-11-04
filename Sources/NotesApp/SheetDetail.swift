@@ -6,7 +6,7 @@ import AppKit
 #endif
 
 enum InkNibPreset: String, CaseIterable {
-    case extraFine, fine, medium, broad, highlighter
+    case extraFine, fine, medium, broad, extraBroad, highlighter
 
     static let pointsPerMillimeter = 72.0 / 25.4
 
@@ -16,12 +16,13 @@ enum InkNibPreset: String, CaseIterable {
         case .fine: return "Fine"
         case .medium: return "Medium"
         case .broad: return "Broad"
+        case .extraBroad: return "Extra Broad"
         case .highlighter: return "Highlighter width"
         }
     }
 
     static func presets(for tool: InkTool) -> [Self] {
-        tool == .highlighter ? [.fine, .medium, .broad, .highlighter] : [.extraFine, .fine, .medium, .broad]
+        tool == .highlighter ? [.fine, .medium, .broad, .highlighter] : [.extraFine, .fine, .medium, .broad, .extraBroad]
     }
 
     static func defaultWidth(for tool: InkTool) -> Double { Self.fine.width(for: tool) }
@@ -35,6 +36,7 @@ enum InkNibPreset: String, CaseIterable {
         case .fine: return tool == .marker ? 0.7 : 0.45
         case .medium: return tool == .marker ? 1 : 0.7
         case .broad: return tool == .marker ? 1.5 : 1
+        case .extraBroad: return tool == .marker ? 2 : 1.3
         case .highlighter: return 4.5 * InkStyle.highlighter.widthMultiplier / Self.pointsPerMillimeter
         }
     }
@@ -72,7 +74,7 @@ enum InkNibPreset: String, CaseIterable {
         case .extraFine: return 0.75 // Not offered for Highlighter.
         case .fine: return 1.5
         case .medium: return 2.5
-        case .broad: return 7
+        case .broad, .extraBroad: return 7 // Extra Broad is not offered for Highlighter.
         case .highlighter: return 4.5
         }
     }
@@ -104,7 +106,7 @@ struct SheetDetail: View {
         (PageColorScheme(rawValue: pageColorScheme) ?? .system).resolved(isDark: colorScheme == .dark)
     }
     private var workspaceAccent: Color {
-        (WorkspaceTheme(rawValue: workspaceTheme) ?? .classic).accent(isDark: colorScheme == .dark)
+        WorkspaceTheme(preferenceValue: workspaceTheme).accent(isDark: colorScheme == .dark)
     }
 
     var body: some View {

@@ -38,9 +38,9 @@ bash scripts/verify-macos.sh
 The build creates:
 
 - `dist/iNotes.app`: native ARM64 app bundle.
-- `dist/iNotes-1.0.4-arm64.dmg`: compressed disk image containing the app, an
+- `dist/iNotes-1.1.0-arm64.dmg`: compressed disk image containing the app, an
   Applications shortcut, and installation instructions.
-- `dist/iNotes-1.0.4-arm64.dmg.sha256`: SHA-256 checksum.
+- `dist/iNotes-1.1.0-arm64.dmg.sha256`: SHA-256 checksum.
 
 Open the disk image and drag iNotes to Applications. The DMG does not install
 background services, kernel extensions, browser runtimes, or privileged helpers.
@@ -48,16 +48,16 @@ The build script validates the property list, architecture, app signature, and D
 before publishing outputs. The verification script mounts it read-only and checks
 the packaged app and Applications shortcut.
 
-The defaults are version 1.0.4 and build 2016, matching the published
-sheet-numbering and Select All update. This exceeds backup-retention build 2015,
-original public v1.0.4 build 2012, and isolated backup QA build 2013. For every
-later update, check the actual public appcast and choose a greater
-`CFBundleVersion`; Sparkle compares build numbers, not just the displayed version.
-The release workflow uses `2002 + GITHUB_RUN_NUMBER`: run 12 built
-2014 but failed a diagnostic coverage check before publishing; run 13 published
-2015, and run 14 published 2016. The next new release run (15) produces 2017.
-A workflow rerun does not increase its build number; start a new dispatched run
-for a same-version rebuild.
+The defaults prepare v1.1 (version 1.1.0), planned build 2017, with four new
+scenery themes replacing Forest and an Extra Broad nib preset. This is an
+unpublished candidate pending user manual QA and exact-source hosted checks.
+The public feed advertised 1.0.4/build 2016 on 4 November 2026. For every later
+update, recheck the actual public appcast and choose a greater `CFBundleVersion`;
+Sparkle compares build numbers, not just the displayed version.
+The release workflow uses `2002 + GITHUB_RUN_NUMBER`: run 12 built 2014 but failed
+before publishing; runs 13/14 published 2015/2016. The next fresh run 15 produces
+2017. A rerun does not increase its build number. The local v1.1.0 QA app uses a
+separate identity, QA build 1, a temporary library, and a disconnected updater.
 
 The 3 November 2026 changes keep active sheets numbered consecutively in page
 order, including after deletion and drag reordering, and make Command-A select

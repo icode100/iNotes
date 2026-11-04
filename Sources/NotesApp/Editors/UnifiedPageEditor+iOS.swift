@@ -749,10 +749,18 @@ struct UnifiedPageEditor: UIViewRepresentable {
                                                userInfo: [NSLocalizedDescriptionKey: message]) }
                 checks += 1
             }
+            try require(WorkspaceTheme(rawValue: "forest") == nil
+                        && WorkspaceTheme(preferenceValue: "forest") == .nature
+                        && WorkspaceTheme(preferenceValue: "unrecognized") == .classic,
+                        "Removed Forest preferences must resolve to Nature and unknown preferences to Classic")
+            try require(WorkspaceTheme.photographicThemes.count == 6
+                        && WorkspaceTheme.openSkyscape.title == "Open Skyscape"
+                        && WorkspaceTheme.rubyHills.title == "Ruby Hills",
+                        "The six scenery choices must use their displayed names")
             try require(WorkspaceArtwork.url(theme: .classic, isDark: false) == nil
                         && WorkspaceArtwork.url(theme: .classic, isDark: true) == nil,
                         "Classic must not load photographic artwork")
-            for theme in [WorkspaceTheme.coast, .forest, .alpine] {
+            for theme in WorkspaceTheme.photographicThemes {
                 var variants: [Data] = []
                 for dark in [false, true] {
                     guard let url = WorkspaceArtwork.url(theme: theme, isDark: dark) else {

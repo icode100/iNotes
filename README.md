@@ -1,8 +1,9 @@
 # iNotes
 
-Version 1.0.4 adds pasted images that you can annotate directly on Mac sheets,
-with movement, proportional resizing, undo, and combined image/ink exports.
-Scenic sidebars have clearer labels and a quieter background.
+The v1.1 candidate (version 1.1.0, planned build 2017) adds Arctic, Open Skyscape,
+Ruby Hills, and Nature scenery, replaces Forest, and adds Extra Broad nibs.
+Coast and Alpine remain available. Local user QA and hosted release checks are
+required before publication; see [candidate notes](docs/releases/1.1.0.md).
 
 The current Mac release is version 1.0.4, build 2016. [Download the Mac installer](https://github.com/icode100/iNotes/releases/download/v1.0.4/iNotes-1.0.4-build2016-arm64.dmg). See [release notes](docs/releases/1.0.4.md)
 and [validation](docs/TESTING.md) for local results and separately recorded public-build verification.
@@ -25,11 +26,12 @@ A small, native, open-source notebook for Apple silicon Macs, with a shared iPad
 - Editable LaTeX equations with a native live preview, fractions, roots, powers, Greek symbols, sums, integrals, and matrices. Equations share the page with text and handwriting and adapt to light/dark paper. Rendering uses the pinned, open-source SwiftMath 1.7.3 library entirely on the device.
 - Straight-line pen tool for table borders, with near-horizontal/vertical snapping and Shift axis constraints on Mac.
 - Mac pen and pencil cursors show a nib dot sized for the selected width and page zoom. The highlighter uses a slanted chisel-tip cursor.
-- Extra Fine/Fine/Medium/Broad nominal nibs: Pen, Pencil, and Straight Line use 0.3/0.45/0.7/1 mm; Brush (Marker) uses 0.5/0.7/1/1.5 mm. Selecting a writing tool starts at Fine; existing notes keep their stored widths. Highlighter retains its prior choices. Nib, paper, line, template, and theme menus show the selected choice, including custom saved nib widths.
+- Extra Fine/Fine/Medium/Broad/Extra Broad nominal nibs: Pen, Pencil, and Straight Line use 0.3/0.45/0.7/1/1.3 mm; Brush (Marker) uses 0.5/0.7/1/1.5/2 mm. Selecting a writing tool starts at Fine; existing notes keep their stored widths. Highlighter retains its prior choices. Nib, paper, line, template, and theme menus show the selected choice, including custom saved nib widths.
 - Pressure-aware pen-tablet input on Mac, including stylus proximity and hardware eraser events. Read-only HID presence detection excludes touchpads; the input indicator confirms actual pen activity. No global input capture or tablet SDK is required.
 - Apple Pencil and native PencilKit tools on iPad, with palm rejection and actual Pencil touch detection. Basic ink paths and instrument styles transfer between Mac and iPad; native PencilKit data is retained. Grid, ruled, dotted, and blank paper save with each sheet.
 - Ruled paper aligns typed baselines with its guides, including wrapped paragraphs, headings, and moved text boxes. The native layout follows whole ruled rows while preserving saved rich-text formatting and colors.
 - Light, dark, and system appearance for the shared page, readable ink colors, and prominent grids, rules, and dots. Switching appearance preserves original note colors. The single-pencil app icon includes native light and dark appearances.
+- Classic plus Coast, Alpine, Arctic, Open Skyscape, Ruby Hills, and Nature workspace scenery, with paired light/dark photographs. A saved Forest preference now shows Nature. Scenery remains separate from page colors and note content.
 - Search across titles, text, positioned text boxes, equation source, and tags; favorite sheets; embedded file attachments.
 - Automatic local saves, a previous-version backup, explicit damaged-library recovery, and external-change checks that prevent overwriting another app instance's changes.
 - Portable `.inotes` import/export. Import creates a separate copy; it never replaces existing notebooks.
@@ -68,7 +70,7 @@ Requires an Apple silicon Mac and macOS 14+. Building the installer requires ful
 open dist/iNotes.app
 ```
 
-The default local installer is `dist/iNotes-1.0.4-arm64.dmg` (version 1.0.4, build 2016). Downloaded public builds are also ad hoc signed: **they are not Apple notarized**, so macOS may report that Apple could not verify iNotes is free of malware.
+The default local installer is `dist/iNotes-1.1.0-arm64.dmg` (version 1.1.0, build 2017). This candidate is not yet published. Downloaded public builds are also ad hoc signed: **they are not Apple notarized**, so macOS may report that Apple could not verify iNotes is free of malware.
 
 If you trust the download from the [official releases](https://github.com/icode100/iNotes/releases), follow Apple's [per-app first-open procedure](https://support.apple.com/en-us/102445):
 

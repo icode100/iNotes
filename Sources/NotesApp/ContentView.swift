@@ -92,7 +92,7 @@ struct ContentView: View {
             #endif
         }
         .environmentObject(presentation)
-        .tint((WorkspaceTheme(rawValue: workspaceTheme) ?? .classic).accent(isDark: colorScheme == .dark))
+        .tint(WorkspaceTheme(preferenceValue: workspaceTheme).accent(isDark: colorScheme == .dark))
         #if !os(macOS)
         .onChange(of: presentation.fullPage) { _, fullPage in
             if fullPage { previousColumns = columnVisibility; columnVisibility = .detailOnly }
@@ -199,7 +199,7 @@ struct ContentView: View {
     }
 
     private var sidebarSecondary: AnyShapeStyle {
-        (WorkspaceTheme(rawValue: workspaceTheme) ?? .classic).sidebarSecondary(isDark: colorScheme == .dark)
+        WorkspaceTheme(preferenceValue: workspaceTheme).sidebarSecondary(isDark: colorScheme == .dark)
     }
 
     private var sidebar: some View {
@@ -314,7 +314,7 @@ struct ContentView: View {
                     .background {
                         if workspaceTheme != "classic", store.sheetID != sheet.id {
                             RoundedRectangle(cornerRadius: 10)
-                                .fill((WorkspaceTheme(rawValue: workspaceTheme) ?? .classic)
+                                .fill(WorkspaceTheme(preferenceValue: workspaceTheme)
                                     .surface(isDark: colorScheme == .dark).opacity(0.92))
                         }
                     }
@@ -386,7 +386,7 @@ struct FolderTreeRow: View {
     @ViewState private var expanded = true
 
     private var sidebarSecondary: AnyShapeStyle {
-        (WorkspaceTheme(rawValue: workspaceTheme) ?? .classic).sidebarSecondary(isDark: colorScheme == .dark)
+        WorkspaceTheme(preferenceValue: workspaceTheme).sidebarSecondary(isDark: colorScheme == .dark)
     }
 
     var body: some View {

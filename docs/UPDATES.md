@@ -43,6 +43,11 @@ does not publish a release.
 
 ## Build and sign a local update
 
+The v1.1 candidate uses version **1.1.0** and planned build **2017**. User
+manual QA and exact-source Native checks must pass before pushing `v1.1.0`.
+The local QA app has separate notes/preferences, QA build 1 and no updater.
+No local computer control or interactive UI automation is permitted.
+
 The 3 November 2026 release uses build 2016, keeps page numbers consecutive
 after deletion and reordering, and supports Command-A for the whole page from
 every tool. User QA and exact-source Native checks passed. Release run 14
@@ -53,10 +58,10 @@ identity, QA build 1, temporary library, and disconnected updater. Recheck the
 public feed and workflow counter before any later publication.
 
 ```sh
-VERSION=1.0.4 BUILD_NUMBER=2016 bash scripts/build-macos.sh
-VERSION=1.0.4 bash scripts/verify-macos.sh
-VERSION=1.0.4 bash scripts/generate-appcast.sh
-VERSION=1.0.4 bash scripts/test-update-signatures.sh
+VERSION=1.1.0 BUILD_NUMBER=2017 bash scripts/build-macos.sh
+VERSION=1.1.0 bash scripts/verify-macos.sh
+VERSION=1.1.0 bash scripts/generate-appcast.sh
+VERSION=1.1.0 bash scripts/test-update-signatures.sh
 ```
 
 The appcast command prepares `dist/update/appcast.xml`. It uses Sparkle's official
@@ -65,13 +70,13 @@ using Apple CryptoKit and the committed public key. It does not upload anything.
 For v1.0.3, the security rebuild 2011 exceeds the initial public build 2010 and
 shared local builds 1010–1012. Check both published and shared `CFBundleVersion`
 values and use a larger number for every update, including same-version rebuilds.
-Development defaults (`1.0.4`, build 2016) are separate from the release workflow's
+Development defaults (`1.1.0`, planned build 2017) are separate from the release workflow's
 `2002 + GITHUB_RUN_NUMBER`. Run 11 published v1.0.4 build 2012; isolated backup QA
 used build 2013. Run 12 built 2014 but stopped at native diagnostic verification before publication.
 Run 13 published 2015, and run 14 published 2016. The next new release run (15)
 must produce 2017 or higher. Failed build 2014
 remains reserved alongside the original installer and QA slot.
-The feed points to the matching `v1.0.4` release's DMG. Never edit a signed appcast
+The candidate feed will point to the matching `v1.1.0` release's DMG. Never edit a signed appcast
 after generation. Re-run the script if its contents change. The last command
 checks valid signatures and rejects changed feeds, unsigned feeds, changed
 archives, and a different public key.
@@ -91,7 +96,7 @@ HTTPS feed; malformed configured channels are rejected before packaging.
 ## Publish a version
 
 After reviewing the source and configuring the secret, push a tag such as
-`v1.0.4`. `.github/workflows/release.yml` runs unit/integration tests, builds the
+`v1.1.0`. `.github/workflows/release.yml` runs unit/integration tests, builds the
 ARM64 DMG, verifies the mounted bundle, signs and independently verifies the
 appcast, then publishes the DMG, SHA-256 checksum, and `appcast.xml` as GitHub
 Release assets. Its token has repository-contents write permission only in the
