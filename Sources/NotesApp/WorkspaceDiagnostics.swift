@@ -266,16 +266,16 @@ enum WorkspaceDiagnostics {
             print(message)
             // Include Tags as well as Title: they use different font sizes,
             // and a stale native field height can shift the whole heading.
-            // Frame/font reads do not request a new intrinsic/layout measure.
+            // Avoid font and sizing getters here: even a nominally read-only
+            // native font lookup could perturb a cached layout measurement.
             let fields = headingNativeFields(in: detailView)
             let countMessage = "Heading native fields [\(phase)] count=\(fields.count)"
             geometryHistory.append(countMessage)
             print(countMessage)
             for (index, field) in fields.enumerated() {
-                let fieldMessage = "Heading native field [\(phase)] index=\(index) id=\(ObjectIdentifier(field)) type=\(type(of: field))"
-                    + " placeholder=\(field.placeholderString ?? "nil") font=\(field.font?.fontName ?? "nil") pointSize=\(field.font?.pointSize ?? 0)"
+                let fieldMessage = "Heading native field [\(phase)] index=\(index) id=\(ObjectIdentifier(field))"
+                    + " placeholder=\(field.placeholderString ?? "nil")"
                     + " frame=\(NSStringFromRect(field.frame)) bounds=\(NSStringFromRect(field.bounds)) inHost=\(NSStringFromRect(field.convert(field.bounds, to: host.view)))"
-                    + " hidden=\(field.isHiddenOrHasHiddenAncestor) editable=\(field.isEditable)"
                 geometryHistory.append(fieldMessage)
                 print(fieldMessage)
             }
@@ -439,7 +439,7 @@ enum WorkspaceDiagnostics {
                 RunLoop.main.run(until: min(deadline, Date(timeIntervalSinceNow: 0.016)))
             } while Date() < deadline
         }
-        for cycle in 1...12 {
+        for cycle in 1...100 {
             let phase = "repeated cycle\(cycle)"
             logHeadingGeometry("\(phase) before hide")
             presentation.toggleHeading()
@@ -790,7 +790,7 @@ enum WorkspaceDiagnostics {
                                 height: max(0, viewport.minY - detailRect.minY))
             return [detailRect, chrome, viewport]
         }
-        func switchSnapshot(_ phase: String, page activePage: UnifiedMacPageView?, frames: [NSRect]?) -> String {
+        func switchSnapshot(_ phase: String, page activePage: UnifiedMacPageView?, frames: [NSRect]?, includeFonts: Bool = false) -> String {
             var snapshot = "Sheet switch snapshot [\(phase)] window=\(NSStringFromRect(window.frame))"
                 + " contentLayout=\(NSStringFromRect(window.contentLayoutRect)) hostFrame=\(NSStringFromRect(host.view.frame)) hostBounds=\(NSStringFromRect(host.view.bounds))"
                 + " selectedSheet=\(String(describing: store.sheetID))"
@@ -803,8 +803,8 @@ enum WorkspaceDiagnostics {
                     + " clipFrame=\(NSStringFromRect(activeScroll.contentView.frame)) clipBounds=\(NSStringFromRect(activeScroll.contentView.bounds))"
                     + " magnification=\(activeScroll.magnification) fitsPageWidth=\(String(describing: (activeScroll as? PageZoomScrollView)?.fitsPageWidth))"
             } else { snapshot += " page=unavailable" }
-            // Read native field frames and font values only. Intrinsic/fitting
-            // measurements can initiate layout and must stay out of sampling.
+            // Capture every field frame before any optional font read. Healthy
+            // observations never ask for fonts or intrinsic/fitting measures.
             func nativeFields(in view: NSView) -> [NSTextField] {
                 let own = (view as? NSTextField).map { [$0] } ?? []
                 return own + view.subviews.flatMap { nativeFields(in: $0) }
@@ -813,7 +813,12 @@ enum WorkspaceDiagnostics {
                 let fields = nativeFields(in: activeDetail)
                 snapshot += " nativeFieldCount=\(fields.count)"
                 for (index, field) in fields.enumerated() {
-                    snapshot += " field\(index)={id:\(ObjectIdentifier(field)),type:\(type(of: field)),placeholder:\(field.placeholderString ?? "nil"),text:\(String(field.stringValue.prefix(40))),font:\(field.font?.fontName ?? "nil"),pointSize:\(field.font?.pointSize ?? 0),frame:\(NSStringFromRect(field.frame)),bounds:\(NSStringFromRect(field.bounds)),inHost:\(NSStringFromRect(field.convert(field.bounds, to: host.view))),hidden:\(field.isHiddenOrHasHiddenAncestor)}"
+                    snapshot += " field\(index)={id:\(ObjectIdentifier(field)),placeholder:\(field.placeholderString ?? "nil"),frame:\(NSStringFromRect(field.frame)),bounds:\(NSStringFromRect(field.bounds)),inHost:\(NSStringFromRect(field.convert(field.bounds, to: host.view)))}"
+                }
+                if includeFonts {
+                    for (index, field) in fields.enumerated() {
+                        snapshot += " observedDriftFieldFont\(index)={id:\(ObjectIdentifier(field)),font:\(field.font?.fontName ?? "nil"),pointSize:\(field.font?.pointSize ?? 0)}"
+                    }
                 }
             }
             return snapshot
@@ -901,7 +906,7 @@ enum WorkspaceDiagnostics {
                             capturedFirstDrift = true
                             snapshotTrace.append("Sheet switch first observed drift [\(phase)]")
                         }
-                        snapshotTrace.append(switchSnapshot(phase, page: activePage, frames: frames))
+                        snapshotTrace.append(switchSnapshot(phase, page: activePage, frames: frames, includeFonts: frameDrift > 0))
                     } else {
                         snapshotTrace.append(switchSnapshot("\(mode) target=\(target) unavailable postTurn=\(afterTurn) turn=\(turns) elapsed=\(now - start) gap=\(sampleGap)", page: nil, frames: nil))
                     }
