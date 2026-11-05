@@ -624,20 +624,15 @@ struct SheetDetail: View {
 }
 
 #if os(macOS)
-/// Keep the caption field's allocation tied to its own native font metrics.
-/// Hosted diagnostics observed a title-sized allocation persisting on this
-/// smaller field after heading reinsertion despite correct native cell metrics.
+/// Measure a fresh plain field only after assigning its intended native font.
+/// Both heading fields have exhibited another font role's allocation despite
+/// retaining their correct font and native cell metrics.
 @MainActor
-enum MacTagFieldMetrics {
-    struct Value {
-        let font: NSFont
-        let height: CGFloat
-    }
-    private static var cached: Value?
+struct MacTextFieldMetrics {
+    let font: NSFont
+    let height: CGFloat
 
-    static var current: Value {
-        let font = NSFont.preferredFont(forTextStyle: .caption1, options: [:])
-        if let cached, cached.font == font { return cached }
+    init(font: NSFont) {
         let field = NSTextField(string: "")
         field.font = font
         field.isBezeled = false
@@ -649,8 +644,36 @@ enum MacTagFieldMetrics {
         field.cell?.isScrollable = true
         let measured = field.cell?.cellSize.height ?? field.intrinsicContentSize.height
         let nativeLineHeight = font.ascender - font.descender + font.leading
-        let value = Value(font: font, height: ceil(measured.isFinite && measured > 0 ? measured : nativeLineHeight))
+        self.font = font
+        height = ceil(measured.isFinite && measured > 0 ? measured : nativeLineHeight)
+    }
+}
+
+@MainActor
+enum MacTagFieldMetrics {
+    private static var cached: MacTextFieldMetrics?
+
+    static var current: MacTextFieldMetrics {
+        let font = NSFont.preferredFont(forTextStyle: .caption1, options: [:])
+        if let cached, cached.font == font { return cached }
+        let value = MacTextFieldMetrics(font: font)
         // One entry, replaced if the preferred system/accessibility font changes.
+        cached = value
+        return value
+    }
+}
+
+@MainActor
+enum MacSheetTitleFieldMetrics {
+    private static var cached: MacTextFieldMetrics?
+
+    static var current: MacTextFieldMetrics {
+        let system = NSFont.systemFont(ofSize: 28, weight: .semibold)
+        let descriptor = system.fontDescriptor.withDesign(.serif) ?? system.fontDescriptor
+        let font = NSFont(descriptor: descriptor, size: 28) ?? system
+        if let cached, cached.font == font { return cached }
+        let value = MacTextFieldMetrics(font: font)
+        // A separate single entry keeps the two heading roles bounded.
         cached = value
         return value
     }
