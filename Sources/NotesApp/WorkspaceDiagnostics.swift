@@ -779,6 +779,34 @@ enum WorkspaceDiagnostics {
                                 height: max(0, viewport.minY - detailRect.minY))
             return [detailRect, chrome, viewport]
         }
+        func switchSnapshot(_ phase: String, page activePage: UnifiedMacPageView?, frames: [NSRect]?) -> String {
+            var snapshot = "Sheet switch snapshot [\(phase)] window=\(NSStringFromRect(window.frame))"
+                + " contentLayout=\(NSStringFromRect(window.contentLayoutRect)) hostFrame=\(NSStringFromRect(host.view.frame)) hostBounds=\(NSStringFromRect(host.view.bounds))"
+                + " selectedSheet=\(String(describing: store.sheetID))"
+            if let frames {
+                snapshot += " detail=\(NSStringFromRect(frames[0])) chrome=\(NSStringFromRect(frames[1])) viewport=\(NSStringFromRect(frames[2]))"
+            } else { snapshot += " frames=unavailable" }
+            if let activePage, let activeScroll = activePage.enclosingScrollView {
+                snapshot += " pageID=\(ObjectIdentifier(activePage)) pageFrame=\(NSStringFromRect(activePage.frame)) pageBounds=\(NSStringFromRect(activePage.bounds))"
+                    + " scrollFrame=\(NSStringFromRect(activeScroll.frame)) scrollBounds=\(NSStringFromRect(activeScroll.bounds))"
+                    + " clipFrame=\(NSStringFromRect(activeScroll.contentView.frame)) clipBounds=\(NSStringFromRect(activeScroll.contentView.bounds))"
+                    + " magnification=\(activeScroll.magnification) fitsPageWidth=\(String(describing: (activeScroll as? PageZoomScrollView)?.fitsPageWidth))"
+            } else { snapshot += " page=unavailable" }
+            // Read native field frames and font values only. Intrinsic/fitting
+            // measurements can initiate layout and must stay out of sampling.
+            func nativeFields(in view: NSView) -> [NSTextField] {
+                let own = (view as? NSTextField).map { [$0] } ?? []
+                return own + view.subviews.flatMap { nativeFields(in: $0) }
+            }
+            if let activeDetail = navigation.splitViewItems.last?.viewController.view {
+                let fields = nativeFields(in: activeDetail)
+                snapshot += " nativeFieldCount=\(fields.count)"
+                for (index, field) in fields.enumerated() {
+                    snapshot += " field\(index)={id:\(ObjectIdentifier(field)),type:\(type(of: field)),placeholder:\(field.placeholderString ?? "nil"),text:\(String(field.stringValue.prefix(40))),font:\(field.font?.fontName ?? "nil"),pointSize:\(field.font?.pointSize ?? 0),frame:\(NSStringFromRect(field.frame)),bounds:\(NSStringFromRect(field.bounds)),inHost:\(NSStringFromRect(field.convert(field.bounds, to: host.view))),hidden:\(field.isHiddenOrHasHiddenAncestor)}"
+                }
+            }
+            return snapshot
+        }
         func typeFixture(_ suffix: String, in activePage: UnifiedMacPageView) throws {
             let activeEditor = activePage.textView
             let history = try require(activeEditor.undoManager, "switch fixture undo manager")
@@ -811,6 +839,7 @@ enum WorkspaceDiagnostics {
             try check(baselineProbes.count == 1, "\(mode) starts with one navigation probe")
             let stableProbe = try require(baselineProbes.first, "stable navigation probe")
             let expectedFrames = try require(switchFrames(firstPage), "switch fixture geometry")
+            let expectedSnapshot = switchSnapshot("\(mode) original baseline", page: firstPage, frames: expectedFrames)
             let expectedCollapsed = [sidebarItem.isCollapsed, sheetsItem.isCollapsed]
             let expectedPresentation = [presentation.fullPage, presentation.sheetsVisible,
                                         presentation.headingVisible, presentation.toolsVisible]
@@ -831,12 +860,15 @@ enum WorkspaceDiagnostics {
                 let deadline = start + 5
                 var previousSampleTime = start, maximumSampleGap: TimeInterval = 0
                 var firstPostTurnSampleDelay: TimeInterval?
+                var snapshotTrace = [expectedSnapshot]
+                var capturedFirstDrift = false
                 let injectStall = !didInjectSwitchStall
                 var injectedStallDuration: TimeInterval = 0
                 var injectedStallTurn: Int?
                 func sample(afterTurn: Bool) {
                     let now = ProcessInfo.processInfo.systemUptime
-                    maximumSampleGap = max(maximumSampleGap, now - previousSampleTime)
+                    let sampleGap = now - previousSampleTime
+                    maximumSampleGap = max(maximumSampleGap, sampleGap)
                     previousSampleTime = now
                     let currentProbes = probes(in: host.view)
                     stableIdentity = stableIdentity && currentProbes.count == 1 && currentProbes.first === stableProbe
@@ -846,11 +878,21 @@ enum WorkspaceDiagnostics {
                             postTurnSamples += 1
                             if firstPostTurnSampleDelay == nil { firstPostTurnSampleDelay = now - start }
                         }
+                        var frameDrift: CGFloat = 0
                         for (actual, expected) in zip(frames, expectedFrames) {
-                            maximumFrameDrift = max(maximumFrameDrift, [abs(actual.minX - expected.minX),
+                            frameDrift = max(frameDrift, [abs(actual.minX - expected.minX),
                                 abs(actual.minY - expected.minY), abs(actual.width - expected.width),
                                 abs(actual.height - expected.height)].max() ?? 0)
                         }
+                        maximumFrameDrift = max(maximumFrameDrift, frameDrift)
+                        let phase = "\(mode) target=\(target) sample\(samples) postTurn=\(afterTurn) turn=\(turns) elapsed=\(now - start) gap=\(sampleGap) drift=\(frameDrift)"
+                        if frameDrift > 0 && !capturedFirstDrift {
+                            capturedFirstDrift = true
+                            snapshotTrace.append("Sheet switch first observed drift [\(phase)]")
+                        }
+                        snapshotTrace.append(switchSnapshot(phase, page: activePage, frames: frames))
+                    } else {
+                        snapshotTrace.append(switchSnapshot("\(mode) target=\(target) unavailable postTurn=\(afterTurn) turn=\(turns) elapsed=\(now - start) gap=\(sampleGap)", page: nil, frames: nil))
                     }
                 }
                 store.sheetID = target
@@ -877,6 +919,10 @@ enum WorkspaceDiagnostics {
                     sample(afterTurn: true)
                 }
                 let elapsed = ProcessInfo.processInfo.systemUptime - start
+                // Emit after observing the complete original sampling window so
+                // stdout backpressure cannot alter individual sampling turns.
+                geometryHistory.append(contentsOf: snapshotTrace)
+                snapshotTrace.forEach { print($0) }
                 // No forced layout/display, focus changes, or page clicks above.
                 // Later samples do not establish continuous geometry during a
                 // stalled source; report the actual gaps without discarding any
