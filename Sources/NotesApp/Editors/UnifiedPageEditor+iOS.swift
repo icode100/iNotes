@@ -219,7 +219,7 @@ struct UnifiedPageEditor: UIViewRepresentable {
             view.page.paper.theme = theme
             view.page.paper.pageTemplate = parent.pageTemplate
             view.page.paper.templateLinePattern = parent.templateLinePattern
-            view.page.overrideUserInterfaceStyle = theme == .dark ? .dark : .light
+            view.page.overrideUserInterfaceStyle = theme.isDark ? .dark : .light
             editor.overrideUserInterfaceStyle = view.page.overrideUserInterfaceStyle
             // PencilKit transforms ink colors itself when a canvas is dark.
             // Our semantic resolver already supplies the display color, so

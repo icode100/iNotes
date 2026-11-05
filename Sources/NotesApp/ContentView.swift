@@ -355,7 +355,7 @@ struct ContentView: View {
         let current = store.folders.first { $0.id == store.folderID }
         let target = (current?.kind == .chapter || current?.kind == .topic) ? current?.id
             : store.folders.first(where: { $0.kind == .chapter && (current == nil || $0.parentID == current?.id) })?.id
-        if let target { nameRequest = NameRequest(kind: .sheet, parent: target) }
+        if let target { store.create(.sheet, parent: target) }
         else if let workbook = current?.kind == .workbook ? current : store.folders.first(where: { $0.kind == .workbook }) {
             nameRequest = NameRequest(kind: .chapter, parent: workbook.id)
         } else { nameRequest = NameRequest(kind: .workbook) }
@@ -410,7 +410,7 @@ struct FolderTreeRow: View {
                     .accessibilityLabel("\(node.kind.rawValue.capitalized): \(node.title)")
                     .contextMenu {
                         Button(node.kind == .workbook ? "New chapter…" : "New topic…") { request(NameRequest(kind: childKind, parent: node.id)) }
-                        if node.kind != .workbook { Button("New sheet…") { request(NameRequest(kind: .sheet, parent: node.id)) } }
+                        if node.kind != .workbook { Button("New sheet") { store.create(.sheet, parent: node.id) } }
                         Divider()
                         Button("Rename…") { request(NameRequest(kind: node.kind, renameID: node.id, title: node.title)) }
                         MoveMenu(node: node)
@@ -456,6 +456,45 @@ struct MoveMenu: View {
                 }
                 if destinations.isEmpty { Text("No other destinations") }
             }
+        }
+    }
+}
+
+/// The title is independent of the page body. Keep an editing draft so the
+/// model's whitespace normalization never removes a space as it is being typed.
+struct SheetTitleField: View {
+    let title: String
+    var isReadOnly = false
+    var onChange: (String) -> Bool
+    @ViewState private var draft: String
+
+    init(title: String, isReadOnly: Bool = false, onChange: @escaping (String) -> Bool) {
+        self.title = title
+        self.isReadOnly = isReadOnly
+        self.onChange = onChange
+        _draft = ViewState(wrappedValue: title)
+    }
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 6) {
+            TextField("Page title", text: $draft)
+                .textFieldStyle(.plain)
+                .font(.system(size: 28, weight: .semibold, design: .serif))
+                .disabled(isReadOnly)
+                .accessibilityLabel("Page title")
+                .accessibilityHint("Optional. Leave blank to identify the sheet by its number.")
+            Rectangle().fill(.secondary.opacity(0.4)).frame(height: 1)
+        }
+        .onChange(of: draft) { _, value in
+            let limited = String(value.prefix(256))
+            if limited != value { draft = limited }
+            let normalized = limited.trimmingCharacters(in: .whitespacesAndNewlines)
+            if normalized != title, !onChange(normalized) { draft = title }
+        }
+        .onChange(of: title) { _, value in
+            // External renames update the field. Our own normalized write must
+            // leave an in-progress trailing space in the editing draft intact.
+            if value != draft.trimmingCharacters(in: .whitespacesAndNewlines) { draft = value }
         }
     }
 }

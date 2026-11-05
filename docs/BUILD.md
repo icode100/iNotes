@@ -38,9 +38,9 @@ bash scripts/verify-macos.sh
 The build creates:
 
 - `dist/iNotes.app`: native ARM64 app bundle.
-- `dist/iNotes-1.1.0-arm64.dmg`: compressed disk image containing the app, an
+- `dist/iNotes-1.2.0-arm64.dmg`: compressed disk image containing the app, an
   Applications shortcut, and installation instructions.
-- `dist/iNotes-1.1.0-arm64.dmg.sha256`: SHA-256 checksum.
+- `dist/iNotes-1.2.0-arm64.dmg.sha256`: SHA-256 checksum.
 
 Open the disk image and drag iNotes to Applications. The DMG does not install
 background services, kernel extensions, browser runtimes, or privileged helpers.
@@ -48,7 +48,17 @@ The build script validates the property list, architecture, app signature, and D
 before publishing outputs. The verification script mounts it read-only and checks
 the packaged app and Applications shortcut.
 
-The defaults match published v1.1 (version 1.1.0), build 2017, with four new
+Local defaults target **v1.2.0**, prospective build **2018** from fresh release
+run **16**. On 5 November 2026, the user confirmed the isolated Mac QA app works
+and explicitly authorized GitHub publication. Before tagging, complete
+exact-source hosted Native checks and a fresh public-feed/release-counter check;
+signed release packaging and independent public-asset verification are still
+pending at this preparation stage. The local QA app uses a
+separate bundle identity, QA build 1, a temporary library and no updater. Full
+installer packaging still requires Xcode's adaptive-icon compiler; a CLT-built
+QA app is not verification of the public release package.
+
+Published v1.1 (version 1.1.0), build 2017, added four new
 scenery themes replacing Forest and an Extra Broad nib preset. Source
 `7946a931c8283e5fc0429fbd1d400f22d76312a5` passed exact-source Native checks and
 signed release run 15. Independently downloaded public assets passed signatures,

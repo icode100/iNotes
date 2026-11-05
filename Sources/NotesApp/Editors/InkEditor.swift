@@ -237,7 +237,7 @@ enum InkRenderer {
     private static func draw(_ stroke: InkStroke, theme: PageTheme) {
         guard let first = stroke.points.first, first.x.isFinite, first.y.isFinite else { return }
         let inkColor = color(theme.resolvedInkHex(stroke.colorHex))
-        let highlighterAlpha: CGFloat = theme == .dark ? 0.36 : 0.25
+        let highlighterAlpha: CGFloat = theme.isDark ? 0.36 : 0.25
         let baseWidth = (stroke.width.isFinite ? max(0.5, min(100, stroke.width)) : 2.5) * stroke.style.widthMultiplier
         if stroke.points.count == 1 {
             let width = baseWidth * pressure(first.pressure)
@@ -282,7 +282,7 @@ enum InkRenderer {
             path.lineWidth = baseWidth * pressure(force)
             path.lineCapStyle = .round
             path.lineJoinStyle = .round
-            let pencilAlpha = (theme == .dark ? 0.55 : 0.3) + (theme == .dark ? 0.4 : 0.58) * max(0, min(1, force))
+            let pencilAlpha = (theme.isDark ? 0.55 : 0.3) + (theme.isDark ? 0.4 : 0.58) * max(0, min(1, force))
             inkColor.withAlphaComponent(stroke.style == .pencil ? CGFloat(pencilAlpha) : 1).set()
             path.stroke()
         }
@@ -615,7 +615,7 @@ enum InkTipCursor {
                                                   width: diameter, height: diameter))
             }
             InkRenderer.color(resolved).setFill(); path.fill()
-            (theme == .dark ? NSColor.black : NSColor.white).withAlphaComponent(0.9).setStroke()
+            (theme.isDark ? NSColor.black : NSColor.white).withAlphaComponent(0.9).setStroke()
             path.lineWidth = edge; path.lineJoinStyle = .round; path.stroke()
             return true
         }

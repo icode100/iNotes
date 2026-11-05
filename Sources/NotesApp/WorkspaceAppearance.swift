@@ -699,8 +699,12 @@ struct AppearanceMenu: View {
                 CheckedMenuButton(title: "Dark", isSelected: appearance == "dark") { appearance = "dark" }
             }
             Menu("Page colors · all sheets") {
-                CheckedMenuButton(title: "Match appearance", isSelected: pageColorScheme == "system") { pageColorScheme = "system" }
-                CheckedMenuButton(title: "Vintage · off-white", isSelected: pageColorScheme == "vintage") { pageColorScheme = "vintage" }
+                ForEach(PageColorScheme.allCases, id: \.self) { scheme in
+                    CheckedMenuButton(title: scheme.displayName,
+                                      isSelected: (PageColorScheme(rawValue: pageColorScheme) ?? .system) == scheme) {
+                        pageColorScheme = scheme.rawValue
+                    }
+                }
             }
             Menu("Workspace scenery") {
                 ForEach(WorkspaceTheme.allCases) { theme in

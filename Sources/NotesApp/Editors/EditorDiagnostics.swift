@@ -235,6 +235,56 @@ enum EditorDiagnostics {
         guard let pageScroll = page.enclosingScrollView else { throw Failure(description: "Shared page scroll view did not mount") }
         try check(page.textView.string == pageText && page.inkView.strokes == pageStrokes, "text and ink mount on the same paper")
         try check(pageScroll.contentView is CenteredPageClipView, "shared page uses the centering clip without a replacement document hierarchy")
+        guard let fitScroll = pageScroll as? PageZoomScrollView else { throw Failure(description: "Fit-width page scroll view did not mount") }
+        func pageFitsVisibleWidth() -> Bool {
+            let viewport = pageScroll.contentView.convert(pageScroll.contentView.visibleRect, to: pageScroll).width
+            let renderedPaper = page.convert(page.bounds, to: pageScroll).width
+            return viewport > 0 && abs(renderedPaper - viewport) < 1
+        }
+        try check(fitScroll.fitsPageWidth && pageFitsVisibleWidth(),
+                  "A newly mounted page fits the actual visible clip viewport by default")
+        let initialFit = pageScroll.magnification
+        let originalWindowSize = window.contentView!.frame.size
+        window.setContentSize(NSSize(width: originalWindowSize.width + 180, height: originalWindowSize.height))
+        let fitResizeDeadline = Date(timeIntervalSinceNow: 1)
+        repeat { RunLoop.main.run(until: Date(timeIntervalSinceNow: 0.016)) }
+        while (!pageFitsVisibleWidth() || abs(pageScroll.magnification - initialFit) < 0.000001) && Date() < fitResizeDeadline
+        try check(fitScroll.fitsPageWidth && pageFitsVisibleWidth() && pageScroll.magnification > initialFit,
+                  "Default width fitting follows native viewport resizing without forced layout")
+        pageScroll.magnification = 1.25
+        window.setContentSize(originalWindowSize)
+        RunLoop.main.run(until: Date(timeIntervalSinceNow: 0.1))
+        page.theme = .dark
+        page.theme = .light
+        try check(!fitScroll.fitsPageWidth && pageScroll.magnification == 1.25 && pageScroll.documentView === page,
+                  "Explicit magnification leaves fit mode and survives viewport and theme changes")
+        do {
+            let clippedWindow = NSWindow(contentRect: NSRect(x: -5500, y: -5500, width: 520, height: 400),
+                                         styleMask: [.titled], backing: .buffered, defer: false)
+            clippedWindow.isReleasedWhenClosed = false
+            defer { clippedWindow.close() }
+            let viewport = NSClipView(frame: NSRect(x: 0, y: 0, width: 520, height: 400))
+            let backing = PageZoomScrollView(frame: NSRect(x: 0, y: 0, width: 900, height: 400))
+            backing.contentView = CenteredPageClipView()
+            backing.allowsMagnification = true
+            backing.minMagnification = 0.25
+            backing.maxMagnification = 4
+            let clippedPage = UnifiedMacPageView(frame: NSRect(origin: .zero, size: InkExport.paperSize))
+            backing.documentView = clippedPage
+            viewport.documentView = backing
+            clippedWindow.contentView = viewport
+            backing.fitPageWidth()
+            let deadline = Date(timeIntervalSinceNow: 1)
+            func clippedWidthMatches() -> Bool {
+                let visible = backing.contentView.convert(backing.contentView.visibleRect, to: backing).width
+                return visible > 0 && abs(clippedPage.convert(clippedPage.bounds, to: backing).width - visible) < 1
+            }
+            repeat { RunLoop.main.run(until: Date(timeIntervalSinceNow: 0.016)) }
+            while !clippedWidthMatches() && Date() < deadline
+            let visible = backing.contentView.convert(backing.contentView.visibleRect, to: backing).width
+            try check(backing.fitsPageWidth && backing.frame.width > visible + 200 && clippedWidthMatches(),
+                      "Width fitting uses the unobscured viewport when a backing scroll view extends beyond its clipping ancestor")
+        }
         pageScroll.magnification = 0.25
         pageScroll.contentView.scroll(to: .zero)
         pageScroll.layoutSubtreeIfNeeded()
@@ -389,6 +439,97 @@ enum EditorDiagnostics {
         page.textView.undoManager?.endUndoGrouping()
         try check(pageText == textBeforeHover + " vlpbhet VLPBHET हिन्दी 日本語" && page.textView.string == pageText,
                   "native Text typing retains every tool letter and Unicode after tablet hover")
+        do {
+            guard let zoomScroll = pageScroll as? PageZoomScrollView else { throw Failure(description: "Keyboard zoom scroll view did not mount") }
+            func zoomKey(_ key: String, flags: NSEvent.ModifierFlags = .command) throws -> NSEvent {
+                guard let event = NSEvent.keyEvent(with: .keyDown, location: .zero, modifierFlags: flags, timestamp: 0,
+                                                  windowNumber: window.windowNumber, context: nil, characters: key,
+                                                  charactersIgnoringModifiers: key, isARepeat: false, keyCode: 24) else {
+                    throw Failure(description: "Cannot construct local zoom key event")
+                }
+                return event
+            }
+            let equalsKey = try zoomKey("=")
+            let plusKey = try zoomKey("+", flags: [.command, .shift])
+            let shiftedEqualsKey = try zoomKey("=", flags: [.command, .shift])
+            let minusKey = try zoomKey("-")
+            try check(PageZoomActions.direction(for: equalsKey) == .zoomIn
+                      && PageZoomActions.direction(for: plusKey) == .zoomIn
+                      && PageZoomActions.direction(for: shiftedEqualsKey) == .zoomIn
+                      && PageZoomActions.direction(for: minusKey) == .zoomOut,
+                      "Command equals, plus, shifted equals and minus resolve to the requested zoom actions")
+            let plainEquals = try zoomKey("=", flags: [])
+            let alternatePlus = try zoomKey("+", flags: [.command, .option])
+            let controlMinus = try zoomKey("-", flags: [.command, .control])
+            try check(PageZoomActions.direction(for: plainEquals) == nil
+                      && PageZoomActions.direction(for: alternatePlus) == nil
+                      && PageZoomActions.direction(for: controlMinus) == nil,
+                      "Ordinary typing and unrelated modified key chords remain outside page zoom")
+            let beforeContent = page.selectionController?.content
+            let beforeSelection = page.textView.selectedRange()
+            let beforeUndo = page.textView.undoManager
+            let beforeCanUndo = beforeUndo?.canUndo
+            let beforeResponder = window.firstResponder
+            let priorPointer = window.testPointerLocation
+            // Model key-window ownership locally; no event is posted globally.
+            window.testPointerLocation = .zero
+            defer {
+                window.testPointerLocation = priorPointer
+                pageScroll.magnification = 1
+                pageScroll.contentView.scroll(to: .zero)
+            }
+            pageScroll.magnification = 1
+            try check(zoomScroll.performKeyEquivalent(with: equalsKey) && abs(pageScroll.magnification - 1.2) < 0.000001,
+                      "Command equals zooms the mounted page through native key-equivalent routing")
+            try check(zoomScroll.performKeyEquivalent(with: plusKey) && abs(pageScroll.magnification - 1.44) < 0.000001,
+                      "Command plus zooms the same mounted page")
+            try check(zoomScroll.performKeyEquivalent(with: minusKey) && abs(pageScroll.magnification - 1.2) < 0.000001,
+                      "Command minus reduces page magnification")
+            try check(pageScroll.documentView === page && window.firstResponder === beforeResponder
+                      && page.textView.selectedRange() == beforeSelection
+                      && page.textView.undoManager === beforeUndo && beforeUndo?.canUndo == beforeCanUndo
+                      && page.selectionController?.content == beforeContent
+                      && page.textView.string == pageText && page.inkView.strokes == pageStrokes,
+                      "Keyboard zoom preserves the native page, focus, caret, undo history and complete page content")
+            try check(!zoomScroll.fitsPageWidth, "Keyboard zoom preserves an explicit scale instead of returning to automatic fitting")
+            try check(PageZoomActions.fitWidth(in: window) && zoomScroll.fitsPageWidth && pageFitsVisibleWidth()
+                      && pageScroll.documentView === page && window.firstResponder === beforeResponder
+                      && page.textView.selectedRange() == beforeSelection
+                      && page.textView.undoManager === beforeUndo && beforeUndo?.canUndo == beforeCanUndo
+                      && page.selectionController?.content == beforeContent,
+                      "Fit Page Width restores automatic fitting without replacing content, focus, caret or undo history")
+            pageScroll.magnification = 1.2
+            let title = NSTextField(string: "Unrelated title input")
+            title.frame = NSRect(x: 10, y: 10, width: 220, height: 24)
+            sharedHost.addSubview(title)
+            try check(window.makeFirstResponder(title), "Unrelated title field accepts focus for zoom routing")
+            let titleResponder = window.firstResponder
+            let beforeTitleZoom = pageScroll.magnification
+            try check(zoomScroll.performKeyEquivalent(with: shiftedEqualsKey)
+                      && pageScroll.magnification > beforeTitleZoom
+                      && window.firstResponder === titleResponder && title.stringValue == "Unrelated title input",
+                      "Shifted zoom-in alias leaves title input and its native focus intact")
+            window.makeFirstResponder(page.textView)
+            title.removeFromSuperview()
+            for _ in 0..<30 { _ = page.zoom(.zoomIn) }
+            try check(pageScroll.magnification == pageScroll.maxMagnification, "Keyboard zoom-in clamps at the existing maximum magnification")
+            for _ in 0..<40 { _ = page.zoom(.zoomOut) }
+            try check(pageScroll.magnification == pageScroll.minMagnification, "Keyboard zoom-out clamps at the existing minimum magnification")
+            let inactiveWindow = NSWindow(contentRect: NSRect(x: -5000, y: -5000, width: 300, height: 200),
+                                          styleMask: [.titled], backing: .buffered, defer: false)
+            inactiveWindow.isReleasedWhenClosed = false
+            defer { inactiveWindow.close() }
+            let inactiveScroll = PageZoomScrollView(frame: NSRect(x: 0, y: 0, width: 300, height: 200))
+            inactiveScroll.allowsMagnification = true
+            inactiveScroll.documentView = UnifiedMacPageView(frame: NSRect(origin: .zero, size: InkExport.paperSize))
+            inactiveWindow.contentView = inactiveScroll
+            let inactiveMagnification = inactiveScroll.magnification
+            let activeMagnification = pageScroll.magnification
+            try check(!PageZoomActions.perform(.zoomIn, in: inactiveWindow)
+                      && inactiveScroll.magnification == inactiveMagnification
+                      && pageScroll.magnification == activeMagnification,
+                      "A zoom action addressed to an inactive window cannot zoom either page")
+        }
         page.textView.undoManager?.undo()
         window.makeFirstResponder(page.inkView)
         // The notification's key-window guard is exercised by live UI QA;
@@ -607,6 +748,24 @@ enum EditorDiagnostics {
         }
         try check(abs(red(unboundedPaper, x: 12, y: 12) - darkPaperRed) < 0.01, "infinite AppKit dirty rectangles clip to the actual bitmap (actual: \(red(unboundedPaper, x: 12, y: 12)), expected: \(darkPaperRed))")
         try check(abs(red(oversizedPaper, x: 12, y: 12) - darkPaperRed) < 0.01, "oversized paper requests build only the visible grid")
+        let pickerColors = InkColors.palette.map(\.hex) + ["#000000", "#FFFFFF", "#102040", "#27B8CD"]
+        let extendedInk = NSColor(colorSpace: .extendedSRGB, components: [-0.2, 1.2, 0.5, 1], count: 4)
+        try check(ThemeTextAttributes.hex(extendedInk) == "#00FF80",
+                  "Extended native RGB components clamp to valid six-digit canonical ink")
+        let p3Ink = InkColors.canonicalHex(Color(nsColor: NSColor(displayP3Red: 1, green: 0, blue: 0, alpha: 1)))
+        try check(p3Ink == "#FF0000",
+                  "Display P3 picker colors convert and clamp to opaque canonical sRGB")
+        for appearanceName in [NSAppearance.Name.aqua, .darkAqua] {
+            guard let appearance = NSAppearance(named: appearanceName) else {
+                throw Failure(description: "Cannot create the color-picker appearance fixture")
+            }
+            var converted: [String] = []
+            appearance.performAsCurrentDrawingAppearance {
+                converted = pickerColors.map { InkColors.canonicalHex(Color(hex: $0)) }
+            }
+            try check(converted == pickerColors,
+                      "native color-picker sRGB conversion preserves every palette and custom color in \(appearanceName.rawValue)")
+        }
         var themedBody = "Default custom"
         let canonicalText = NSMutableAttributedString(string: themedBody, attributes: [
             .font: NSFont.systemFont(ofSize: 16), .foregroundColor: ThemeTextAttributes.color("#30343B")
@@ -632,8 +791,24 @@ enum EditorDiagnostics {
         let canonicalCopy = ThemeTextAttributes.canonical(themeTextView.attributedString(), theme: .dark)
         let restoredCustom = canonicalCopy.attribute(.foregroundColor, at: 8, effectiveRange: nil) as! NSColor
         try check(ThemeTextAttributes.hex(restoredCustom) == "#102040", "custom rich-text ink restores its exact canonical color")
-        themeCoordinator.parent = themeEditor(.light)
-        themeCoordinator.load(text: themedBody, rtf: themedRTF, into: themeTextView)
+        for theme in PageTheme.allCases {
+            themeCoordinator.parent = themeEditor(theme)
+            themeCoordinator.load(text: themedBody, rtf: themedRTF, into: themeTextView)
+            let expectedAppearance: NSAppearance.Name = theme.isDark ? .darkAqua : .aqua
+            try check(themeTextView.appearance?.name == expectedAppearance,
+                      "\(theme.rawValue) uses the matching native text appearance")
+            let displayed = themeTextView.attributedString()
+            let displayedInk = displayed.attribute(.foregroundColor, at: 8, effectiveRange: nil) as! NSColor
+            let canonical = ThemeTextAttributes.canonical(displayed, theme: theme)
+            let defaultInk = canonical.attribute(.foregroundColor, at: 0, effectiveRange: nil) as! NSColor
+            let customInk = canonical.attribute(.foregroundColor, at: 8, effectiveRange: nil) as! NSColor
+            try check(ThemeTextAttributes.hex(displayedInk) == theme.resolvedInkHex("#102040")
+                      && ThemeTextAttributes.hex(defaultInk) == "#30343B"
+                      && ThemeTextAttributes.hex(customInk) == "#102040",
+                      "\(theme.rawValue) displays readable custom text while retaining exact canonical default and custom colors")
+            try check(themeTextView.string == themedBody && textCallbacks == 0 && themedRTF == originalRTF,
+                      "\(theme.rawValue) changes native presentation without writing text or stored RTF")
+        }
         themeCoordinator.parent = themeEditor(.dark)
         themeCoordinator.load(text: themedBody, rtf: themedRTF, into: themeTextView)
         try check(textCallbacks == 0 && themedRTF == originalRTF, "theme-only rich-text switches never write notes or change stored RTF bytes")

@@ -645,7 +645,7 @@ final class IOSTextBoxView: UIView {
         editor.isEditable = editable
         editor.isSelectable = editable
         editor.undoManager?.levelsOfUndo = 50
-        editor.overrideUserInterfaceStyle = theme == .dark ? .dark : .light
+        editor.overrideUserInterfaceStyle = theme.isDark ? .dark : .light
         richText.parent = RichTextEditor(text: .constant(box.text), rtfData: .constant(box.rtfData), theme: theme, onChange: { [weak self] text, rtf in
             guard let self else { return }
             self.editor.undoManager?.levelsOfUndo = 50

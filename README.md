@@ -1,5 +1,14 @@
 # iNotes
 
+The **v1.2.0 update** adds scenery-matched paper, Vintage Black,
+Pitch Black/White, five pastel papers, sixteen ink presets and a native custom
+color picker. New sheets open blank immediately; type in the underlined title
+at the top to name them, or leave it empty. Mac pages initially fit the visible
+page width. Command-Plus/Minus zoom manually; View → Fit Page Width restores fitting.
+The user confirmed the isolated Mac QA app works and authorized publication on
+5 November 2026. Hosted release checks and public-asset verification are pending.
+See the [v1.2 notes](docs/releases/1.2.0.md) and [validation record](docs/TESTING.md).
+
 Version 1.1.0 (v1.1), build 2017, adds Arctic, Open Skyscape,
 Ruby Hills, and Nature scenery, replaces Forest, and adds Extra Broad nibs.
 Coast and Alpine remain available. Extra Broad uses 1.5 mm for Pen, 1.3 mm for
@@ -17,7 +26,7 @@ A small, native, open-source notebook for Apple silicon Macs, with a shared iPad
 ## What works
 
 - Workbooks → chapters → nested topics → sheets, with distinct sidebar icons, renaming, moving, duplication, and recoverable Trash. Create workbooks using **New workbook** in the sidebar.
-- Resize the sheets pane or hide it independently of the workbook sidebar. Sheet numbers appear with creation dates in the list and page header; sheet titles are optional. Active sheets are numbered 1, 2, 3… in each chapter or topic's page order. Deleting Sheet 2 from three sheets immediately changes the former Sheet 3 to 2, and the next new sheet is 3. Dragging a sheet between others updates their page numbers; removing all sheets restarts at 1. Restored and moved sheets join the destination's page sequence. Renaming, editing, and searching preserve numbers. The header shows the nearest containing chapter or topic and can be hidden to make more room for the page.
+- Resize the sheets pane or hide it independently of the workbook sidebar. Sheet numbers appear with creation dates in the list and page header; sheet titles are optional. Active sheets are numbered 1, 2, 3… in each chapter or topic's page order. Deleting Sheet 2 from three sheets immediately changes the former Sheet 3 to 2, and the next new sheet is 3. Dragging a sheet between others updates their page numbers; removing all sheets restarts at 1. Restored and moved sheets join the destination's page sequence. Renaming, editing, and searching preserve numbers. New sheets open without a naming dialog. Their underlined top title stays blank until you type a name; clearing it restores the blank title. The breadcrumb shows the containing chapter or topic, and the heading can be hidden to make more room for the page.
 - Text and handwriting share one scrollable, zoomable page. Select Text, pen, straight line, pencil, marker, highlighter, or eraser without hiding either text or ink. Native rich text includes headings, formatting, lists, links, spell checking, and undo/redo.
 - **Text** routes every pointer, including a pen tablet or Apple Pencil, to the text caret and text selection. Choose a drawing tool for handwriting. Typing in Text mode keeps ordinary letters as text.
 - **Select** draws a rectangular selection; **Lasso** follows a freehand outline. Select typed text, pen strokes, positioned text boxes, and equations together, then move, copy, cut, paste, duplicate, delete, or undo the selection. Moving or pasting selected typed text creates a positioned rich-text box on the same paper.
@@ -31,7 +40,7 @@ A small, native, open-source notebook for Apple silicon Macs, with a shared iPad
 - Apple Pencil and native PencilKit tools on iPad, with palm rejection and actual Pencil touch detection. Basic ink paths and instrument styles transfer between Mac and iPad; native PencilKit data is retained. Grid, ruled, dotted, and blank paper save with each sheet.
 - Ruled paper aligns typed baselines with its guides, including wrapped paragraphs, headings, and moved text boxes. The native layout follows whole ruled rows while preserving saved rich-text formatting and colors.
 - Light, dark, and system appearance for the shared page, readable ink colors, and prominent grids, rules, and dots. Switching appearance preserves original note colors. The single-pencil app icon includes native light and dark appearances.
-- Classic plus Coast, Alpine, Arctic, Open Skyscape, Ruby Hills, and Nature workspace scenery, with paired light/dark photographs. A saved Forest preference now shows Nature. Scenery remains separate from page colors and note content.
+- Classic plus Coast, Alpine, Arctic, Open Skyscape, Ruby Hills, and Nature workspace scenery, with paired light/dark photographs. A saved Forest preference now shows Nature. The matching page-color choice follows scenery and appearance; explicit vintage, pitch and pastel papers stay fixed. Scenery never changes saved note content.
 - Search across titles, text, positioned text boxes, equation source, and tags; favorite sheets; embedded file attachments.
 - Automatic local saves, a previous-version backup, explicit damaged-library recovery, and external-change checks that prevent overwriting another app instance's changes.
 - Portable `.inotes` import/export. Import creates a separate copy; it never replaces existing notebooks.
@@ -70,7 +79,7 @@ Requires an Apple silicon Mac and macOS 14+. Building the installer requires ful
 open dist/iNotes.app
 ```
 
-The default local installer is `dist/iNotes-1.1.0-arm64.dmg` (version 1.1.0, build 2017), matching the published release. Downloaded public builds are also ad hoc signed: **they are not Apple notarized**, so macOS may report that Apple could not verify iNotes is free of malware.
+The default local installer target is `dist/iNotes-1.2.0-arm64.dmg` (version 1.2.0, prospective build 2018). Publication is authorized; the current published release remains 1.1.0/build 2017 while hosted checks and release preparation complete. Downloaded public builds are also ad hoc signed: **they are not Apple notarized**, so macOS may report that Apple could not verify iNotes is free of malware.
 
 If you trust the download from the [official releases](https://github.com/icode100/iNotes/releases), follow Apple's [per-app first-open procedure](https://support.apple.com/en-us/102445):
 

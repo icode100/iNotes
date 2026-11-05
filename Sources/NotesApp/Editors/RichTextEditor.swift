@@ -182,7 +182,7 @@ struct RichTextEditor: NSViewRepresentable {
                     .font: NSFont.systemFont(ofSize: 16), .foregroundColor: ThemeTextAttributes.color(PageTheme.light.textHex)
                 ])
             }
-            editor.appearance = NSAppearance(named: parent.theme == .dark ? .darkAqua : .aqua)
+            editor.appearance = NSAppearance(named: parent.theme.isDark ? .darkAqua : .aqua)
             editor.backgroundColor = ThemeTextAttributes.color(parent.theme.paperHex)
             editor.textStorage?.setAttributedString(ThemeTextAttributes.display(canonical, theme: parent.theme))
             editor.setSelectedRange(ThemeTextAttributes.clipped(selected, length: (text as NSString).length))
@@ -410,7 +410,7 @@ struct RichTextEditor: UIViewRepresentable {
                     .font: UIFont.preferredFont(forTextStyle: .body), .foregroundColor: ThemeTextAttributes.color(PageTheme.light.textHex)
                 ])
             }
-            editor.overrideUserInterfaceStyle = parent.theme == .dark ? .dark : .light
+            editor.overrideUserInterfaceStyle = parent.theme.isDark ? .dark : .light
             editor.attributedText = ThemeTextAttributes.display(canonical, theme: parent.theme)
             editor.selectedRange = ThemeTextAttributes.clipped(selected, length: canonical.length)
             editor.typingAttributes[.foregroundColor] = ThemeTextAttributes.color(parent.theme.resolvedInkHex(PageTheme.light.textHex))
@@ -508,9 +508,16 @@ enum ThemeTextAttributes {
         resolved.getRed(&red, green: &green, blue: &blue, alpha: &alpha)
         #else
         let resolved = source.resolvedColor(with: UITraitCollection(userInterfaceStyle: .light))
-        guard resolved.getRed(&red, green: &green, blue: &blue, alpha: &alpha) else { return PageTheme.light.textHex }
+        guard let space = CGColorSpace(name: CGColorSpace.sRGB),
+              let converted = resolved.cgColor.converted(to: space, intent: .relativeColorimetric, options: nil),
+              UIColor(cgColor: converted).getRed(&red, green: &green, blue: &blue, alpha: &alpha) else { return PageTheme.light.textHex }
         #endif
-        return String(format: "#%02X%02X%02X", Int((red * 255).rounded()), Int((green * 255).rounded()), Int((blue * 255).rounded()))
+        // Native pickers can provide extended or Display P3 colors. Keep the
+        // canonical archive/picker value bounded to opaque six-digit sRGB.
+        func byte(_ value: CGFloat) -> Int {
+            value.isFinite ? Int((min(1, max(0, value)) * 255).rounded()) : 0
+        }
+        return String(format: "#%02X%02X%02X", byte(red), byte(green), byte(blue))
     }
 
     static func display(_ source: NSAttributedString, theme: PageTheme) -> NSAttributedString {
@@ -537,7 +544,7 @@ enum ThemeTextAttributes {
             if let original, hex(displayed) == theme.resolvedInkHex(hex(original)).uppercased() {
                 canonical = original
             } else {
-                canonical = color(theme == .dark ? theme.canonicalInkHex(hex(displayed)) : hex(displayed))
+                canonical = color(theme.isDark ? theme.canonicalInkHex(hex(displayed)) : hex(displayed))
             }
             result.addAttribute(.foregroundColor, value: canonical, range: range)
             result.removeAttribute(canonicalColorKey, range: range)

@@ -2,29 +2,135 @@ import Foundation
 
 /// One application-wide paper preference; notebook colors remain canonical.
 public enum PageColorScheme: String, CaseIterable, Sendable {
-    case system, vintage
+    // Preserve the stored `vintage` value used by earlier releases.
+    case system, vintage, vintageBlack, pitchBlack, pitchWhite
+    case pastelPeach, pastelRose, pastelLavender, pastelMint, pastelSky
 
-    public var displayName: String { self == .system ? "System theme" : "Vintage" }
+    public var displayName: String {
+        switch self {
+        case .system: return "Match scenery and appearance"
+        case .vintage: return "Vintage White"
+        case .vintageBlack: return "Vintage Black"
+        case .pitchBlack: return "Pitch Black"
+        case .pitchWhite: return "Pitch White"
+        case .pastelPeach: return "Pastel Peach"
+        case .pastelRose: return "Pastel Rose"
+        case .pastelLavender: return "Pastel Lavender"
+        case .pastelMint: return "Pastel Mint"
+        case .pastelSky: return "Pastel Sky"
+        }
+    }
 
-    public func resolved(isDark: Bool) -> PageTheme {
-        self == .vintage ? .vintage : (isDark ? .dark : .light)
+    /// Scenery affects only the matching choice. Explicit papers stay fixed
+    /// through appearance/scenery changes, including the legacy vintage choice.
+    public func resolved(isDark: Bool, scenery: String = "classic") -> PageTheme {
+        switch self {
+        case .system:
+            switch scenery {
+            case "coast": return isDark ? .coastDark : .coastLight
+            case "alpine": return isDark ? .alpineDark : .alpineLight
+            case "arctic": return isDark ? .arcticDark : .arcticLight
+            case "open-skyscape": return isDark ? .skyscapeDark : .skyscapeLight
+            case "ruby-hills": return isDark ? .rubyDark : .rubyLight
+            case "nature", "forest": return isDark ? .natureDark : .natureLight
+            default: return isDark ? .dark : .light
+            }
+        case .vintage: return .vintage
+        case .vintageBlack: return .vintageBlack
+        case .pitchBlack: return .pitchBlack
+        case .pitchWhite: return .pitchWhite
+        case .pastelPeach: return .pastelPeach
+        case .pastelRose: return .pastelRose
+        case .pastelLavender: return .pastelLavender
+        case .pastelMint: return .pastelMint
+        case .pastelSky: return .pastelSky
+        }
     }
 }
 
 /// A display theme for paper and ink. Stored strokes keep their original colors;
 /// callers resolve a color while drawing rather than rewriting a notebook.
 public enum PageTheme: String, CaseIterable, Sendable {
-    case light, dark, vintage
+    case light, dark, vintage, vintageBlack, pitchBlack, pitchWhite
+    case coastLight, coastDark, alpineLight, alpineDark, arcticLight, arcticDark
+    case skyscapeLight, skyscapeDark, rubyLight, rubyDark, natureLight, natureDark
+    case pastelPeach, pastelRose, pastelLavender, pastelMint, pastelSky
+
+    public var isDark: Bool {
+        switch self {
+        case .dark, .vintageBlack, .pitchBlack, .coastDark, .alpineDark,
+             .arcticDark, .skyscapeDark, .rubyDark, .natureDark: return true
+        default: return false
+        }
+    }
 
     public var paperHex: String {
-        switch self { case .light: "#FFFFFF"; case .dark: "#1B2027"; case .vintage: "#F3E9D2" }
+        switch self {
+        case .light, .pitchWhite: return "#FFFFFF"
+        case .dark: return "#1B2027"
+        case .vintage: return "#F3E9D2"
+        case .vintageBlack: return "#26231E"
+        case .pitchBlack: return "#000000"
+        case .coastLight: return "#F0F7F8"
+        case .coastDark: return "#18262B"
+        case .alpineLight: return "#F3F0FA"
+        case .alpineDark: return "#211F2C"
+        case .arcticLight: return "#F0F8FA"
+        case .arcticDark: return "#172831"
+        case .skyscapeLight: return "#F0F6FC"
+        case .skyscapeDark: return "#1C2635"
+        case .rubyLight: return "#FAF0F1"
+        case .rubyDark: return "#26191F"
+        case .natureLight: return "#F3F6EB"
+        case .natureDark: return "#20281D"
+        case .pastelPeach: return "#FBE9DC"
+        case .pastelRose: return "#F8E5ED"
+        case .pastelLavender: return "#EDE7F8"
+        case .pastelMint: return "#E4F3E9"
+        case .pastelSky: return "#E4F0FA"
+        }
     }
+
     public var ruleHex: String {
-        switch self { case .light: "#8E9FB3"; case .dark: "#63768A"; case .vintage: "#A59679" }
+        switch self {
+        case .light: return "#8E9FB3"
+        case .dark: return "#63768A"
+        case .vintage: return "#A59679"
+        case .vintageBlack: return "#8D816C"
+        case .pitchBlack: return "#777777"
+        case .pitchWhite: return "#929292"
+        case .coastLight: return "#829DA3"
+        case .coastDark: return "#64858E"
+        case .alpineLight: return "#9890AF"
+        case .alpineDark: return "#81769D"
+        case .arcticLight: return "#829DA8"
+        case .arcticDark: return "#678B9E"
+        case .skyscapeLight: return "#859BB4"
+        case .skyscapeDark: return "#7087A7"
+        case .rubyLight: return "#AA8B92"
+        case .rubyDark: return "#946B78"
+        case .natureLight: return "#909D7E"
+        case .natureDark: return "#7A8A68"
+        case .pastelPeach: return "#A98C77"
+        case .pastelRose: return "#AB8596"
+        case .pastelLavender: return "#9789AD"
+        case .pastelMint: return "#809C89"
+        case .pastelSky: return "#8199AF"
+        }
     }
-    public var textHex: String { self == .dark ? "#EDF1F5" : "#20242A" }
+
+    public var textHex: String {
+        self == .vintageBlack ? "#F0E7D5" : (isDark ? "#EDF1F5" : "#20242A")
+    }
+
     public var templateHex: String {
-        switch self { case .light: "#9C4C57"; case .dark: "#E4A0AB"; case .vintage: "#995D47" }
+        switch self {
+        case .vintage: return "#995D47"
+        case .vintageBlack: return "#D9B28C"
+        case .pitchBlack: return "#A0A0A0"
+        case .pitchWhite: return "#686868"
+        default: return isDark ? "#E4A0AB" : "#9C4C57"
+        }
     }
 
     private static let darkPalette: [String: String] = [
@@ -35,22 +141,24 @@ public enum PageTheme: String, CaseIterable, Sendable {
         "#E2B84D": "#F4D27D"
     ]
 
-    /// Resolves the canonical ink color for the displayed paper. Dark paper uses
-    /// lighter versions of the palette and lifts dark custom colors by hue.
+    /// Resolves canonical ink for the displayed paper. All dark papers use
+    /// lighter palette colors and lift dark custom colors while retaining hue.
     public func resolvedInkHex(_ canonical: String) -> String {
         guard let rgb = RGB(hex: canonical) else { return textHex }
         let normalized = rgb.hex
-        guard self == .dark else { return normalized }
+        guard isDark else { return normalized }
+        if normalized == "#30343B" { return textHex }
         if let semantic = Self.darkPalette[normalized] { return semantic }
         // Legacy pens commonly used these near-black values before the palette
         // settled on #30343B. A neutral default should always remain readable.
         if rgb.maximum - rgb.minimum < 0.10 && rgb.lightness < 0.45 { return textHex }
-        if rgb.contrast(with: RGB(hex: paperHex)!) >= 4.5 { return normalized }
+        let paper = RGB(hex: paperHex)!
+        if rgb.contrast(with: paper) >= 4.5 { return normalized }
         let hsl = rgb.hsl
         var lifted = RGB(hue: hsl.hue, saturation: hsl.saturation, lightness: max(0.72, hsl.lightness))
         // Saturated blue can have low luminance despite a high HSL lightness.
         // Keep lifting its lightness, retaining hue and saturation, if needed.
-        if lifted.contrast(with: RGB(hex: paperHex)!) < 4.5 {
+        if lifted.contrast(with: paper) < 4.5 {
             lifted = RGB(hue: hsl.hue, saturation: hsl.saturation, lightness: max(0.82, hsl.lightness))
         }
         return lifted.hex
@@ -59,9 +167,10 @@ public enum PageTheme: String, CaseIterable, Sendable {
     /// Reverses only the known display palette. Custom color lightening is not
     /// reversible: editors must retain canonical color metadata for those colors.
     public func canonicalInkHex(_ displayed: String) -> String {
-        guard let rgb = RGB(hex: displayed) else { return self == .dark ? "#30343B" : textHex }
+        guard let rgb = RGB(hex: displayed) else { return isDark ? "#30343B" : textHex }
         let normalized = rgb.hex
-        guard self == .dark else { return normalized }
+        guard isDark else { return normalized }
+        if normalized == textHex { return "#30343B" }
         return Self.darkPalette.first(where: { $0.value == normalized })?.key ?? normalized
     }
 }

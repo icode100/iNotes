@@ -24,6 +24,83 @@ final class PageThemeTests: XCTestCase {
         XCTAssertEqual(PageTheme.vintage.resolvedInkHex("invalid"), PageTheme.vintage.textHex)
     }
 
+    func testMatchingPaperFollowsSceneryAndLegacyForestPreference() {
+        let scenery = ["classic", "coast", "alpine", "arctic", "open-skyscape", "ruby-hills", "nature"]
+        let light = scenery.map { PageColorScheme.system.resolved(isDark: false, scenery: $0) }
+        let dark = scenery.map { PageColorScheme.system.resolved(isDark: true, scenery: $0) }
+        XCTAssertEqual(Set(light.map(\.paperHex)).count, scenery.count)
+        XCTAssertEqual(Set(dark.map(\.paperHex)).count, scenery.count)
+        for index in scenery.indices {
+            XCTAssertFalse(light[index].isDark)
+            XCTAssertTrue(dark[index].isDark)
+            XCTAssertNotEqual(light[index], dark[index])
+        }
+        let ruby = channels(PageColorScheme.system.resolved(isDark: true, scenery: "ruby-hills").paperHex)
+        XCTAssertTrue(ruby.red > ruby.blue && ruby.blue > ruby.green)
+        let nature = channels(PageColorScheme.system.resolved(isDark: true, scenery: "nature").paperHex)
+        XCTAssertTrue(nature.green > nature.red && nature.green > nature.blue)
+        for isDark in [false, true] {
+            XCTAssertEqual(PageColorScheme.system.resolved(isDark: isDark, scenery: "forest"),
+                           PageColorScheme.system.resolved(isDark: isDark, scenery: "nature"))
+            XCTAssertEqual(PageColorScheme.system.resolved(isDark: isDark, scenery: "unknown"),
+                           PageColorScheme.system.resolved(isDark: isDark))
+        }
+    }
+
+    func testExplicitPaperChoicesStayFixedAndPitchGuidesAreNeutral() {
+        XCTAssertEqual(PageColorScheme(rawValue: "vintage"), .vintage)
+        for choice in PageColorScheme.allCases where choice != .system {
+            let expected = choice.resolved(isDark: false)
+            for isDark in [false, true] {
+                for scenery in ["classic", "ruby-hills", "forest", "open-skyscape"] {
+                    XCTAssertEqual(choice.resolved(isDark: isDark, scenery: scenery), expected)
+                }
+            }
+        }
+        XCTAssertEqual(PageTheme.pitchBlack.paperHex, "#000000")
+        XCTAssertEqual(PageTheme.pitchWhite.paperHex, "#FFFFFF")
+        for theme in [PageTheme.pitchBlack, .pitchWhite] {
+            let guide = channels(theme.ruleHex)
+            XCTAssertEqual(guide.red, guide.green)
+            XCTAssertEqual(guide.green, guide.blue)
+            XCTAssertNotEqual(theme.ruleHex, theme.paperHex)
+        }
+        let pastels: [PageTheme] = [.pastelPeach, .pastelRose, .pastelLavender, .pastelMint, .pastelSky]
+        XCTAssertEqual(Set(pastels.map(\.paperHex)).count, pastels.count)
+        for pastel in pastels {
+            XCTAssertFalse(pastel.isDark)
+            XCTAssertNotEqual(pastel.paperHex, PageTheme.light.paperHex)
+        }
+    }
+
+    func testEveryPaperHasReadableTextGuidesAndTemplate() {
+        for theme in PageTheme.allCases {
+            XCTAssertTrue(contrast(theme.textHex, theme.paperHex) >= 7)
+            XCTAssertTrue(contrast(theme.ruleHex, theme.paperHex) >= 2.3)
+            XCTAssertTrue(contrast(theme.templateHex, theme.paperHex) >= 3)
+            XCTAssertEqual(theme.resolvedInkHex("invalid"), theme.textHex)
+        }
+    }
+
+    func testAllDarkPapersAdaptPaletteAndCustomInkWithoutLosingCanonicalColors() {
+        for theme in PageTheme.allCases where theme.isDark {
+            for canonical in palette {
+                let displayed = theme.resolvedInkHex(canonical)
+                XCTAssertTrue(contrast(displayed, theme.paperHex) >= 4.5)
+                XCTAssertEqual(theme.canonicalInkHex(displayed), canonical)
+            }
+            for custom in ["#102040", "#330F35", "#174B20", "#6A3200", "#1100FF", "#880000"] {
+                let displayed = theme.resolvedInkHex(custom)
+                XCTAssertTrue(contrast(displayed, theme.paperHex) >= 4.5)
+                // Lifting is deliberately not reversed into an approximate
+                // original; native text/ink metadata retains the exact source.
+                XCTAssertEqual(theme.canonicalInkHex(displayed), displayed)
+            }
+            XCTAssertEqual(theme.resolvedInkHex("#FFFF00"), "#FFFF00")
+            XCTAssertEqual(theme.resolvedInkHex("#FFFFFF"), "#FFFFFF")
+        }
+    }
+
     func testDefaultTextAndDarkInkContrast() {
         XCTAssertTrue(contrast(PageTheme.dark.textHex, PageTheme.dark.paperHex) >= 7)
         XCTAssertTrue(contrast(PageTheme.light.textHex, PageTheme.light.paperHex) >= 7)
@@ -81,8 +158,9 @@ final class PageThemeTests: XCTestCase {
         let before = try LibraryArchive.encode(library)
         for _ in 0..<20 {
             for stroke in note.strokes {
-                _ = PageTheme.dark.resolvedInkHex(stroke.colorHex)
-                _ = PageTheme.light.resolvedInkHex(stroke.colorHex)
+                for theme in PageTheme.allCases {
+                    _ = theme.resolvedInkHex(stroke.colorHex)
+                }
             }
         }
         let after = try LibraryArchive.encode(library)

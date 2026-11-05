@@ -47,7 +47,7 @@ struct UnifiedPageEditor: NSViewRepresentable {
     func makeCoordinator() -> Coordinator { Coordinator(self) }
 
     func makeNSView(context: Context) -> NSScrollView {
-        let scroll = NSScrollView()
+        let scroll = PageZoomScrollView()
         scroll.contentView = CenteredPageClipView()
         scroll.hasVerticalScroller = true
         scroll.hasHorizontalScroller = true
@@ -67,6 +67,7 @@ struct UnifiedPageEditor: NSViewRepresentable {
         page.selectionView.controller = context.coordinator.selection
         context.coordinator.richText.load(text: text, rtf: rtfData, into: page.textView)
         configure(page, coordinator: context.coordinator, isEnabled: context.environment.isEnabled)
+        scroll.fitPageWidth()
         return scroll
     }
 
@@ -187,6 +188,124 @@ struct UnifiedPageEditor: NSViewRepresentable {
     }
 }
 
+enum PageZoomDirection: Equatable { case zoomIn, zoomOut }
+
+/// Menu actions target only the visible page in the current window, including
+/// when a title or search field owns keyboard focus.
+@MainActor
+enum PageZoomActions {
+    static func direction(for event: NSEvent) -> PageZoomDirection? {
+        guard event.type == .keyDown else { return nil }
+        let flags = event.modifierFlags.intersection([.command, .shift, .option, .control])
+        guard flags == .command || flags == [.command, .shift] else { return nil }
+        switch event.charactersIgnoringModifiers {
+        case "=", "+": return .zoomIn
+        case "-" where flags == .command: return .zoomOut
+        default: return nil
+        }
+    }
+
+    @discardableResult
+    static func perform(_ direction: PageZoomDirection, in window: NSWindow? = NSApp.keyWindow) -> Bool {
+        guard let window, window.isKeyWindow, window.attachedSheet == nil, NSApp.modalWindow == nil,
+              let content = window.contentView, let page = page(in: content) else { return false }
+        return page.zoom(direction)
+    }
+
+    @discardableResult
+    static func fitWidth(in window: NSWindow? = NSApp.keyWindow) -> Bool {
+        guard let window, window.isKeyWindow, window.attachedSheet == nil, NSApp.modalWindow == nil,
+              let content = window.contentView,
+              let scroll = page(in: content)?.enclosingScrollView as? PageZoomScrollView else { return false }
+        scroll.fitPageWidth()
+        return true
+    }
+
+    private static func page(in view: NSView) -> UnifiedMacPageView? {
+        guard !view.isHiddenOrHasHiddenAncestor else { return nil }
+        if let page = view as? UnifiedMacPageView, page.visibleRect.width > 0, page.visibleRect.height > 0 { return page }
+        return view.subviews.lazy.compactMap { page(in: $0) }.first
+    }
+}
+
+/// Accept the unshifted equals key as the usual Zoom In alias as well as '+';
+/// ordinary text entry and modified shortcuts continue through AppKit.
+@MainActor
+final class PageZoomScrollView: NSScrollView {
+    private(set) var fitsPageWidth = true
+    private var applyingFitWidth = false
+    private var updatingNativeGeometry = false
+
+    override var magnification: CGFloat {
+        get { super.magnification }
+        set {
+            if !applyingFitWidth && !updatingNativeGeometry { fitsPageWidth = false }
+            super.magnification = newValue
+        }
+    }
+
+    override func setMagnification(_ magnification: CGFloat, centeredAt point: NSPoint) {
+        if !applyingFitWidth && !updatingNativeGeometry { fitsPageWidth = false }
+        super.setMagnification(magnification, centeredAt: point)
+    }
+
+    override func magnify(with event: NSEvent) {
+        fitsPageWidth = false
+        super.magnify(with: event)
+    }
+
+    override func viewDidMoveToWindow() {
+        super.viewDidMoveToWindow()
+        if window != nil { needsLayout = true }
+    }
+
+    override func layout() {
+        let previous = updatingNativeGeometry
+        updatingNativeGeometry = true
+        super.layout()
+        updatingNativeGeometry = previous
+        applyFitWidth()
+    }
+
+    override func tile() {
+        let previous = updatingNativeGeometry
+        updatingNativeGeometry = true
+        super.tile()
+        updatingNativeGeometry = previous
+        applyFitWidth()
+    }
+
+    func fitPageWidth() {
+        fitsPageWidth = true
+        applyFitWidth()
+        needsLayout = true
+    }
+
+    private func applyFitWidth() {
+        guard fitsPageWidth, !applyingFitWidth, !updatingNativeGeometry,
+              window != nil, allowsMagnification, let document = documentView,
+              document.bounds.width.isFinite, document.bounds.width > 0 else { return }
+        // Clip bounds are expressed in magnified document coordinates. Convert
+        // only its unobscured rectangle back to the scroll view's native points;
+        // the backing view can be wider than the visible editor viewport.
+        let viewportWidth = contentView.convert(contentView.visibleRect, to: self).width
+        guard viewportWidth.isFinite, viewportWidth > 0 else { return }
+        let target = min(maxMagnification, max(minMagnification, viewportWidth / document.bounds.width))
+        guard abs(magnification - target) > 0.000001 else { return }
+        applyingFitWidth = true
+        defer { applyingFitWidth = false }
+        let center = NSPoint(x: document.visibleRect.midX, y: document.visibleRect.midY)
+        super.setMagnification(target, centeredAt: center)
+        (document as? UnifiedMacPageView)?.refreshToolCursor()
+    }
+
+    override func performKeyEquivalent(with event: NSEvent) -> Bool {
+        if let direction = PageZoomActions.direction(for: event),
+           PageZoomActions.perform(direction, in: window) { return true }
+        return super.performKeyEquivalent(with: event)
+    }
+}
+
 @MainActor
 enum UnifiedPageExport {
     static func pdf(text: String, rtfData: Data?, strokes: [InkStroke], paper: InkPaper, theme: PageTheme = .light, pageTemplate: PageTemplate = .none, templateLinePattern: LinePattern = .solid, textBoxes: [PageTextBox] = [], equations: [NoteEquation] = [], images: [PageImage] = []) -> Data {
@@ -248,7 +367,7 @@ final class UnifiedMacPageView: NSView {
             guard theme != oldValue else { return }
             paperView.theme = theme
             inkView.theme = theme
-            textView.appearance = NSAppearance(named: theme == .dark ? .darkAqua : .aqua)
+            textView.appearance = NSAppearance(named: theme.isDark ? .darkAqua : .aqua)
         }
     }
     var onInputChange: ((String) -> Void)?
@@ -381,6 +500,17 @@ final class UnifiedMacPageView: NSView {
         guard let window, window.isKeyWindow, !isHiddenOrHasHiddenAncestor,
               visibleRect.contains(convert(window.mouseLocationOutsideOfEventStream, from: nil)) else { return }
         (activePageCursor ?? .iBeam).set()
+    }
+
+    @discardableResult
+    func zoom(_ direction: PageZoomDirection) -> Bool {
+        guard let scroll = enclosingScrollView, scroll.allowsMagnification else { return false }
+        let factor: CGFloat = direction == .zoomIn ? 1.2 : 1 / 1.2
+        let target = min(scroll.maxMagnification, max(scroll.minMagnification, scroll.magnification * factor))
+        let center = NSPoint(x: visibleRect.midX, y: visibleRect.midY)
+        scroll.setMagnification(target, centeredAt: center)
+        refreshToolCursor()
+        return true
     }
 
     private func updateDocumentCursor() {

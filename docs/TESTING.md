@@ -1,5 +1,116 @@
 # Validation
 
+## v1.2.0 local QA and publication preparation — 5 November 2026
+
+Source candidate based on `150d5466abcd8608f7a46ba07fa227585f50eb52`.
+This is not yet a published release. The user authorized building/opening an
+isolated QA app, with no computer control. On **5 November 2026**, the user
+confirmed that the QA app works and explicitly requested GitHub publication.
+That satisfies the manual-QA and publication-authorization gate for this
+candidate. Exact-source hosted Native checks, signed release packaging and
+independent public-asset verification remain separate, pending milestones.
+The expected release is **1.2.0 / build 2018** from fresh signed-release run
+**16**, subject to a live public-feed and workflow-counter recheck.
+The candidate changes paper/ink preferences, immediate blank-sheet creation,
+inline titles, Mac keyboard zoom and default fit-to-width. No archive format,
+dependency, pressure, pane policy or update-signing identity changes.
+
+Host: macOS **27.2 (26B123)**, Apple silicon, Apple Swift **6.4.2**
+(`swiftlang-6.4.2.1.9 clang-2100.4.1.1`), Command Line Tools selected at
+`/Library/Developer/CommandLineTools`.
+
+- `TMPDIR=/private/tmp bash scripts/test.sh` passed **126 tests, 0 failures**
+  in **3.67 seconds**, using the CLT standalone runner's same XCTest methods.
+  New coverage includes scenery/legacy preference resolution, fixed papers,
+  neutral pitch guides, all-paper contrast and canonical ink preservation.
+  The first sandboxed run could not create 25 temporary backup fixtures; the
+  unchanged suite passed outside that restriction. No test guard was weakened.
+- Shell syntax checks and the iPad project plist lint passed. These do not
+  establish iPad compilation.
+- `bash scripts/build-macos.sh` stopped before packaging because full Xcode's
+  `actool` is unavailable. `bash scripts/verify-macos.sh` found no v1.2 installer.
+  `xcodebuild ... -destination 'generic/platform=iOS Simulator'
+  CODE_SIGNING_ALLOWED=NO build` could not run with CLT selected.
+- Appcast preparation stopped because the release DMG was absent. Signature
+  probes require that final DMG/feed and have not passed for this candidate.
+  No private key was printed or regenerated, and nothing was uploaded.
+
+After the final source freeze, an ARM64 optimized Mac build passed using SwiftPM
+with `--build-system native --disable-sandbox --jobs 4 -c release --arch arm64`
+and workspace-local caches/scratch. The existing SwiftMath resource-lookup patch
+was applied only in the disposable dependency checkout, as in release packaging.
+The build logged existing Swift 6.4 actor/Sendable warnings in navigation code
+under the project's Swift 5 mode; it completed successfully in **24.48 seconds**.
+
+The isolated QA binary passed `--smoke-test --editor-test`:
+
+- **803 native editor**, **520 workspace**, **31 equation**, **12 ruled-text**,
+  **8 tool-shortcut** and **62 numbering/title/store** checks; existing
+  store/updater checks, including **16 updater configurations**, and independent
+  backup integration also passed.
+- New native coverage includes initial width fit, passive viewport resize,
+  clipped backing width, explicit zoom retention and reset, keyboard zoom,
+  editor/focus/caret/undo/content preservation, all 23 paper renderings, canonical
+  custom colors, and in-gamut/extended/Display P3 picker conversion. Title-store
+  checks cover blank defaults, repeated Unicode renames, clearing, numbering,
+  complete image-bearing page preservation and save/reopen.
+- The 49,127-node hierarchy import completed in **1.005 s**, with folder query
+  **0.018 s**. These are this host's diagnostic measurements.
+- Sheet-switch samples retained the minimum 12 post-turn observations and showed
+  **zero measured frame drift/collapse changes** with stable probe identity.
+  The injected first-turn stall produced a **0.743 s** first sample gap; late
+  observations do not establish continuity through that unsampled interval.
+
+These are in-process native fixture diagnostics with isolated storage/preferences,
+not external computer control, actual displayed-hover captures, interactive
+color-panel/menu testing or physical stylus validation. No pane diagnostic
+threshold or production pressure behavior was weakened.
+
+QA app: `dist/iNotes-QA-1.2.0.app`, version **1.2.0 / QA build 1**, separate
+identity **`io.inotes.qa.v120.20261105`**, with no Sparkle configuration.
+Its plist and launch environment point to
+`/private/tmp/inotes-v1.2-qa-p6eobxe5`; creation of that isolated `Library.json`
+was verified after launch. The app was opened for user QA without computer
+control. The user confirmed that this QA app works on **5 November 2026** and
+authorized publication. This is the user's aggregate manual result, without a
+separate claim that physical stylus, cloud delivery or every supported OS was
+tested. Production notes were not used by the automated checks.
+ARM64 architecture and strict ad hoc app/framework/helper signatures passed.
+The QA app uses the fallback ICNS; it does not verify the adaptive icon,
+release DMG, Ed25519 release signatures or separately built public assets.
+
+QA executable: **6,339,552 bytes**, SHA-256
+`718a79abff20ca05e7f578d69000332fbff3961310de88b6bc25a2baa57aaa58`.
+The app contains **39,807,789 regular-file bytes** excluding duplicate symlink
+targets; these are file sizes, not RAM measurements. The source/manifests
+fingerprint is
+`f4f179a45ba578373ca04e200b950a990d9821837608615a982e176db4ddf1c3`
+(SHA-256 over `git ls-files Sources Package.swift Package.resolved` entries,
+each path, NUL, file bytes, NUL). No source file was newer than the QA executable.
+Temporary logs are `/private/tmp/inotes-v1.2-core-tests.log`,
+`/private/tmp/inotes-v1.2-qa-build.log`,
+`/private/tmp/inotes-v1.2-native-tests.log` and
+`/private/tmp/inotes-v1.2-qa-package.log`; artifact metadata is in ignored
+`dist/qa-v1.2.json`.
+
+The user-facing QA checklist for this candidate was:
+
+| Area | Required check |
+| --- | --- |
+| Matching paper | Every scenery in light/dark; dark Ruby Hills is maroon-black; Forest preference resolves to Nature |
+| Fixed paper | Vintage White/Black, Pitch White/Black and all five pastels; visible checked menu state; pitch dots/rules/grid stay grey |
+| Ink | All presets and custom picker, change themes, draw, undo/redo and relaunch; original colors/content persist |
+| Title | New sheet without a dialog, multiword/Unicode input in underlined title, clear to blank, 256-character paste, title-local Select All and tool-letter typing |
+| Zoom | Initial fit to actual editor width, Command-Plus/Equals/Minus, pinch zoom, Fit Page Width, narrow/expanded panes, explicit zoom retained after theme/pane changes |
+| Existing safeguards | Text/ink/images/objects together, whole-page Select All from all tools, cursor appearance, pane hide/show/sheet switches, numbering and persistence |
+
+Do not infer visible cursor/menu correctness or physical stylus behavior solely
+from callback/in-process checks. Physical tablet/Pencil, iPad, older macOS and
+cloud delivery remain separate. Hosted Native checks and independent public
+artifact verification are still pending and must be recorded against their exact
+source/build after they complete. The user's publishing authorization does not
+establish those hosted or public-asset results.
+
 ## Published v1.1.0 / build 2017 — 4 November 2026
 
 Released source [`7946a931`](https://github.com/icode100/iNotes/commit/7946a931c8283e5fc0429fbd1d400f22d76312a5)

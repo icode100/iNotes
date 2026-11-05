@@ -3,7 +3,30 @@ import UniformTypeIdentifiers
 import NotesCore
 #if os(macOS)
 import AppKit
+#else
+import UIKit
 #endif
+
+/// Canonical sRGB values. Paper themes adapt their display without changing
+/// the selected color or the colors of strokes already stored in a notebook.
+enum InkColors {
+    static let palette: [(name: String, hex: String)] = [
+        ("Graphite", "#30343B"), ("Sage", "#314D43"), ("Blue", "#3869B2"),
+        ("Rose", "#B14D55"), ("Gold", "#E2B84D"), ("Violet", "#7852A9"),
+        ("Teal", "#177E89"), ("Orange", "#C56A24"), ("Crimson", "#A62D42"),
+        ("Indigo", "#4D4BA5"), ("Olive", "#6D762E"), ("Cocoa", "#805538"),
+        ("Coral", "#DB746B"), ("Lilac", "#AA85C8"), ("Aqua", "#60B6B2"),
+        ("Silver", "#92989F")
+    ]
+
+    @MainActor static func canonicalHex(_ color: Color) -> String {
+        #if os(macOS)
+        return ThemeTextAttributes.hex(NSColor(color))
+        #else
+        return ThemeTextAttributes.hex(UIColor(color))
+        #endif
+    }
+}
 
 enum InkNibPreset: String, CaseIterable {
     case extraFine, fine, medium, broad, extraBroad, highlighter
@@ -99,11 +122,13 @@ struct SheetDetail: View {
     @ViewState private var exportName = "Note"
     @ViewState private var equationDraft: NoteEquation?
     @ViewState private var renameRequest: NameRequest?
+    @ViewState private var showInkColors = false
     private var sheet: NoteNode? { store.library.node(id: sheetID) }
     private var inkTool: InkTool { InkTool(rawValue: selectedTool) ?? .pen }
     private var paper: InkPaper { InkPaper(rawValue: sheet?.paperStyle.rawValue ?? "dotted") ?? .dotted }
     private var pageTheme: PageTheme {
-        (PageColorScheme(rawValue: pageColorScheme) ?? .system).resolved(isDark: colorScheme == .dark)
+        (PageColorScheme(rawValue: pageColorScheme) ?? .system)
+            .resolved(isDark: colorScheme == .dark, scenery: workspaceTheme)
     }
     private var workspaceAccent: Color {
         WorkspaceTheme(preferenceValue: workspaceTheme).accent(isDark: colorScheme == .dark)
@@ -124,9 +149,10 @@ struct SheetDetail: View {
                     HStack(alignment: .top) {
                         VStack(alignment: .leading, spacing: 8) {
                             Text(store.breadcrumb(sheet.parentID)).font(.caption).foregroundStyle(.secondary).lineLimit(1)
-                            Text(store.sheetHeading(sheet.id))
-                                .font(.system(size: 28, weight: .semibold, design: .serif))
-                                .lineLimit(2).accessibilityAddTraits(.isHeader)
+                            SheetTitleField(title: sheet.title, isReadOnly: sheet.isTrashed) { candidate in
+                                store.rename(sheet.id, to: candidate)
+                                return store.library.node(id: sheet.id)?.title == candidate
+                            }
                             headerMetadata(sheet)
                         }
                         Spacer(minLength: 8)
@@ -454,12 +480,25 @@ struct SheetDetail: View {
 
     private var inkSettings: some View {
         HStack(spacing: 9) {
-            ForEach(["#30343B", "#314D43", "#3869B2", "#B14D55", "#E2B84D"], id: \.self) { hex in
-                Button { inkColor = hex } label: {
-                    Circle().fill(Color(hex: pageTheme.resolvedInkHex(hex))).frame(width: 15, height: 15)
-                        .padding(3).overlay(Circle().stroke(inkColor == hex ? Color.secondary : .clear, lineWidth: 1))
-                }.buttonStyle(.plain).accessibilityLabel(inkColorName(hex))
+            ForEach(Array(InkColors.palette.prefix(5)), id: \.hex) { choice in
+                inkSwatch(choice)
             }
+            Button { showInkColors.toggle() } label: {
+                Image(systemName: "paintpalette").frame(width: 24, height: 26)
+            }.buttonStyle(.plain).help("More ink colors").accessibilityLabel("More ink colors")
+                .popover(isPresented: $showInkColors) {
+                    VStack(alignment: .leading, spacing: 14) {
+                        Text("Ink colors").font(.headline)
+                        LazyVGrid(columns: Array(repeating: GridItem(.fixed(42)), count: 4), spacing: 12) {
+                            ForEach(InkColors.palette, id: \.hex) { choice in
+                                inkSwatch(choice)
+                            }
+                        }
+                        customInkPicker
+                        Text(inkColor.uppercased()).font(.caption.monospaced()).foregroundStyle(.secondary)
+                    }.padding(18)
+                }
+            customInkPicker.labelsHidden().frame(width: 26)
             Menu {
                 let presets = InkNibPreset.presets(for: inkTool)
                 if !presets.contains(where: { abs(inkWidth - $0.width(for: inkTool)) < 0.000_001 }) {
@@ -515,14 +554,23 @@ struct SheetDetail: View {
         }
     }
 
-    private func inkColorName(_ hex: String) -> String {
-        switch hex {
-        case "#30343B": return pageTheme == .dark ? "Light graphite ink" : "Graphite ink"
-        case "#314D43": return "Sage ink"
-        case "#3869B2": return "Blue ink"
-        case "#B14D55": return "Rose ink"
-        default: return "Gold ink"
-        }
+    private var customInkPicker: some View {
+        ColorPicker("Custom ink color", selection: Binding(
+            get: { Color(hex: inkColor) },
+            set: { inkColor = InkColors.canonicalHex($0) }
+        ), supportsOpacity: false)
+        .help("Choose any ink color. Dark paper adapts dark colors for readability.")
+        .accessibilityLabel("Custom ink color")
+        .accessibilityValue(inkColor.uppercased())
+    }
+
+    private func inkSwatch(_ choice: (name: String, hex: String)) -> some View {
+        Button { inkColor = choice.hex } label: {
+            Circle().fill(Color(hex: pageTheme.resolvedInkHex(choice.hex))).frame(width: 15, height: 15)
+                .padding(5).overlay(Circle().stroke(inkColor.uppercased() == choice.hex ? Color.primary : .clear, lineWidth: 1.5))
+        }.buttonStyle(.plain).help(choice.name + " ink")
+            .accessibilityLabel(choice.name + " ink")
+            .accessibilityValue(inkColor.uppercased() == choice.hex ? "Selected" : "Not selected")
     }
 
     private func attachments(_ sheet: NoteNode) -> some View {

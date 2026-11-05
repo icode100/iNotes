@@ -471,7 +471,8 @@ enum WorkspaceDiagnostics {
         settle()
 
         let contentBeforeScenery = store.selectedSheet?.pageContent
-        for theme in WorkspaceTheme.photographicThemes {
+        let caretBeforePaperChanges = editor.selectedRange()
+        for theme in [WorkspaceTheme.classic] + WorkspaceTheme.photographicThemes {
             preferences.set(theme.rawValue, forKey: "workspaceTheme")
             for appearance in [ColorScheme.light, .dark] {
                 host.rootView = ContentView(presentation: presentation)
@@ -483,14 +484,55 @@ enum WorkspaceDiagnostics {
                 let activeTip = page.inkView.tipCursor()
                 try check(findPage(host.view) === page && page.textView === editor
                           && store.selectedSheet?.pageContent == contentBeforeScenery
-                          && abs(scroll.magnification - 1.25) < 0.001,
-                          "\(theme.rawValue) \(appearance) preserves the editor, notes, and zoom")
+                          && abs(scroll.magnification - 1.25) < 0.001
+                          && editor.undoManager === undo && undo.canUndo
+                          && editor.selectedRange() == caretBeforePaperChanges,
+                          "\(theme.rawValue) \(appearance) preserves the editor, notes, caret, undo, and zoom")
+                let expectedPaper = PageColorScheme.system.resolved(isDark: appearance == .dark, scenery: theme.rawValue)
+                try check(page.theme == expectedPaper && page.paperView.theme == expectedPaper
+                          && page.inkView.theme == expectedPaper
+                          && editor.appearance?.name == (expectedPaper.isDark ? .darkAqua : .aqua),
+                          "\(theme.rawValue) \(appearance) matches native paper, ink, and text appearance to the scenery")
                 try check(page.activeTool == .pen && !editor.isEditable && !editor.isSelectable
                           && scroll.documentCursor === activeTip && page.activePageCursor === activeTip
                           && page.inputView(at: NSPoint(x: 100, y: 100), event: nil) === page.inkView,
                           "\(theme.rawValue) \(appearance) keeps pen cursor ownership and routes input to ink")
             }
         }
+
+        // Explicit papers must remain fixed when both the surrounding scenery
+        // and system appearance change. Exercise the mounted editor so this
+        // catches accidental view replacement as well as preference wiring.
+        for choice in PageColorScheme.allCases where choice != .system {
+            preferences.set(choice.rawValue, forKey: "pageColorScheme")
+            let expectedPaper = choice.resolved(isDark: false)
+            for appearance in [ColorScheme.light, .dark] {
+                preferences.set(appearance == .light ? "ruby-hills" : "nature", forKey: "workspaceTheme")
+                host.rootView = ContentView(presentation: presentation)
+                    .environmentObject(store)
+                    .environmentObject(inputDevice)
+                    .defaultAppStorage(preferences)
+                    .preferredColorScheme(appearance)
+                settle(0.25)
+                try check(page.theme == expectedPaper && page.paperView.theme == expectedPaper
+                          && page.inkView.theme == expectedPaper
+                          && editor.appearance?.name == (expectedPaper.isDark ? .darkAqua : .aqua),
+                          "\(choice.rawValue) stays fixed with matching native text appearance through \(appearance) scenery changes")
+                try check(findPage(host.view) === page && page.textView === editor
+                          && store.selectedSheet?.pageContent == contentBeforeScenery
+                          && editor.undoManager === undo && undo.canUndo
+                          && editor.selectedRange() == caretBeforePaperChanges
+                          && abs(scroll.magnification - 1.25) < 0.001,
+                          "\(choice.rawValue) \(appearance) preserves editor identity, content, caret, undo, and zoom")
+                let activeTip = page.inkView.tipCursor()
+                try check(page.activeTool == .pen && !editor.isEditable && !editor.isSelectable
+                          && scroll.documentCursor === activeTip && page.activePageCursor === activeTip
+                          && page.inputView(at: NSPoint(x: 100, y: 100), event: nil) === page.inkView,
+                          "\(choice.rawValue) \(appearance) retains pen cursor ownership and ink routing")
+            }
+        }
+        preferences.set("system", forKey: "pageColorScheme")
+        settle(0.25)
 
         func checkSheetBadgePassesThrough(_ transition: String, topOffset: CGFloat) throws {
             let local = NSPoint(x: scroll.bounds.maxX - 40,

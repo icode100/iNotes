@@ -43,6 +43,13 @@ does not publish a release.
 
 ## Build and sign a local update
 
+The v1.2.0 update targets prospective build **2018**. On 5 November 2026, the user
+confirmed that the isolated Mac QA app works and explicitly authorized GitHub
+publication. Wait for hosted Native checks on the exact source commit before
+tagging, and recheck the latest public feed and workflow counter. Build 2018 is
+the expected value for fresh release run **16**; signed release packaging and
+independent downloaded-public-asset verification remain pending at this stage.
+
 The published v1.1 update uses version **1.1.0** and build **2017**, from source
 `7946a931c8283e5fc0429fbd1d400f22d76312a5`. The user passed local manual QA and
 requested the final Pen-only 1.5 mm correction. Exact-source
@@ -62,10 +69,10 @@ identity, QA build 1, temporary library, and disconnected updater. Recheck the
 public feed and workflow counter before any later publication.
 
 ```sh
-VERSION=1.1.0 BUILD_NUMBER=2017 bash scripts/build-macos.sh
-VERSION=1.1.0 bash scripts/verify-macos.sh
-VERSION=1.1.0 bash scripts/generate-appcast.sh
-VERSION=1.1.0 bash scripts/test-update-signatures.sh
+VERSION=1.2.0 BUILD_NUMBER=2018 bash scripts/build-macos.sh
+VERSION=1.2.0 bash scripts/verify-macos.sh
+VERSION=1.2.0 bash scripts/generate-appcast.sh
+VERSION=1.2.0 bash scripts/test-update-signatures.sh
 ```
 
 The appcast command prepares `dist/update/appcast.xml`. It uses Sparkle's official
@@ -74,7 +81,7 @@ using Apple CryptoKit and the committed public key. It does not upload anything.
 For v1.0.3, the security rebuild 2011 exceeds the initial public build 2010 and
 shared local builds 1010–1012. Check both published and shared `CFBundleVersion`
 values and use a larger number for every update, including same-version rebuilds.
-Development defaults (`1.1.0`, build 2017) match the current public release and
+Development defaults (`1.2.0`, prospective build 2018) target the authorized update and
 are separate from the release workflow's
 `2002 + GITHUB_RUN_NUMBER`. Run 11 published v1.0.4 build 2012; isolated backup QA
 used build 2013. Run 12 built 2014 but stopped at native diagnostic verification before publication.
@@ -101,7 +108,9 @@ HTTPS feed; malformed configured channels are rejected before packaging.
 ## Publish a version
 
 After reviewing the source and configuring the secret, push a tag such as
-`v1.1.0`. `.github/workflows/release.yml` runs unit/integration tests, builds the
+`v1.2.0` only after the user's publication approval and exact-source Native
+checks. The user authorized v1.2.0 publication on 5 November 2026.
+`.github/workflows/release.yml` runs unit/integration tests, builds the
 ARM64 DMG, verifies the mounted bundle, signs and independently verifies the
 appcast, then publishes the DMG, SHA-256 checksum, and `appcast.xml` as GitHub
 Release assets. Its token has repository-contents write permission only in the

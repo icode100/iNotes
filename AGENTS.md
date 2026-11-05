@@ -25,6 +25,22 @@ passed the local candidate QA, then requested the Pen-only increase on 4 Novembe
 asset verification passed. The final numeric correction did not receive a
 second manual QA pass; consult `docs/TESTING.md` for precise evidence and limits.
 
+The **v1.2.0 update** adds scenery-matched page colors, Vintage Black,
+Pitch Black/White, five pastel papers, sixteen preset ink colors and a native
+custom color picker. New sheets open immediately with an empty stored title;
+the underlined top title field names the sheet as the user types and can be
+cleared again. Mac pages initially fit the visible editor width; explicit zoom
+disables automatic fitting. Command-Plus/Minus zoom the existing Mac page and
+View → Fit Page Width restores automatic fitting. On **5 November 2026**, the
+user confirmed that the isolated Mac QA app works and explicitly authorized
+GitHub publication. Exact-source hosted Native checks, signed release packaging
+and independent public-asset verification are still pending at this preparation
+stage. Consult the dated v1.2 record in `docs/TESTING.md` for actual evidence and
+limits. Version defaults target 1.2.0 / prospective build **2018** from fresh
+release run **16**; recheck the public feed and counter before publishing.
+The last verified public release remains v1.1.0/build 2017 until the new release
+has actually published.
+
 ## Priorities
 
 - Protect saved notes, archive compatibility, undo history, and recoverability.
@@ -63,6 +79,11 @@ Use availability guards for APIs newer than the deployment target.
   they must not overwrite existing notebooks. Duplication preserves page payloads.
 - A sheet title may be empty; workbook/chapter/topic names must remain nonempty.
   Use `displayTitle` for visible/export fallbacks, not as a replacement stored title.
+  New-sheet actions create blank sheets directly without a naming dialog. The
+  underlined title field edits only `title`, preserving ID, creation metadata,
+  page content, page order and sheet numbers. Keep an editing draft so trimming
+  the stored title does not eat spaces mid-word; rejected renames must restore
+  the saved value. Preserve the 256-character limit and field-local Select All.
 - The user's 3 November 2026 sheet-numbering request supersedes the earlier
   lifetime-allocation rule. Active `sheetNumber` values are contiguous page
   numbers, starting at 1 within each immediate chapter/topic in saved page order.
@@ -255,8 +276,18 @@ Do not treat callback-level cursor assertions alone as proof of the displayed cu
 
 Keep ruled text aligned with paper guides; preserve solid/dashed/dotted lines,
 templates, selection, equations, and combined exports when modifying rendering.
-Page color is a global preference, distinct from scenic workspace appearance.
+Page color is a global preference. Its default Match scenery and appearance
+choice resolves paper and guide colors from the selected scenery in light/dark
+mode; Ruby Hills dark paper is maroon-black. Explicit paper choices are fixed
+independently of scenery and appearance: Vintage White (legacy `vintage`),
+Vintage Black, Pitch Black, Pitch White, and Pastel Peach/Rose/Lavender/Mint/Sky.
+Pitch papers use neutral grey guides. Use `PageTheme.isDark` for native text
+appearance, cursor contrast and ink rendering; equality with `.dark` covers only
+Classic. Preserve legacy `forest` → Nature resolution for paper too.
 Light/dark or vintage changes must not rewrite canonical stored text/ink colors.
+The native ink picker stores opaque canonical sRGB hex values; swatches resolve
+only their displayed color. Theme changes must preserve custom colors and all
+previous strokes, and must not reset tool widths or add pressure behavior.
 
 The twelve supplied Coast/Alpine/Arctic/Open Skyscape/Ruby Hills/Nature PNGs live in
 `Sources/NotesApp/Resources/WorkspaceThemes`. Preserve their light/dark mapping,
@@ -364,7 +395,9 @@ and v1.0.4 run 11 published 2012. Backup QA used 2013; dispatched run 12 built
 2014 but failed verification before publishing. Run 13 published 2015, and run 14
 published 2016. Run 15 published v1.1.0/build 2017 from `7946a931`; its exact-source
 Native checks and separately downloaded public assets passed on 4 November 2026.
-Defaults match the published version and build. The v1.1.0 local QA
+Defaults now target v1.2.0 / prospective build 2018; publication authorization
+and the local QA result were recorded on 5 November 2026. Exact-source hosted
+checks and public-build verification must be recorded separately. The v1.1.0 local QA
 identities use separate QA builds 1 and 2 (final Pen correction). The next new
 signed-release run (16) must produce 2018; recheck both feed and counter
 immediately before publication. A workflow rerun does not

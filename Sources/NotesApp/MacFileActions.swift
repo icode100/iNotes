@@ -112,7 +112,7 @@ struct NotesCommands: Commands {
                 .disabled(updater.isConfigured && !updater.canCheckForUpdates)
         }
         CommandGroup(replacing: .newItem) {
-            Button("New Sheet…") { NotificationCenter.default.post(name: .newSheet, object: nil) }.keyboardShortcut("n")
+            Button("New Sheet") { NotificationCenter.default.post(name: .newSheet, object: nil) }.keyboardShortcut("n")
         }
         CommandGroup(after: .newItem) {
             Divider()
@@ -125,6 +125,14 @@ struct NotesCommands: Commands {
         CommandGroup(after: .textEditing) {
             Divider()
             Button("Search All Notes") { NotificationCenter.default.post(name: .focusSearch, object: nil) }.keyboardShortcut("f")
+        }
+        CommandGroup(after: .sidebar) {
+            Divider()
+            Button("Zoom In") { PageZoomActions.perform(.zoomIn) }
+                .keyboardShortcut("+", modifiers: .command)
+            Button("Zoom Out") { PageZoomActions.perform(.zoomOut) }
+                .keyboardShortcut("-", modifiers: .command)
+            Button("Fit Page Width") { PageZoomActions.fitWidth() }
         }
         CommandMenu("Format") {
             Button("Bold") { RichTextEditor.perform(.bold) }.keyboardShortcut("b")

@@ -131,6 +131,8 @@ enum StoreDiagnostics {
         let first = try createSheet(in: chapter)
         let second = try createSheet(in: chapter)
         let third = try createSheet(in: chapter)
+        try require([first, second, third].allSatisfy { store.library.node(id: $0)?.title == "" },
+                    "New sheets store empty titles without substituting their page-number labels")
         let png = Data(base64Encoded: "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR4nGP4z8DwHwAFAAH/iZk9HQAAAABJRU5ErkJggg==")!
         store.update(first) {
             $0.pageContent = PageContent(text: "Keep these notes — नमस्ते",
@@ -141,6 +143,33 @@ enum StoreDiagnostics {
         }
         store.rename(third, to: "A named page")
         guard let original = store.library.node(id: first) else { throw LibraryError.nodeNotFound }
+        store.sheetID = first
+        let titleEditOrder = store.library.nodes.map(\.id)
+        let titleEditNumbers = store.library.children(of: chapter).compactMap(\.sheetNumber)
+        for title in ["Physics", "Physics notes — café 日本語 नमस्ते", ""] {
+            store.rename(first, to: title)
+            guard let renamed = store.library.node(id: first) else { throw LibraryError.nodeNotFound }
+            try require(store.errorMessage == nil && renamed.title == title,
+                        "Consecutive title edits and clearing update the stored sheet name")
+            try require(renamed.id == original.id && renamed.createdAt == original.createdAt
+                        && renamed.pageContent == original.pageContent && renamed.order == original.order
+                        && renamed.sheetNumber == original.sheetNumber && renamed.parentID == original.parentID
+                        && store.library.nodes.map(\.id) == titleEditOrder
+                        && store.library.children(of: chapter).compactMap(\.sheetNumber) == titleEditNumbers
+                        && store.sheetID == first && store.folderID == chapter,
+                        "Live title edits preserve page identity, creation metadata, complete content, numbering, order and selection")
+            try require(store.flush() && store.errorMessage == nil, "Each live title edit saves successfully")
+            let titleReload = NotesStore(directory: directory, preferences: preferences)
+            guard let savedTitle = titleReload.library.node(id: first) else { throw LibraryError.nodeNotFound }
+            try require(titleReload.errorMessage == nil && savedTitle.title == title
+                        && savedTitle.id == original.id
+                        && abs(savedTitle.createdAt.timeIntervalSince1970 - original.createdAt.timeIntervalSince1970) < 0.001
+                        && savedTitle.pageContent == original.pageContent && savedTitle.order == original.order
+                        && savedTitle.sheetNumber == original.sheetNumber && savedTitle.parentID == original.parentID
+                        && titleReload.library.nodes.map(\.id) == titleEditOrder
+                        && titleReload.library.children(of: chapter).compactMap(\.sheetNumber) == titleEditNumbers,
+                        "Saved Unicode titles and blank titles reopen with page content, identity, metadata and numbering intact")
+        }
         store.trash(second)
         try checkSequence([first, third], in: chapter)
         try require(store.library.node(id: second)?.isTrashed == true, "Deleted page remains recoverable in Trash")
@@ -212,7 +241,7 @@ enum StoreDiagnostics {
                     && reopened.library.node(id: mixedFirst)?.sheetNumber == 3
                     && reopened.library.node(id: first)?.pageContent == original.pageContent,
                     "Reopening preserves page positions, numbering and retained image-bearing notes")
-        return "Sheet numbering/store checks passed: \(checks), including delete/reset, native move offsets, mixed siblings, rejection, selection/content preservation and exact save/reopen"
+        return "Sheet numbering/store checks passed: \(checks), including blank/Unicode live titles, delete/reset, native move offsets, mixed siblings, rejection, selection/content preservation and exact save/reopen"
     }
 
     /// Exercise the real import-to-navigation path using a disposable library.
