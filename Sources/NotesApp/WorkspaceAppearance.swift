@@ -90,9 +90,12 @@ final class WorkspaceNavigationProbe: NSView {
     private var diagnosticLastTransitionEntry = "none"
     private var diagnosticLastTransitionTargets: [String] = []
     private var diagnosticLastCompletion = "none"
+    private var diagnosticCompletedGeneration: Int?
+    private var diagnosticVisibilityPublicationSequence = 0
+    private var diagnosticPendingVisibilityPublications: Set<Int> = []
 
     /// The native fixture enables capture explicitly. Production navigation does
-    /// not allocate trace messages or emit logs; only immutable strings are kept.
+    /// not allocate trace messages, track publication IDs, or emit logs.
     static func beginDiagnosticCapture() {
         if diagnosticCaptureDepth == 0 { diagnosticEvents = [] }
         diagnosticCaptureDepth += 1
@@ -117,6 +120,76 @@ final class WorkspaceNavigationProbe: NSView {
                   let owner = restorationOwners.object(forKey: controller) else { return nil }
             return "Retained restoration controller=\(ObjectIdentifier(controller)) \(owner.diagnosticsState())"
         }
+    }
+
+    struct RestorationDiagnosticSnapshot: Equatable {
+        let ownerID: ObjectIdentifier
+        let controllerID: ObjectIdentifier?
+        let pending: Int
+        let ownsController: Bool
+        let detached: Bool
+        let restoring: Bool
+        let hasAfterRestoration: Bool
+    }
+
+    struct DiagnosticSnapshot: Equatable {
+        let uptime: TimeInterval
+        let probeID: ObjectIdentifier
+        let controllerID: ObjectIdentifier?
+        let savedControllerID: ObjectIdentifier?
+        let generation: Int
+        let completedGeneration: Int?
+        let pendingVisibilityPublicationIDs: [Int]
+        let fullPage: Bool
+        let sheetsVisible: Bool
+        let wasFullPage: Bool
+        let applying: Bool
+        let scheduled: Bool
+        let geometryScheduled: Bool
+        let transitionInProgress: Bool
+        let restoreExpandedSheetsWidth: Bool
+        let dismantled: Bool
+        let attached: Bool
+        let owner: RestorationDiagnosticSnapshot?
+        let waitingOwner: RestorationDiagnosticSnapshot?
+
+        /// Readiness reflects accepted intent and completed/coalesced work.
+        /// Geometry is deliberately left to the fixture's unchanged assertions.
+        func isQuiescent(expectedFullPage: Bool, expectedSheetsVisible: Bool) -> Bool {
+            guard attached, !dismantled, let controllerID,
+                  savedControllerID == controllerID,
+                  fullPage == expectedFullPage, wasFullPage == expectedFullPage,
+                  sheetsVisible == expectedSheetsVisible,
+                  !applying, !scheduled, !geometryScheduled, !transitionInProgress,
+                  pendingVisibilityPublicationIDs.isEmpty,
+                  let owner, owner.controllerID == controllerID, owner.ownsController,
+                  owner.pending == 0, !owner.detached, !owner.restoring,
+                  !owner.hasAfterRestoration, waitingOwner == nil else { return false }
+            return expectedFullPage || !expectedSheetsVisible || !restoreExpandedSheetsWidth
+        }
+    }
+
+    /// This snapshot never schedules work, forces layout, or publishes state.
+    /// Inspect the actual enclosing controller too: a replacement probe may be
+    /// waiting for its predecessor before it has saved any controller of its own.
+    func diagnosticsSnapshot() -> DiagnosticSnapshot {
+        let controller = enclosingNavigationController()
+        let currentOwner = controller.flatMap { Self.restorationOwners.object(forKey: $0) }
+        return DiagnosticSnapshot(
+            uptime: ProcessInfo.processInfo.systemUptime,
+            probeID: ObjectIdentifier(self),
+            controllerID: controller.map(ObjectIdentifier.init),
+            savedControllerID: savedController.map(ObjectIdentifier.init),
+            generation: transitionGeneration,
+            completedGeneration: diagnosticCompletedGeneration,
+            pendingVisibilityPublicationIDs: diagnosticPendingVisibilityPublications.sorted(),
+            fullPage: fullPage, sheetsVisible: sheetsVisible, wasFullPage: wasFullPage,
+            applying: applying, scheduled: scheduled, geometryScheduled: geometryScheduled,
+            transitionInProgress: transitionInProgress,
+            restoreExpandedSheetsWidth: restoreExpandedSheetsWidth,
+            dismantled: dismantled, attached: window != nil && superview != nil,
+            owner: restoration?.diagnosticsSnapshot(),
+            waitingOwner: currentOwner !== restoration ? currentOwner?.diagnosticsSnapshot() : nil)
     }
 
     /// Read-only failure diagnostics. Never synchronizes, lays out, or publishes
@@ -219,6 +292,14 @@ final class WorkspaceNavigationProbe: NSView {
             "id=\(ObjectIdentifier(self)) controller=\(controller.map { String(describing: ObjectIdentifier($0)) } ?? "nil")"
                 + " pending=\(pending) detached=\(detached) restoring=\(restoring) ownsController=\(ownsController) observers=\(observations.count) hasAfterRestoration=\(afterRestoration != nil)"
                 + " itemIDs=\(items.map { String(describing: ObjectIdentifier($0.item)) }) savedCollapsed=\(items.map(\.collapsed)) currentCollapsed=\(items.map { $0.item.isCollapsed })"
+        }
+
+        func diagnosticsSnapshot() -> RestorationDiagnosticSnapshot {
+            RestorationDiagnosticSnapshot(ownerID: ObjectIdentifier(self),
+                                          controllerID: controller.map(ObjectIdentifier.init),
+                                          pending: pending, ownsController: ownsController,
+                                          detached: detached, restoring: restoring,
+                                          hasAfterRestoration: afterRestoration != nil)
         }
 
         func beginTransition() {
@@ -384,7 +465,22 @@ final class WorkspaceNavigationProbe: NSView {
                     let visible = !item.isCollapsed
                     self.sheetsVisible = visible
                     if visible { self.restoreExpandedSheetsWidth = true }
+                    let diagnosticPublicationID: Int?
+                    if Self.diagnosticCaptureDepth > 0 {
+                        self.diagnosticVisibilityPublicationSequence += 1
+                        diagnosticPublicationID = self.diagnosticVisibilityPublicationSequence
+                        self.diagnosticPendingVisibilityPublications.insert(self.diagnosticVisibilityPublicationSequence)
+                        Self.recordDiagnosticEvent("visibility publication queued probe=\(ObjectIdentifier(self)) id=\(self.diagnosticVisibilityPublicationSequence) visible=\(visible)")
+                    } else {
+                        diagnosticPublicationID = nil
+                    }
                     DispatchQueue.main.async { [weak self] in
+                        defer {
+                            if let diagnosticPublicationID, let self {
+                                self.diagnosticPendingVisibilityPublications.remove(diagnosticPublicationID)
+                                Self.recordDiagnosticEvent("visibility publication finished probe=\(ObjectIdentifier(self)) id=\(diagnosticPublicationID)")
+                            }
+                        }
                         guard let self, !self.dismantled, !self.fullPage,
                               self.sheetsVisible == visible else { return }
                         self.onSheetsVisibilityChange?(visible)
@@ -438,6 +534,7 @@ final class WorkspaceNavigationProbe: NSView {
                 MainActor.assumeIsolated {
                     restoration?.completeTransition()
                     if Self.diagnosticCaptureDepth > 0, let self {
+                        self.diagnosticCompletedGeneration = generation
                         self.diagnosticLastCompletion = "generation=\(generation) currentGeneration=\(self.transitionGeneration) fullPage=\(self.fullPage) wasFullPage=\(self.wasFullPage) dismantled=\(self.dismantled) previousCollapsed=\(self.previousCollapsed) collapsed=\(self.savedItems.map { $0.item.isCollapsed })"
                         Self.recordDiagnosticEvent("transition completion probe=\(ObjectIdentifier(self)) \(self.diagnosticLastCompletion)")
                     }

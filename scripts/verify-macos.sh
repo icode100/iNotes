@@ -1,7 +1,7 @@
 #!/bin/bash
 set -euo pipefail
 ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
-VERSION="${VERSION:-1.2.1}"
+VERSION="${VERSION:-1.2.2}"
 DMG="${1:-$ROOT/dist/iNotes-$VERSION-arm64.dmg}"
 if [[ ! -f "$DMG" ]]; then
   echo "DMG not found: $DMG" >&2

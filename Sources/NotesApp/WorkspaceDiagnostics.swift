@@ -11,6 +11,34 @@ enum WorkspaceDiagnostics {
         let description: String
     }
 
+    /// Observe callback state after real run-loop turns. Geometry is deliberately
+    /// absent from readiness: the caller must assess the first completed state.
+    private static func observeCallbackCompletion<Snapshot>(
+        start: TimeInterval, timeout: TimeInterval = 5,
+        clock: () -> TimeInterval = { ProcessInfo.processInfo.systemUptime },
+        advanceTurn: ((TimeInterval) -> Void)? = nil,
+        snapshot: () -> Snapshot, isReady: (Snapshot) -> Bool,
+        observe: (Snapshot, TimeInterval, TimeInterval, Bool) -> Void
+    ) -> (snapshot: Snapshot, elapsed: TimeInterval, completed: Bool) {
+        let deadline = start + timeout
+        var previous = start
+        var value = snapshot()
+        let initialTime = clock()
+        observe(value, initialTime - start, initialTime - previous, false)
+        previous = initialTime
+        while clock() < deadline {
+            let remaining = deadline - clock()
+            if let advanceTurn { advanceTurn(remaining) }
+            else { RunLoop.main.run(until: Date(timeIntervalSinceNow: min(0.016, max(0, remaining)))) }
+            let now = clock()
+            value = snapshot()
+            observe(value, now - start, now - previous, true)
+            previous = now
+            if now < deadline && isReady(value) { return (value, now - start, true) }
+        }
+        return (value, clock() - start, false)
+    }
+
     static func run() throws -> String {
         var checks = 0
         var geometryHistory: [String] = []
@@ -27,6 +55,42 @@ enum WorkspaceDiagnostics {
         }
         WorkspaceNavigationProbe.beginDiagnosticCapture()
         defer { WorkspaceNavigationProbe.endDiagnosticCapture() }
+
+        // Deterministically exercise callback readiness later than the former
+        // 0.4-second wait, then reject incorrect geometry at that first boundary.
+        var policyClock: TimeInterval = 0
+        var delayedCallbackReady = false
+        var observedPendingOriginalWindow = false
+        let delayed = observeCallbackCompletion(start: 0, clock: { policyClock }, advanceTurn: { _ in
+            policyClock += 0.1
+            delayedCallbackReady = policyClock >= 0.55
+        }, snapshot: { (ready: delayedCallbackReady, width: CGFloat(policyClock >= 0.8 ? 582 : 813)) }, isReady: { $0.ready }) { state, elapsed, _, afterTurn in
+                if afterTurn && elapsed >= 0.4 && !state.ready { observedPendingOriginalWindow = true }
+            }
+        try check(delayed.completed && delayed.elapsed >= 0.55 && observedPendingOriginalWindow,
+                  "passive completion policy never treats the old 0.4-second window as a callback completion")
+        struct WrongCompletedGeometry: Error {}
+        var rejectedWrongCompletedGeometry = false
+        do {
+            // The fixture would recover at 0.8 seconds. Its first completed
+            // observation at 0.6 remains wrong and cannot be replaced by recovery.
+            guard abs(delayed.snapshot.width - CGFloat(582)) < 5 else { throw WrongCompletedGeometry() }
+        } catch is WrongCompletedGeometry { rejectedWrongCompletedGeometry = true }
+        try check(rejectedWrongCompletedGeometry && delayed.elapsed < 0.8,
+                  "incorrect geometry remains a failure at the first callback-completed observation")
+        var stalledClock: TimeInterval = 0
+        let stalled = observeCallbackCompletion(start: 0, clock: { stalledClock }, advanceTurn: { _ in
+            stalledClock = 5.1
+        }, snapshot: { stalledClock > 5 }, isReady: { $0 }, observe: { _, _, _, _ in })
+        try check(!stalled.completed && stalled.elapsed > 5,
+                  "callback readiness after a first-turn stall cannot pass the absolute five-second timeout")
+        var neverReadyClock: TimeInterval = 0
+        let neverReady = observeCallbackCompletion(start: 0, clock: { neverReadyClock }, advanceTurn: { remaining in
+            neverReadyClock += min(0.1, remaining)
+        }, snapshot: { false }, isReady: { $0 }, observe: { _, _, _, _ in })
+        try check(!neverReady.completed && neverReady.elapsed >= 5,
+                  "permanently pending callbacks fail within the absolute observation deadline")
+        geometryHistory.append("Completion policy deterministic virtual-clock callback elapsed=\(delayed.elapsed) originalWindowPending=\(observedPendingOriginalWindow) wrongCompletedGeometryRejected=\(rejectedWrongCompletedGeometry)")
 
         // Exercise the installed resource lookup, not a source-tree path. This
         // catches missing SwiftPM bundles and Xcode resource-phase omissions.
@@ -285,7 +349,7 @@ enum WorkspaceDiagnostics {
                 return own + view.subviews.flatMap { currentProbes(in: $0) }
             }
             for (index, probe) in currentProbes(in: host.view).enumerated() {
-                context.append("Failure navigation probe\(index) id=\(ObjectIdentifier(probe)) \(probe.diagnosticsState())")
+                context.append("Failure navigation probe\(index) uptime=\(probe.diagnosticsSnapshot().uptime) id=\(ObjectIdentifier(probe)) \(probe.diagnosticsState())")
             }
             let retainedOwners = WorkspaceNavigationProbe.diagnosticsRestorationOwners()
             context.append("Failure retained restoration owners count=\(retainedOwners.count)")
@@ -313,6 +377,60 @@ enum WorkspaceDiagnostics {
                 context.append("Failure native field metrics\(index) id=\(ObjectIdentifier(field)) placeholder=\(field.placeholderString ?? "nil") font=\(fontName) pointSize=\(pointSize) intrinsic=\(NSStringFromSize(intrinsic)) fitting=\(NSStringFromSize(fitting)) cellSize=\(String(describing: cellSize)) frameAfterMetrics=\(NSStringFromRect(field.frame))")
             }
             return context.joined(separator: "\n")
+        }
+
+        func currentNavigationProbes(in view: NSView) -> [WorkspaceNavigationProbe] {
+            let own = (view as? WorkspaceNavigationProbe).map { [$0] } ?? []
+            return own + view.subviews.flatMap { currentNavigationProbes(in: $0) }
+        }
+
+        func navigatePassively(_ label: String, expectedSheets: Bool? = nil,
+                               action: () throws -> Void) throws {
+            let initialProbes = currentNavigationProbes(in: host.view)
+            guard initialProbes.count == 1, let probe = initialProbes.first else {
+                throw Failure(description: "Missing unique navigation probe before \(label)")
+            }
+            let initial = probe.diagnosticsSnapshot()
+            let initialPage = findPage(host.view)
+            var start = ProcessInfo.processInfo.systemUptime
+            var collapseChanges: [String] = []
+            let observations = [sidebarItem, sheetsItem].enumerated().map { index, item in
+                item.observe(\.isCollapsed, options: [.new]) { item, _ in
+                    MainActor.assumeIsolated {
+                        collapseChanges.append("elapsed=\(ProcessInfo.processInfo.systemUptime - start) pane\(index) id=\(ObjectIdentifier(item)) collapsed=\(item.isCollapsed)")
+                    }
+                }
+            }
+            defer { observations.forEach { $0.invalidate() } }
+            start = ProcessInfo.processInfo.systemUptime
+            try action()
+            let requestedFullPage = presentation.fullPage
+            let requestedSheets = expectedSheets ?? presentation.sheetsVisible
+            var trace: [String] = []
+            var originalObservation: String?
+            var stableIdentity = true
+            let result = observeCallbackCompletion(start: start, snapshot: { probe.diagnosticsSnapshot() },
+                isReady: { state in
+                    state.isQuiescent(expectedFullPage: requestedFullPage, expectedSheetsVisible: requestedSheets)
+                }) { state, elapsed, gap, afterTurn in
+                    let current = currentNavigationProbes(in: host.view)
+                    stableIdentity = stableIdentity && current.count == 1 && current.first === probe
+                        && state.probeID == initial.probeID && state.controllerID == initial.controllerID
+                        && findPage(host.view) === initialPage
+                    let detail = detailView.convert(detailView.bounds, to: host.view)
+                    let viewport = findPage(host.view)?.enclosingScrollView.map { $0.convert($0.bounds, to: host.view) }
+                    let entry = "Navigation passive [\(label)] uptime=\(start + elapsed) elapsed=\(elapsed) gap=\(gap) postTurn=\(afterTurn) generation=\(state.generation) idle=\(state.isQuiescent(expectedFullPage: requestedFullPage, expectedSheetsVisible: requestedSheets)) identity=\(stableIdentity) collapsed=\([sidebarItem.isCollapsed, sheetsItem.isCollapsed]) detail=\(NSStringFromRect(detail)) viewport=\(viewport.map(NSStringFromRect) ?? "none") state={\(probe.diagnosticsState())}"
+                    trace.append(entry)
+                    if afterTurn && elapsed >= 0.4 && originalObservation == nil { originalObservation = entry }
+                }
+            geometryHistory.append(contentsOf: trace)
+            let completionLog = "Navigation completion [\(label)] elapsed=\(result.elapsed) completed=\(result.completed) original0.4=\(originalObservation ?? "completed before original observation window") nativeCollapseChanges=\(collapseChanges) firstCompleted={\(trace.last ?? "none")}"
+            geometryHistory.append(completionLog)
+            print(completionLog)
+            try check(result.completed && result.elapsed < 5 && stableIdentity,
+                      "\(label) reaches callback quiescence on the same native owner within five seconds")
+            // Return at the first callback-idle observation, even if its geometry
+            // is wrong. Existing callers assert the unchanged geometry thresholds.
         }
 
         func logHeadingGeometry(_ phase: String) {
@@ -544,8 +662,7 @@ enum WorkspaceDiagnostics {
             try checkHeadingFieldAllocations(phase)
         }
 
-        presentation.toggleSheets()
-        waitPassively { sheetsItem.isCollapsed && scroll.bounds.width > normalWidth + 100 }
+        try navigatePassively("hide only sheets") { presentation.toggleSheets() }
         try checkEditorSurvives("hiding only the sheets pane")
         try check(!presentation.sheetsVisible && sheetsItem.isCollapsed && presentation.headingVisible
                   && sidebarItem.isCollapsed == sidebarWasCollapsed,
@@ -554,8 +671,7 @@ enum WorkspaceDiagnostics {
         try check(scroll.bounds.width > normalWidth + 100,
                   "collapsing sheets gives their horizontal space to the same editor")
         try checkPassiveSidebarCycle(sheetsVisible: false, tool: .text)
-        presentation.toggleSheets()
-        waitPassively { !sheetsItem.isCollapsed && abs(scroll.bounds.width - normalWidth) < 5 }
+        try navigatePassively("restore only sheets") { presentation.toggleSheets() }
         try checkEditorSurvives("restoring only the sheets pane")
         try checkDetailGeometry("restoring resized sheets")
         geometryHistory.append("Workspace restored viewport width=\(scroll.bounds.width) expected=\(normalWidth)")
@@ -565,14 +681,12 @@ enum WorkspaceDiagnostics {
 
         // A user collapsing the native divider must update the model, otherwise
         // the next SwiftUI update would immediately reopen the pane.
-        sheetsItem.isCollapsed = true
-        settle()
+        try navigatePassively("native sheets-divider collapse", expectedSheets: false) { sheetsItem.isCollapsed = true }
         try checkEditorSurvives("native sheets-divider collapse")
         try check(!presentation.sheetsVisible && sheetsItem.isCollapsed && presentation.headingVisible,
                   "native collapse observation updates sheets visibility without hiding the heading")
         try checkDetailGeometry("native sheets collapse")
-        sheetsItem.isCollapsed = false
-        settle()
+        try navigatePassively("native sheets-divider expansion", expectedSheets: true) { sheetsItem.isCollapsed = false }
         try checkEditorSurvives("native sheets-divider expansion")
         try check(presentation.sheetsVisible && !sheetsItem.isCollapsed,
                   "native expansion observation updates sheets visibility")
@@ -580,33 +694,30 @@ enum WorkspaceDiagnostics {
         try check(abs(scroll.bounds.width - normalWidth) < 5,
                   "native sheets expansion restores the previous user-resized width")
 
-        presentation.headingVisible = false
-        presentation.sheetsVisible = false
-        settle()
-        presentation.fullPage = true
-        settle()
+        try navigatePassively("hide heading and sheets before full page") {
+            presentation.headingVisible = false
+            presentation.sheetsVisible = false
+        }
+        try navigatePassively("enter full page with hidden heading and sheets") { presentation.fullPage = true }
         try checkEditorSurvives("full page with independently hidden heading and sheets")
         try check(navigation.splitViewItems.dropLast().allSatisfy(\.isCollapsed),
                   "full page still collapses every native navigation pane")
-        presentation.fullPage = false
-        settle()
+        try navigatePassively("exit full page with hidden heading and sheets") { presentation.fullPage = false }
         try checkEditorSurvives("leaving full page with independently hidden chrome")
         try check(!presentation.headingVisible && !presentation.sheetsVisible && sheetsItem.isCollapsed
                   && sidebarItem.isCollapsed == sidebarWasCollapsed,
                   "full-page exit preserves the separately hidden heading and sheets")
-        presentation.fullPage = true
-        settle()
-        presentation.toggleHeading()
-        settle()
+        try navigatePassively("re-enter full page before heading restore") { presentation.fullPage = true }
+        try navigatePassively("restore only heading from full page") { presentation.toggleHeading() }
         try checkEditorSurvives("restoring only heading from full page")
         try check(!presentation.fullPage && presentation.headingVisible
                   && !presentation.sheetsVisible && sheetsItem.isCollapsed,
                   "heading restore exits full page without reopening hidden sheets")
-        presentation.headingVisible = false
-        presentation.fullPage = true
-        settle()
-        presentation.toggleSheets()
-        settle()
+        try navigatePassively("enter full page before sheets restore") {
+            presentation.headingVisible = false
+            presentation.fullPage = true
+        }
+        try navigatePassively("restore only sheets from full page") { presentation.toggleSheets() }
         try checkEditorSurvives("restoring only sheets from full page")
         try check(!presentation.fullPage && presentation.sheetsVisible && !sheetsItem.isCollapsed
                   && !presentation.headingVisible,
@@ -614,8 +725,7 @@ enum WorkspaceDiagnostics {
         presentation.headingVisible = true
         settle()
 
-        presentation.fullPage = true
-        settle()
+        try navigatePassively("enter full page with visible sheets") { presentation.fullPage = true }
         try checkEditorSurvives("entering full page")
         try check(scroll.bounds.width > normalWidth + 250,
                   "full page frees both navigation columns for the editor")
@@ -625,9 +735,10 @@ enum WorkspaceDiagnostics {
         try checkEditorSurvives("hiding drawing tools")
         try check(scroll.bounds.height > toolsHeight + 30,
                   "hiding tools gives their vertical space to the native editor")
-        presentation.fullPage = false
-        settle()
+        try navigatePassively("exit full page with tools hidden") { presentation.fullPage = false }
         try checkEditorSurvives("restoring navigation with tools hidden")
+        try check(abs(scroll.bounds.width - normalWidth) < 5,
+                  "full-page exit restores the previous width at its first callback-idle boundary before tools change")
         presentation.toolsVisible = true
         settle()
         try checkEditorSurvives("restoring drawing tools")
@@ -648,9 +759,10 @@ enum WorkspaceDiagnostics {
         try check(page.activeTool == .pen, "workspace tool preference selects the mounted native pen")
         let tipCursor = page.inkView.tipCursor()
         for fullPage in [true, false] {
-            presentation.fullPage = fullPage
-            presentation.toolsVisible = !fullPage
-            settle()
+            try navigatePassively("pen full page \(fullPage)") {
+                presentation.fullPage = fullPage
+                presentation.toolsVisible = !fullPage
+            }
             try check(findPage(host.view) === page && scroll.documentCursor === tipCursor
                       && page.activePageCursor === tipCursor,
                       "pen cursor ownership and native page survive full page \(fullPage)")
@@ -659,12 +771,10 @@ enum WorkspaceDiagnostics {
         }
 
         for visible in [true, false] {
-            presentation.sheetsVisible = visible
-            settle() // Establish the fixture before the independent sidebar action.
+            try navigatePassively("establish pen sheets visibility \(visible)") { presentation.sheetsVisible = visible }
             try checkPassiveSidebarCycle(sheetsVisible: visible, tool: .pen)
         }
-        presentation.sheetsVisible = true
-        settle()
+        try navigatePassively("restore pen sheets fixture") { presentation.sheetsVisible = true }
 
         let contentBeforeScenery = store.selectedSheet?.pageContent
         let caretBeforePaperChanges = editor.selectedRange()
@@ -764,8 +874,11 @@ enum WorkspaceDiagnostics {
                                               isARepeat: false, keyCode: keyCode) else {
                 throw Failure(description: "Cannot create the local '\(label)' key equivalent")
             }
-            try check(window.performKeyEquivalent(with: event), "\(label) has an enabled control accepting its real key equivalent")
-            settle()
+            let priorIntent = (presentation.fullPage, presentation.sheetsVisible)
+            try navigatePassively(label) {
+                try check(window.performKeyEquivalent(with: event), "\(label) has an enabled control accepting its real key equivalent")
+            }
+            if priorIntent == (presentation.fullPage, presentation.sheetsVisible) { settle() }
             try check(expected(), "\(label) changes the workspace presentation")
         }
 
@@ -916,15 +1029,18 @@ enum WorkspaceDiagnostics {
 
         var didInjectSwitchStall = false
         for mode in ["sidebar hidden", "both panes hidden", "full page"] {
-            presentation.fullPage = false
-            presentation.sheetsVisible = true
-            sidebarItem.isCollapsed = true
             store.sheetID = firstSheet
-            settle()
+            settle() // Mounting the separate sheet is fixture setup.
+            try navigatePassively("\(mode) switch fixture initial panes") {
+                presentation.fullPage = false
+                presentation.sheetsVisible = true
+                sidebarItem.isCollapsed = true
+            }
             let expandedWidth = sheetsItem.viewController.view.convert(sheetsItem.viewController.view.bounds, to: split).width
-            if mode == "both panes hidden" { presentation.sheetsVisible = false }
-            if mode == "full page" { presentation.fullPage = true }
-            settle()
+            try navigatePassively("\(mode) switch fixture requested panes") {
+                if mode == "both panes hidden" { presentation.sheetsVisible = false }
+                if mode == "full page" { presentation.fullPage = true }
+            }
             let firstPage = try require(findPage(host.view), "first mounted switch page")
             try typeFixture(" a", in: firstPage)
             let firstHistory = try require(firstPage.textView.undoManager, "first sheet undo")
@@ -1085,21 +1201,24 @@ enum WorkspaceDiagnostics {
             let returnedPage = try switchPassively(to: firstSheet, text: expectedFirstText)
             try check(returnedPage.textView.undoManager !== secondHistory && returnedPage.textView.undoManager?.canUndo == false,
                       "\(mode) returning to the first sheet cannot undo a second-sheet edit")
-            presentation.fullPage = false
-            presentation.sheetsVisible = true
-            settle()
+            try navigatePassively("\(mode) restore panes after sheet switching") {
+                presentation.fullPage = false
+                presentation.sheetsVisible = true
+            }
             let restoredWidth = sheetsItem.viewController.view.convert(sheetsItem.viewController.view.bounds, to: split).width
             try check(abs(restoredWidth - expandedWidth) < 5,
                       "\(mode) sheet changes preserve the retained sheets-pane width")
         }
 
         preferences.set("pen", forKey: "inkTool")
-        presentation.fullPage = false
-        presentation.sheetsVisible = true
-        presentation.headingVisible = true
-        presentation.toolsVisible = true
-        sidebarItem.isCollapsed = true
-        settle()
+        settle() // Establish the pen input fixture before pane actions.
+        try navigatePassively("establish pane motion fixture") {
+            presentation.fullPage = false
+            presentation.sheetsVisible = true
+            presentation.headingVisible = true
+            presentation.toolsVisible = true
+            sidebarItem.isCollapsed = true
+        }
         let motionPage = try require(findPage(host.view), "pane-motion page")
         let motionScroll = try require(motionPage.enclosingScrollView, "pane-motion viewport")
         let motionProbe = try require(probes(in: host.view).first, "pane-motion probe")
@@ -1111,10 +1230,25 @@ enum WorkspaceDiagnostics {
         func samplePaneMotion(_ label: String, actions: [(TimeInterval, () -> Void)],
                               sidebarHidden: Bool, sheetsVisible: Bool, fullPage: Bool,
                               monotonic: Bool = false) throws {
-            let start = Date(), deadline = Date(timeIntervalSinceNow: 0.8)
+            let start = ProcessInfo.processInfo.systemUptime, deadline = start + 5
             var actionIndex = 0, samples = 0, stableIdentity = true, boundedViewport = true
             var presentationX: [CGFloat] = []
-            func sample() {
+            var trace: [String] = [], collapseChanges: [String] = []
+            var firstCompletedGeometryValid: Bool?
+            var firstCompletedIntentValid: Bool?
+            var originalWindowObservation: String?
+            var previousSample = start
+            var completed = false
+            let observations = [sidebarItem, sheetsItem].enumerated().map { index, item in
+                item.observe(\.isCollapsed, options: [.new]) { item, _ in
+                    MainActor.assumeIsolated {
+                        collapseChanges.append("elapsed=\(ProcessInfo.processInfo.systemUptime - start) pane\(index)=\(item.isCollapsed)")
+                    }
+                }
+            }
+            defer { observations.forEach { $0.invalidate() } }
+            func sample(afterTurn: Bool) {
+                let now = ProcessInfo.processInfo.systemUptime
                 samples += 1
                 let currentProbes = probes(in: host.view)
                 stableIdentity = stableIdentity && currentProbes.count == 1 && currentProbes.first === motionProbe
@@ -1131,17 +1265,46 @@ enum WorkspaceDiagnostics {
                    let rootLayer = host.view.layer?.presentation() {
                     presentationX.append(layer.convert(layer.bounds, to: rootLayer).minX)
                 }
+                let state = motionProbe.diagnosticsSnapshot()
+                stableIdentity = stableIdentity && state.controllerID == ObjectIdentifier(navigation)
+                let idle = state.isQuiescent(expectedFullPage: fullPage, expectedSheetsVisible: sheetsVisible)
+                let entry = "Pane motion sample [\(label)] uptime=\(now) elapsed=\(now - start) gap=\(now - previousSample) postTurn=\(afterTurn) generation=\(state.generation) completedGeneration=\(String(describing: state.completedGeneration)) idle=\(idle) viewport=\(NSStringFromRect(viewport)) collapsed=\([sidebarItem.isCollapsed, sheetsItem.isCollapsed])"
+                previousSample = now
+                trace.append(entry)
+                if afterTurn && now - start >= 0.8 && originalWindowObservation == nil { originalWindowObservation = entry }
+                completed = afterTurn && actionIndex == actions.count && idle
+                if completed && firstCompletedGeometryValid == nil {
+                    let detail = navigation.splitViewItems.last!.viewController.view.convert(
+                        navigation.splitViewItems.last!.viewController.view.bounds, to: host.view)
+                    let navigationRight = navigation.splitViewItems.dropLast().filter { !$0.isCollapsed }
+                        .map { $0.viewController.view.convert($0.viewController.view.bounds, to: host.view).maxX }
+                        .max() ?? splitRect.minX
+                    firstCompletedGeometryValid = abs(viewport.minX - max(detail.minX, navigationRight)) < 2
+                        && abs(viewport.maxX - detail.maxX) < 2
+                    firstCompletedIntentValid = sidebarItem.isCollapsed == sidebarHidden && sheetsItem.isCollapsed == !sheetsVisible
+                        && presentation.sheetsVisible == sheetsVisible && presentation.fullPage == fullPage
+                    trace.append("Pane motion first completed [\(label)] \(entry) geometryValid=\(firstCompletedGeometryValid!) intentValid=\(firstCompletedIntentValid!)")
+                }
             }
-            sample()
+            sample(afterTurn: false)
             repeat {
-                let elapsed = Date().timeIntervalSince(start)
+                let elapsed = ProcessInfo.processInfo.systemUptime - start
                 while actionIndex < actions.count, elapsed >= actions[actionIndex].0 {
+                    let deliveredAt = ProcessInfo.processInfo.systemUptime
                     actions[actionIndex].1()
+                    trace.append("Pane motion action [\(label)] index=\(actionIndex) plannedOffset=\(actions[actionIndex].0) deliveredUptime=\(deliveredAt) actualElapsed=\(deliveredAt - start) completedTurns=\(max(0, samples - 1))")
                     actionIndex += 1
                 }
-                RunLoop.main.run(until: min(deadline, Date(timeIntervalSinceNow: 0.016)))
-                sample()
-            } while Date() < deadline
+                let remaining = deadline - ProcessInfo.processInfo.systemUptime
+                RunLoop.main.run(until: Date(timeIntervalSinceNow: min(0.016, max(0, remaining))))
+                sample(afterTurn: true)
+            } while ProcessInfo.processInfo.systemUptime < deadline
+                && (ProcessInfo.processInfo.systemUptime - start < 0.8 || !completed)
+            let observationElapsed = ProcessInfo.processInfo.systemUptime - start
+            geometryHistory.append(contentsOf: trace)
+            let completionLog = "Pane motion completion [\(label)] elapsed=\(observationElapsed) completed=\(completed) original0.8=\(originalWindowObservation ?? "none") nativeCollapseChanges=\(collapseChanges) firstCompletedGeometryValid=\(String(describing: firstCompletedGeometryValid)) firstCompletedIntentValid=\(String(describing: firstCompletedIntentValid))"
+            geometryHistory.append(completionLog)
+            print(completionLog)
             let finalViewport = motionScroll.convert(motionScroll.bounds, to: host.view)
             let detailRect = navigation.splitViewItems.last!.viewController.view.convert(
                 navigation.splitViewItems.last!.viewController.view.bounds, to: host.view)
@@ -1164,12 +1327,13 @@ enum WorkspaceDiagnostics {
             let requiresInterpolation = monotonic && presentationX.count >= 3
                 && !NSWorkspace.shared.accessibilityDisplayShouldReduceMotion
             geometryHistory.append("Pane motion [\(label)] nativeSamples=\(samples) presentationSamples=\(presentationX.count) presentationBacktrack=\(backtrack) intermediatePositions=\(intermediatePositions.count) finalViewport=\(NSStringFromRect(finalViewport)) positions=\(presentationX)")
-            try check(actionIndex == actions.count && samples > 2 && stableIdentity,
+            try check(actionIndex == actions.count && samples > 2 && stableIdentity && completed
+                      && observationElapsed < 5,
                       "\(label) processes every requested action without replacing chrome or editor")
-            try check(boundedViewport && abs(finalViewport.minX - max(detailRect.minX, navigationRight)) < 2
+            try check(firstCompletedGeometryValid == true && boundedViewport && abs(finalViewport.minX - max(detailRect.minX, navigationRight)) < 2
                       && abs(finalViewport.maxX - detailRect.maxX) < 2,
                       "\(label) keeps sampled viewports bounded and settles without clipping or a blank gutter")
-            try check(sidebarItem.isCollapsed == sidebarHidden && sheetsItem.isCollapsed == !sheetsVisible
+            try check(firstCompletedIntentValid == true && sidebarItem.isCollapsed == sidebarHidden && sheetsItem.isCollapsed == !sheetsVisible
                       && presentation.sheetsVisible == sheetsVisible && presentation.fullPage == fullPage,
                       "\(label) honors the latest pane intent after interrupted animations finish")
             try check(backtrack <= 2.5, "\(label) has no backward bounce in available presentation-layer samples")
@@ -1188,10 +1352,11 @@ enum WorkspaceDiagnostics {
             (0, { presentation.toggleSheets() }), (0.06, { presentation.toggleSheets() }),
             (0.12, { presentation.toggleSheets() })],
             sidebarHidden: true, sheetsVisible: false, fullPage: false)
-        presentation.headingVisible = false
-        presentation.toolsVisible = false
-        sidebarItem.isCollapsed = false
-        settle() // Establish independently hidden sheets/header/tools before the rapid sequence.
+        try navigatePassively("establish rapid reversal fixture") {
+            presentation.headingVisible = false
+            presentation.toolsVisible = false
+            sidebarItem.isCollapsed = false
+        }
         try samplePaneMotion("rapid full-page reversal", actions: [
             (0, { presentation.fullPage.toggle() }), (0.06, { presentation.fullPage.toggle() }),
             (0.12, { presentation.fullPage.toggle() }), (0.18, { presentation.fullPage.toggle() })],
@@ -1202,13 +1367,12 @@ enum WorkspaceDiagnostics {
         // Finish an earlier full-page session with the sidebar visible. A
         // subsequent sheets animation must not reuse that session's snapshot
         // after the user independently hides the sidebar.
-        presentation.sheetsVisible = true
-        presentation.fullPage = true
-        settle()
-        presentation.fullPage = false
-        settle()
-        sidebarItem.isCollapsed = true
-        settle() // Setup ends here; the mixed transitions below are passive.
+        try navigatePassively("establish earlier full page session") {
+            presentation.sheetsVisible = true
+            presentation.fullPage = true
+        }
+        try navigatePassively("complete earlier full page session") { presentation.fullPage = false }
+        try navigatePassively("hide sidebar before mixed transitions") { sidebarItem.isCollapsed = true }
         try check(sidebarItem.isCollapsed && !sheetsItem.isCollapsed && !presentation.fullPage,
                   "mixed-transition fixture starts with a newly hidden sidebar after an older full-page session")
         var mixedTransitionReopenedSidebar = false
@@ -1227,9 +1391,10 @@ enum WorkspaceDiagnostics {
         try check(!mixedTransitionReopenedSidebar,
                   "entering and leaving full page during a later sheets animation never reopens the independently hidden sidebar")
 
-        sidebarItem.isCollapsed = true
-        presentation.fullPage = true
-        settle()
+        try navigatePassively("establish full page before empty selection") {
+            sidebarItem.isCollapsed = true
+            presentation.fullPage = true
+        }
         var emptySelectionCollapseChanges: [String] = []
         let emptySelectionObservers = [sidebarItem, sheetsItem].enumerated().map { index, item in
             item.observe(\.isCollapsed, options: [.new]) { item, _ in

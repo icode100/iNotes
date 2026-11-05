@@ -43,18 +43,29 @@ does not publish a release.
 
 ## Build and sign a local update
 
-The v1.2.1 candidate targets prospective build **2019**, fresh release run **17**.
+The v1.2.2 candidate targets prospective build **2020**, fresh release run **18**.
 The user passed the isolated 1.2.0 QA app and authorized v1.2 publication on
 5 November 2026. Source `ca051953` passed hosted Native checks, but signed release
 run **16** failed “restoring the heading restores its previous layout height”
 before publication. Its v1.2.0 tag and build **2018** remain reserved. Ed25519
 release signature probes did not run and no public 1.2.0 assets were published.
-Diagnostics captured title/tag native field-height mismatches; the candidate
-replaces those Mac controls. Its fresh input/layout validation and a separate
-pane failure investigation remain pending. Wait for fresh hosted Native checks
-on its exact source before tagging,
-then recheck the latest public feed and workflow counter. Signed release checks
-and independently downloaded-public-asset verification remain required.
+The owned Mac heading-input replacement at
+`adf533e4f4ad190422111e531c8c038e72bbfbb6` passed both
+[branch Native checks 42035913994](https://github.com/icode100/iNotes/actions/runs/42035913994)
+and [main Native checks 42037619009](https://github.com/icode100/iNotes/actions/runs/42037619009),
+including iPad compilation. Its [signed release run 17](https://github.com/icode100/iNotes/actions/runs/42037656071),
+build **2019**, stopped before publication at a pane-width assertion while
+navigation generation 12 had one pending native completion. All 100 heading
+cycles retained correct native allocations. No public 1.2.1 assets were created;
+preserve its tag and build 2019 too.
+
+The 1.2.2 harness correction waits passively for native completion callbacks,
+bounded at five seconds, rather than assuming 0.4 seconds completes an animation.
+It retains the original pane/geometry limits and makes no runtime pane-policy
+change or claim of a proven native pane fix. Wait for fresh hosted Native checks
+on the new exact source before tagging, then recheck the latest public feed and
+workflow counter. Signed release checks and independently downloaded-public-asset
+verification remain required.
 
 The published v1.1 update uses version **1.1.0** and build **2017**, from source
 `7946a931c8283e5fc0429fbd1d400f22d76312a5`. The user passed local manual QA and
@@ -75,10 +86,10 @@ identity, QA build 1, temporary library, and disconnected updater. Recheck the
 public feed and workflow counter before any later publication.
 
 ```sh
-VERSION=1.2.1 BUILD_NUMBER=2019 bash scripts/build-macos.sh
-VERSION=1.2.1 bash scripts/verify-macos.sh
-VERSION=1.2.1 bash scripts/generate-appcast.sh
-VERSION=1.2.1 bash scripts/test-update-signatures.sh
+VERSION=1.2.2 BUILD_NUMBER=2020 bash scripts/build-macos.sh
+VERSION=1.2.2 bash scripts/verify-macos.sh
+VERSION=1.2.2 bash scripts/generate-appcast.sh
+VERSION=1.2.2 bash scripts/test-update-signatures.sh
 ```
 
 The appcast command prepares `dist/update/appcast.xml`. It uses Sparkle's official
@@ -87,13 +98,14 @@ using Apple CryptoKit and the committed public key. It does not upload anything.
 For v1.0.3, the security rebuild 2011 exceeds the initial public build 2010 and
 shared local builds 1010–1012. Check both published and shared `CFBundleVersion`
 values and use a larger number for every update, including same-version rebuilds.
-Development defaults (`1.2.1`, prospective build 2019) target the authorized update and
+Development defaults (`1.2.2`, prospective build 2020) target the authorized update and
 are separate from the release workflow's
 `2002 + GITHUB_RUN_NUMBER`. Run 11 published v1.0.4 build 2012; isolated backup QA
 used build 2013. Run 12 built 2014 but stopped at native diagnostic verification before publication.
-Runs 13, 14 and 15 published 2015, 2016 and 2017. Run 16 built 2018 but failed
-before publication. The next new release run (17) must produce 2019 or higher.
-Failed builds 2014 and 2018 remain reserved alongside original installers and QA slots.
+Runs 13, 14 and 15 published 2015, 2016 and 2017. Runs 16 and 17 built 2018 and
+2019 but failed before publication. The next new release run (18) must produce
+2020 or higher. Failed builds 2014, 2018 and 2019 remain reserved alongside
+original installers and QA slots.
 The public feed points to the matching `v1.1.0` release's DMG. Never edit a signed appcast
 after generation. Re-run the script if its contents change. The last command
 checks valid signatures and rejects changed feeds, unsigned feeds, changed
@@ -114,9 +126,10 @@ HTTPS feed; malformed configured channels are rejected before packaging.
 ## Publish a version
 
 After reviewing the source and configuring the secret, push a tag such as
-`v1.2.1` only after publication approval and exact-source Native checks. The user
+`v1.2.2` only after publication approval and exact-source Native checks. The user
 authorized v1.2 publication on 5 November 2026. Preserve the failed unpublished
-`v1.2.0` tag at `ca051953`; do not move it to the changed source or reuse build 2018.
+`v1.2.0` tag at `ca051953` and `v1.2.1` tag at `adf533e4`; do not move either to
+changed source or reuse builds 2018/2019.
 `.github/workflows/release.yml` runs unit/integration tests, builds the
 ARM64 DMG, verifies the mounted bundle, signs and independently verifies the
 appcast, then publishes the DMG, SHA-256 checksum, and `appcast.xml` as GitHub

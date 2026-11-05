@@ -31,22 +31,27 @@ custom color picker. New sheets open immediately with an empty stored title;
 the underlined top title field names the sheet as the user types and can be
 cleared again. Mac pages initially fit the visible editor width; explicit zoom
 disables automatic fitting. Command-Plus/Minus zoom the existing Mac page and
-View → Fit Page Width restores automatic fitting. On **5 November 2026**, the
-user confirmed that the isolated 1.2.0 Mac QA app works and authorized publication.
-Source `ca051953ff5e89239ed1bbed51ac033e02df5e35` passed exact-source Native
-checks, including iPad compilation. Signed release run **16**, build **2018**,
-then failed the heading-restoration layout-height assertion before publication.
-Its Ed25519 signature probes and public-asset verification did not run; no 1.2.0
-release assets were published. Preserve the `v1.2.0` tag and reserved build 2018.
-The current **1.2.1 / build 2019** candidate replaces the two Mac heading inputs
-with owned AppKit controls after diagnostics captured title/tag fields receiving
-the other role's native height. An outer SwiftUI frame alone retained an
-overflowing native control and is not a sufficient fix. The replacement still
-requires fresh input and layout validation. A separate full-page pane assertion
-also failed on unchanged v1.1 source; its cause remains unresolved. The exact
-final source must pass fresh Native checks before fresh release run **17**. Consult
-`docs/TESTING.md` for evidence and limits. The verified public release remains
-**1.1.0 / build 2017** until a new release actually publishes and is verified.
+View → Fit Page Width restores automatic fitting. The user passed the isolated
+1.2.0 QA app and authorized publication on **5 November 2026**.
+
+Unpublished 1.2.0/build 2018 failed heading restoration. The 1.2.1 source
+`adf533e4f4ad190422111e531c8c038e72bbfbb6` replaces Mac title/tag inputs with
+owned AppKit controls after passive tests captured incorrect native heights.
+Outer SwiftUI frames alone retained native overflow. It passed the full local
+suite and two exact-source hosted Native runs, including iPad compilation.
+Signed release run **17**, build **2019**, then failed a pane-width assertion
+while native exit generation 12 still had one pending completion. All 100 heading
+cycles retained correct field heights. Mounted verification, Ed25519 probes and
+publication were not reached; preserve both failed tags/build reservations.
+
+The current **1.2.2 / prospective build 2020** candidate corrects the diagnostic's
+fixed 0.4-second settled-state assumption using bounded passive observation of
+native completion and queued callbacks. Geometry thresholds and early motion
+observations remain required. No production pane correction is established by
+an in-flight snapshot alone. Fresh exact-source Native checks and release run
+**18** remain required before publication. Consult `docs/TESTING.md` for evidence
+and limits. The verified public release remains **1.1.0 / build 2017** until a
+new release actually publishes and is independently verified.
 
 ## Priorities
 
@@ -223,6 +228,17 @@ Do not treat callback-level cursor assertions alone as proof of the displayed cu
   undo/redo synchronization, raw editing spaces, marked text and read-only
   behavior. The internal framework mechanism is not established by these
   observations. Consult the versioned validation record for the candidate result.
+
+- **A fixed settling delay expired during a native pane animation.** Release
+  run 17 checked the restored width while exit generation 12 still had one native
+  completion pending; current pane references matched and title/tag heights were
+  correct. An earlier transition took 0.470 seconds after its deferred start,
+  exceeding the general fixture's 0.4-second assumption. Final geometry must be
+  asserted at callback quiescence, bounded to five seconds, without waiting for
+  the desired width as the readiness predicate. Keep the first completed-state
+  observation, original nominal-window evidence when still pending, every early
+  motion sample and actual sample gaps. Do not force layout, relax geometry or
+  turn a wrong completed state into a pass by waiting for later recovery.
 
 - **Hosted load exhausted a sheet-switch sampling window.** Release run 12
   (unpublished build 2014) observed one sample after a slow run-loop turn, with
@@ -420,11 +436,14 @@ published 2016. Run 15 published v1.1.0/build 2017 from `7946a931`; its exact-so
 Native checks and separately downloaded public assets passed on 4 November 2026.
 Run 16 built v1.2.0/build 2018 from `ca051953`, then failed the heading-restoration
 workspace assertion before publication; preserve that tag and build reservation.
-Defaults now target v1.2.1 / prospective build 2019. Initial v1.2.0 user QA and
+Run 17 built v1.2.1/build 2019 from `adf533e4`, then failed the pane-width
+assertion during an unfinished native exit before publication. Preserve that
+tag and reservation too. Defaults now target v1.2.2 / prospective build 2020.
+Initial v1.2.0 user QA and
 publication authorization were recorded on 5 November 2026; they do not establish
 later-source or public-build results. The v1.1.0 local QA identities use separate
-QA builds 1 and 2 (final Pen correction). The next new signed-release run (17)
-must produce 2019; recheck both feed and counter immediately before publication.
+QA builds 1 and 2 (final Pen correction). The next new signed-release run (18)
+must produce 2020; recheck both feed and counter immediately before publication.
 A workflow rerun does not
 advance `GITHUB_RUN_NUMBER`. Never reuse its build number for an updated binary.
 The release workflow supports an explicit `workflow_dispatch` for the current

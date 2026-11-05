@@ -38,9 +38,9 @@ bash scripts/verify-macos.sh
 The build creates:
 
 - `dist/iNotes.app`: native ARM64 app bundle.
-- `dist/iNotes-1.2.1-arm64.dmg`: compressed disk image containing the app, an
+- `dist/iNotes-1.2.2-arm64.dmg`: compressed disk image containing the app, an
   Applications shortcut, and installation instructions.
-- `dist/iNotes-1.2.1-arm64.dmg.sha256`: SHA-256 checksum.
+- `dist/iNotes-1.2.2-arm64.dmg.sha256`: SHA-256 checksum.
 
 Open the disk image and drag iNotes to Applications. The DMG does not install
 background services, kernel extensions, browser runtimes, or privileged helpers.
@@ -48,17 +48,28 @@ The build script validates the property list, architecture, app signature, and D
 before publishing outputs. The verification script mounts it read-only and checks
 the packaged app and Applications shortcut.
 
-Local defaults target **v1.2.1**, prospective build **2019** from fresh release
-run **17**. The user confirmed the isolated 1.2.0 QA app works and authorized
+Local defaults target **v1.2.2**, prospective build **2020** from fresh release
+run **18**. The user confirmed the isolated 1.2.0 QA app works and authorized
 publication on 5 November 2026. Source `ca051953` passed hosted Native checks,
 including iPad compilation, but signed release run 16 failed a heading-restoration
 workspace assertion before publishing. Its 1.2.0/build 2018 tag and build number
 remain reserved; there are no public 1.2.0 assets to verify. Diagnostics captured
 title/tag native height mismatches that outer SwiftUI frames did not resolve.
-The candidate replaces those Mac inputs and requires fresh input/layout checks;
-a separate pane failure also reproduced on unchanged v1.1. It requires
-fresh exact-source Native checks, a feed/counter recheck, release checks and
-independent public-asset verification.
+The owned-input replacement at `adf533e4f4ad190422111e531c8c038e72bbfbb6`
+passed [branch Native checks 42035913994](https://github.com/icode100/iNotes/actions/runs/42035913994)
+and [main Native checks 42037619009](https://github.com/icode100/iNotes/actions/runs/42037619009),
+including iPad compilation. [Release run 17](https://github.com/icode100/iNotes/actions/runs/42037656071),
+build **2019**, failed a pane-width assertion before publication while navigation
+generation 12 still had one pending completion; its 100 heading cycles retained
+the correct native allocations. Preserve the unpublished `v1.2.1` tag and build
+2019 as well as `v1.2.0`/2018.
+
+The 1.2.2 diagnostic correction replaces a fixed 0.4-second settling assumption
+with a passive wait for native completion callbacks, bounded at five seconds.
+The original pane and geometry assertions remain. This is a harness correction,
+without a runtime pane-policy change or a proven native pane fix. The new source
+still requires exact-source Native checks, a feed/counter recheck, release checks
+and independent public-asset verification. No additional manual QA is implied.
 
 The local QA app uses a separate bundle identity, QA build 1, a temporary library
 and no updater. Full installer packaging requires Xcode's adaptive-icon compiler;
@@ -73,9 +84,10 @@ The public feed advertised 1.1.0/build 2017 on 4 November 2026. For every later
 update, recheck the actual public appcast and choose a greater `CFBundleVersion`;
 Sparkle compares build numbers, not just the displayed version.
 The release workflow uses `2002 + GITHUB_RUN_NUMBER`: run 12 built 2014 but failed
-before publishing; runs 13/14/15 published 2015/2016/2017. Run 16 built 2018
-but failed before publication; the next fresh run 17 produces 2019. A rerun does
-not increase its build number. The local v1.1.0 QA apps use separate identities, QA builds 1 and 2, temporary libraries and
+before publishing; runs 13/14/15 published 2015/2016/2017. Runs 16 and 17 built
+2018 and 2019 but failed before publication; the next fresh run 18 produces 2020.
+A rerun does not increase its build number. The local v1.1.0 QA apps use separate
+identities, QA builds 1 and 2, temporary libraries and
 disconnected updaters. User QA passed the initial candidate; the final Pen-only
 1.5 mm correction received compilation, plain smoke and hosted native checks.
 

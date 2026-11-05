@@ -1,21 +1,155 @@
 # Validation
 
-## v1.2.1 / prospective build 2019 preparation — 5 November 2026
+## v1.2.2 / prospective build 2020 preparation — 5 November 2026
 
-The new candidate follows the unpublished v1.2.0/build 2018 failure recorded
-below. Version defaults target **1.2.1 / build 2019**, expected from fresh
-signed-release run **17**, subject to a live feed/counter check. The `v1.2.0`
-tag remains at `ca051953ff5e89239ed1bbed51ac033e02df5e35`; build 2018 stays
-reserved and must not be reused for changed source.
+The current candidate follows the two unpublished releases below. Defaults target
+**1.2.2 / prospective build 2020**, expected from fresh signed-release run **18**,
+subject to a live feed/counter gate. Preserve `v1.2.0` at `ca051953` (build 2018)
+and `v1.2.1` at `adf533e4` (build 2019); neither has published release assets.
+The verified public release remains **1.1.0 / build 2017**.
 
-The candidate replaces the Mac title/tag inputs with owned AppKit controls after
-diagnostics captured wrong native field allocations. Input/layout validation,
-fresh exact-source Native checks, signed release checks and public-asset
-verification for the new candidate are pending. A separate full-page pane
-assertion also failed on unchanged v1.1 source; its cause remains unresolved.
-The user's initial 1.2.0 QA result remains recorded below; no second manual pass
-or later-source success is implied. The latest verified public version remains
-**1.1.0 / build 2017**.
+The candidate corrects a diagnostic readiness assumption: a fixed 0.4-second
+wait did not establish that native animations and their coalesced callbacks had
+finished. Final-state assertions now require bounded passive observation of
+accepted intent, native completions, ownership and queued callbacks, while
+retaining early frames, first completed-state geometry, sample gaps and motion
+checks. Geometry is not the readiness predicate. This is a harness correction,
+not a speculative production pane change. Fresh local/hosted exact-source checks,
+signed-release checks and independent public-asset verification remain pending.
+
+## v1.2.1 exact-source hosted Native checks — 5 November 2026
+
+Source [`adf533e4`](https://github.com/icode100/iNotes/commit/adf533e4f4ad190422111e531c8c038e72bbfbb6)
+passed [branch Native checks 42035913994](https://github.com/icode100/iNotes/actions/runs/42035913994)
+and [duplicate main Native checks 42037619009](https://github.com/icode100/iNotes/actions/runs/42037619009).
+Both completed all workflow steps, including mounted-DMG verification and iPad
+simulator compilation. They are separate from the failed signed-release build.
+
+The branch run used macOS **26.6.2**, image **20261026.0455.2**, Swift **6.3.3**.
+It recorded **126 XCTest tests, zero failures, 10.861 seconds** (10.893 wall),
+**852 editor, 1,940 workspace, 31 equation, 12 ruled-text, 8 shortcut and 62
+numbering/title/store checks**, plus the existing updater/backup integrations.
+All **100** passive heading cycles kept actual native title/tag heights at
+**34/13 points**. All six sheet switches retained zero measured frame, title-height
+and tag-height drift, stable probe identity and no collapse events, with **13
+total / 12 post-turn observations** each. The injected **0.785981-second** stall
+produced a **1.088668-second** sampling gap; later samples do not establish
+continuity across that gap.
+
+Evidence: `/private/tmp/inotes-v1.2-nativecontrol-evidence-summary.json` and
+`/private/tmp/inotes-v1.2-nativecontrol-42035913994-logs.zip`.
+These passes establish the recorded builds' results; they do not establish a
+separately rebuilt public release, physical input devices or every older OS.
+
+## v1.2.1 / build 2019 signed release failed before publication — 5 November 2026
+
+[Signed release run 17 / 42037656071](https://github.com/icode100/iNotes/actions/runs/42037656071)
+used exact source `adf533e4f4ad190422111e531c8c038e72bbfbb6`, version **1.2.1**,
+build **2019**, macOS **26.6.2 (25G83)** and image **20261026.0455.2**.
+It passed **126 XCTest tests, zero failures, 10.459 seconds** (10.493 wall),
+ARM64 app/DMG creation and packaging smoke checks, including 62 numbering/store
+and 16 updater configurations plus independent backup integration.
+
+The native step passed **852 editor, 31 equation, 12 ruled-text and 8 shortcut
+checks**, and all **100** heading repetitions retained correct title/tag native
+heights. It then failed “leaving full page restores the previous navigation
+layout”: viewport width was **813** versus baseline **582** points. The captured
+probe had `transitionInProgress=true`, generation **12**, one pending native
+completion and queued synchronization/geometry work. Its last completion was
+entry generation 11. Current item references matched; both panes' model collapse
+flags were already false, while their frames were still moving. The snapshot
+therefore did not establish completed final geometry.
+
+The trace also showed an earlier native completion taking **0.469956 seconds**
+after its deferred start, exceeding the general fixed **0.4-second** settling
+assumption. Generation 9 began about **10 ms** before generation 8 completed.
+The old failure snapshot lacked a monotonic capture time, so generation 12's
+precise age cannot be recovered from buffered output timestamps. These facts
+justify completion-based readiness, without establishing a production pane fix
+or permitting geometry thresholds or early motion evidence to be discarded.
+
+`verify-macos.sh` and the Ed25519 scripts were **not reached** in that step;
+publication was **skipped** and seed cleanup **passed**. There are no public
+1.2.1 assets to verify. Preserve its annotated tag object
+`c6006556a0b38f1f3a9609119c99604ad953e47e`, peeled source `adf533e4` and build
+2019 reservation. Evidence is
+`/private/tmp/inotes-v1.2.1-signed-release-evidence-summary.json` and
+`/private/tmp/inotes-v1.2.1-signed-release-verification.log`.
+
+## v1.2.1 owned heading inputs — local verification, 5 November 2026
+
+Source [`adf533e4`](https://github.com/icode100/iNotes/commit/adf533e4f4ad190422111e531c8c038e72bbfbb6)
+replaces the Mac title/tag inputs with an owned native field and container for
+each fixed role. Font assignment precedes native measurement, and the actual
+child's height follows its own font metrics. The iPad input path remains SwiftUI.
+The earlier outer-frame-only attempt is not treated as a successful fix.
+The archive format, stored page content, pressure behavior and pane policy did
+not change in this correction.
+
+The exact local source/manifests SHA-256 is
+`f34b07cd0d2e12615b2f826c87a1b3d7afcbd29518026f172781a8f9632a786b`.
+On Apple silicon, macOS **27.2 (26B123)**, Swift **6.4.2**
+(`swiftlang-6.4.2.1.9 clang-2100.4.1.1`) with Command Line Tools:
+
+- **126 standalone core tests, zero failures, 3.75 seconds**.
+- The frozen ARM64 native build and complete isolated `--smoke-test --editor-test`
+  run passed: **853 editor, 1,940 workspace, 31 equation, 12 ruled-text,
+  8 shortcut, 62 numbering/title/store and 16 updater-configuration checks**,
+  plus the existing store and independent-backup integrations.
+- All **100** repeated passive heading cycles completed with actual native
+  title/tag allocations checked alongside viewport geometry. Sheet-switch
+  samples recorded zero measured frame, title-height or tag-height drift,
+  stable probe identity and no native collapse events. The original sampling
+  counts, thresholds and deadlines were retained. The injected first-turn stall
+  produced a **0.741288208 s** maximum sample gap; later observations do not
+  establish continuity through that unsampled interval.
+- Actual component input checks passed native typing and trailing-space/Unicode
+  title normalization, local Select All/tool-letter protection, direct native
+  UndoManager undo/redo synchronization, external/model/theme refresh with
+  retained focus/caret, rejected rename rollback, the 256-character Unicode
+  bound, clearing, Tags Return/blur/disappearance commits, read-only/reinserted
+  heights and save/reopen with unchanged page text, ink and objects.
+- The native marked-text fixture passed composition preservation during model
+  and theme updates and publication after commit. This exercises the native
+  input-client path synthetically; it is not physical input-method validation.
+
+The initial unrelated-input fixture incorrectly required all three controls to
+share one UndoManager because they shared an NSTextView field editor. Measured
+values showed the same editor with distinct nonnil per-control managers. The
+fixture now enables native undo for its plain unrelated field, logs the actual
+relationship, exercises each real manager directly and verifies that old heading
+manager notifications cannot publish another control's text. The real unrelated
+undo/model-isolation assertions remain; the runtime does not substitute a shared
+manager merely to satisfy the fixture.
+
+The original full-page exit assertion passed in this local run. Its earlier
+failure on unchanged v1.1 source is retained as baseline evidence; neither that
+baseline failure nor this local pass establishes its cause or a production pane
+fix. No pane behavior was changed on that hypothesis.
+
+Diagnostic executable: **6,611,968 bytes**, SHA-256
+`934328a14da79fd3d4f84ac5f2885c6549106102ab6c7e7aa85d68b201043be6`.
+These are local diagnostic artifact bytes, not release installer or RAM
+measurements. Evidence is
+`/private/tmp/inotes-v1.2.1-native-heading-local-evidence.json`, with build/native
+logs `inotes-v1.2.1-native-heading-build-3.log` and
+`inotes-v1.2.1-native-heading-tests-3.log`, and core log
+`inotes-v1.2.1-core-tests.log` in the same temporary directory.
+
+This CLT result does not establish full-Xcode production packaging, adaptive icon
+verification, iPad compilation, hosted Native success, Ed25519 release probes or
+downloaded public assets. The fixture used isolated storage/preferences and
+offscreen in-process windows, without external computer control or real notes.
+No new manual QA, displayed system-cursor capture, physical IME/stylus/iPad,
+older macOS, provider delivery or updater installation result is claimed.
+
+## v1.2.1 heading-allocation investigation — 5 November 2026
+
+The following pre-fix runs followed the unpublished 1.2.0/build 2018 failure.
+The original `v1.2.0` tag and build 2018 remain reserved. Later owned native
+heading controls and their verified results are recorded above. The user's
+manual QA applies to the initial isolated 1.2.0 candidate, without a new manual
+pass for these later native-input changes.
 
 The investigation retained the original heading-height tolerance, sheet-switch
 drift limit, minimum post-turn observations, sampling window and timeout. Added
