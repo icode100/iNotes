@@ -246,6 +246,43 @@ enum WorkspaceDiagnostics {
         let expectedLeadingInset = initialViewportRect.minX - max(initialDetailRect.minX, initialNavigationRight)
         let expectedTrailingInset = initialDetailRect.maxX - initialViewportRect.maxX
 
+        func logHeadingGeometry(_ phase: String) {
+            let detailRect = detailView.convert(detailView.bounds, to: host.view)
+            let viewportRect = scroll.convert(scroll.bounds, to: host.view)
+            let message = "Heading geometry [\(phase)] baselineViewport=\(normalWidth)x\(normalHeight)"
+                + " window=\(NSStringFromRect(window.frame)) contentLayout=\(NSStringFromRect(window.contentLayoutRect))"
+                + " hostFrame=\(NSStringFromRect(host.view.frame)) hostBounds=\(NSStringFromRect(host.view.bounds))"
+                + " detailFrame=\(NSStringFromRect(detailView.frame)) detailBounds=\(NSStringFromRect(detailView.bounds)) detailInHost=\(NSStringFromRect(detailRect))"
+                + " scrollFrame=\(NSStringFromRect(scroll.frame)) scrollBounds=\(NSStringFromRect(scroll.bounds)) viewport=\(NSStringFromRect(viewportRect))"
+                + " clipFrame=\(NSStringFromRect(scroll.contentView.frame)) clipBounds=\(NSStringFromRect(scroll.contentView.bounds))"
+                + " magnification=\(scroll.magnification) fitsPageWidth=\(String(describing: (scroll as? PageZoomScrollView)?.fitsPageWidth))"
+                + " headingVisible=\(presentation.headingVisible) sidebarCollapsed=\(sidebarItem.isCollapsed) sheetsCollapsed=\(sheetsItem.isCollapsed)"
+            geometryHistory.append(message)
+            print(message)
+            func titleFields(in view: NSView) -> [NSTextField] {
+                var fields: [NSTextField] = []
+                if let field = view as? NSTextField,
+                   field.placeholderString == "Page title"
+                    || (field.isEditable && abs((field.font?.pointSize ?? 0) - 28) < 0.1) {
+                    fields.append(field)
+                }
+                for child in view.subviews { fields.append(contentsOf: titleFields(in: child)) }
+                return fields
+            }
+            let fields = titleFields(in: detailView)
+            let countMessage = "Heading title fields [\(phase)] count=\(fields.count)"
+            geometryHistory.append(countMessage)
+            print(countMessage)
+            for (index, field) in fields.enumerated() {
+                let fieldMessage = "Heading title field [\(phase)] index=\(index) type=\(type(of: field))"
+                    + " frame=\(NSStringFromRect(field.frame)) bounds=\(NSStringFromRect(field.bounds)) inHost=\(NSStringFromRect(field.convert(field.bounds, to: host.view)))"
+                    + " intrinsic=\(NSStringFromSize(field.intrinsicContentSize)) fitting=\(NSStringFromSize(field.fittingSize))"
+                    + " hidden=\(field.isHiddenOrHasHiddenAncestor) editable=\(field.isEditable)"
+                geometryHistory.append(fieldMessage)
+                print(fieldMessage)
+            }
+        }
+
         func checkDetailGeometry(_ transition: String) throws {
             let detailRect = detailView.convert(detailView.bounds, to: host.view)
             let viewportRect = scroll.convert(scroll.bounds, to: host.view)
@@ -334,8 +371,10 @@ enum WorkspaceDiagnostics {
                   "heading and native sheets pane begin independently visible")
         try checkPassiveSidebarCycle(sheetsVisible: true, tool: .text)
 
+        logHeadingGeometry("before hide")
         presentation.toggleHeading()
         settle()
+        logHeadingGeometry("after hide")
         try checkEditorSurvives("hiding the heading independently")
         try check(!presentation.headingVisible && presentation.sheetsVisible && !sheetsItem.isCollapsed
                   && sidebarItem.isCollapsed == sidebarWasCollapsed,
@@ -344,9 +383,38 @@ enum WorkspaceDiagnostics {
                   "hiding the heading gives its vertical space to the same native editor")
         presentation.toggleHeading()
         settle()
+        // Capture the original observation before diagnostic metric reads or
+        // any additional run-loop turns can change its pass/fail outcome.
+        let restoredHeadingHeight = scroll.bounds.height
+        let restoredHeadingMatchesBaseline = abs(restoredHeadingHeight - normalHeight) < 5
+        logHeadingGeometry("restored initial")
         try checkEditorSurvives("restoring the heading independently")
-        try check(abs(scroll.bounds.height - normalHeight) < 5,
-                  "restoring the heading restores its previous layout height")
+        if !restoredHeadingMatchesBaseline {
+            let start = ProcessInfo.processInfo.systemUptime
+            let deadline = start + 1
+            var previousSample = start
+            var sampleCount = 0
+            var maximumGap: TimeInterval = 0
+            repeat {
+                let remaining = deadline - ProcessInfo.processInfo.systemUptime
+                guard remaining > 0 else { break }
+                // Observe only normal run-loop work. Later recovery is evidence,
+                // never a replacement for the failed initial observation.
+                RunLoop.main.run(until: Date(timeIntervalSinceNow: min(0.016, remaining)))
+                let now = ProcessInfo.processInfo.systemUptime
+                let gap = now - previousSample
+                maximumGap = max(maximumGap, gap)
+                previousSample = now
+                sampleCount += 1
+                logHeadingGeometry("restored passive sample\(sampleCount) elapsed=\(now - start) gap=\(gap)")
+            } while ProcessInfo.processInfo.systemUptime < deadline
+            let summary = "Heading restore passive summary samples=\(sampleCount) elapsed=\(ProcessInfo.processInfo.systemUptime - start) maximumSampleGap=\(maximumGap)"
+                + " initialHeight=\(restoredHeadingHeight) baselineHeight=\(normalHeight) finalHeight=\(scroll.bounds.height) initialResult=\(restoredHeadingMatchesBaseline)"
+            geometryHistory.append(summary)
+            print(summary)
+        }
+        try check(restoredHeadingMatchesBaseline,
+                  "restoring the heading restores its previous layout height (initial=\(restoredHeadingHeight), baseline=\(normalHeight), delta=\(restoredHeadingHeight - normalHeight), tolerance<5)")
 
         presentation.toggleSheets()
         waitPassively { sheetsItem.isCollapsed && scroll.bounds.width > normalWidth + 100 }
