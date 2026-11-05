@@ -283,6 +283,32 @@ enum WorkspaceDiagnostics {
             }
         }
 
+        func recordFailedHeadingRestore(_ phase: String, initialHeight: CGFloat, initialResult: Bool) {
+            guard !initialResult else { return }
+            let start = ProcessInfo.processInfo.systemUptime
+            let deadline = start + 1
+            var previousSample = start
+            var sampleCount = 0
+            var maximumGap: TimeInterval = 0
+            repeat {
+                let remaining = deadline - ProcessInfo.processInfo.systemUptime
+                guard remaining > 0 else { break }
+                // Observe only normal run-loop work. Later recovery is evidence,
+                // never a replacement for the failed initial observation.
+                RunLoop.main.run(until: Date(timeIntervalSinceNow: min(0.016, remaining)))
+                let now = ProcessInfo.processInfo.systemUptime
+                let gap = now - previousSample
+                maximumGap = max(maximumGap, gap)
+                previousSample = now
+                sampleCount += 1
+                logHeadingGeometry("\(phase) passive sample\(sampleCount) elapsed=\(now - start) gap=\(gap)")
+            } while ProcessInfo.processInfo.systemUptime < deadline
+            let summary = "Heading restore passive summary [\(phase)] samples=\(sampleCount) elapsed=\(ProcessInfo.processInfo.systemUptime - start) maximumSampleGap=\(maximumGap)"
+                + " initialHeight=\(initialHeight) baselineHeight=\(normalHeight) finalHeight=\(scroll.bounds.height) initialResult=\(initialResult)"
+            geometryHistory.append(summary)
+            print(summary)
+        }
+
         func checkDetailGeometry(_ transition: String) throws {
             let detailRect = detailView.convert(detailView.bounds, to: host.view)
             let viewportRect = scroll.convert(scroll.bounds, to: host.view)
@@ -389,32 +415,45 @@ enum WorkspaceDiagnostics {
         let restoredHeadingMatchesBaseline = abs(restoredHeadingHeight - normalHeight) < 5
         logHeadingGeometry("restored initial")
         try checkEditorSurvives("restoring the heading independently")
-        if !restoredHeadingMatchesBaseline {
-            let start = ProcessInfo.processInfo.systemUptime
-            let deadline = start + 1
-            var previousSample = start
-            var sampleCount = 0
-            var maximumGap: TimeInterval = 0
-            repeat {
-                let remaining = deadline - ProcessInfo.processInfo.systemUptime
-                guard remaining > 0 else { break }
-                // Observe only normal run-loop work. Later recovery is evidence,
-                // never a replacement for the failed initial observation.
-                RunLoop.main.run(until: Date(timeIntervalSinceNow: min(0.016, remaining)))
-                let now = ProcessInfo.processInfo.systemUptime
-                let gap = now - previousSample
-                maximumGap = max(maximumGap, gap)
-                previousSample = now
-                sampleCount += 1
-                logHeadingGeometry("restored passive sample\(sampleCount) elapsed=\(now - start) gap=\(gap)")
-            } while ProcessInfo.processInfo.systemUptime < deadline
-            let summary = "Heading restore passive summary samples=\(sampleCount) elapsed=\(ProcessInfo.processInfo.systemUptime - start) maximumSampleGap=\(maximumGap)"
-                + " initialHeight=\(restoredHeadingHeight) baselineHeight=\(normalHeight) finalHeight=\(scroll.bounds.height) initialResult=\(restoredHeadingMatchesBaseline)"
-            geometryHistory.append(summary)
-            print(summary)
-        }
+        recordFailedHeadingRestore("restored initial", initialHeight: restoredHeadingHeight, initialResult: restoredHeadingMatchesBaseline)
         try check(restoredHeadingMatchesBaseline,
                   "restoring the heading restores its previous layout height (initial=\(restoredHeadingHeight), baseline=\(normalHeight), delta=\(restoredHeadingHeight - normalHeight), tolerance<5)")
+
+        // Repeat real heading transitions without forced layout, preference
+        // changes, or page clicks. Every restore uses the original baseline;
+        // a later successful cycle cannot erase an earlier mismatch.
+        func waitForPassiveHeadingTurn() {
+            let deadline = Date(timeIntervalSinceNow: 0.4)
+            repeat {
+                RunLoop.main.run(until: min(deadline, Date(timeIntervalSinceNow: 0.016)))
+            } while Date() < deadline
+        }
+        for cycle in 1...12 {
+            let phase = "repeated cycle\(cycle)"
+            logHeadingGeometry("\(phase) before hide")
+            presentation.toggleHeading()
+            waitForPassiveHeadingTurn()
+            let hiddenHeight = scroll.bounds.height
+            logHeadingGeometry("\(phase) after hide")
+            try checkEditorSurvives("\(phase) hiding heading passively")
+            try check(!presentation.headingVisible && presentation.sheetsVisible && !sheetsItem.isCollapsed
+                      && sidebarItem.isCollapsed == sidebarWasCollapsed,
+                      "\(phase) hiding heading preserves both native navigation panes")
+            try check(hiddenHeight > normalHeight + 50,
+                      "\(phase) hiding heading gives its vertical space to the editor (height=\(hiddenHeight), baseline=\(normalHeight))")
+            presentation.toggleHeading()
+            waitForPassiveHeadingTurn()
+            let restoredHeight = scroll.bounds.height
+            let matchesBaseline = abs(restoredHeight - normalHeight) < 5
+            logHeadingGeometry("\(phase) restored initial")
+            try checkEditorSurvives("\(phase) restoring heading passively")
+            try check(presentation.headingVisible && presentation.sheetsVisible && !sheetsItem.isCollapsed
+                      && sidebarItem.isCollapsed == sidebarWasCollapsed,
+                      "\(phase) restoring heading preserves both native navigation panes")
+            recordFailedHeadingRestore("\(phase) restored initial", initialHeight: restoredHeight, initialResult: matchesBaseline)
+            try check(matchesBaseline,
+                      "\(phase) restored heading matches the original viewport height (initial=\(restoredHeight), baseline=\(normalHeight), delta=\(restoredHeight - normalHeight), tolerance<5)")
+        }
 
         presentation.toggleSheets()
         waitPassively { sheetsItem.isCollapsed && scroll.bounds.width > normalWidth + 100 }

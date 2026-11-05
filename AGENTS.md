@@ -25,21 +25,24 @@ passed the local candidate QA, then requested the Pen-only increase on 4 Novembe
 asset verification passed. The final numeric correction did not receive a
 second manual QA pass; consult `docs/TESTING.md` for precise evidence and limits.
 
-The **v1.2.0 update** adds scenery-matched page colors, Vintage Black,
+The **v1.2 update** adds scenery-matched page colors, Vintage Black,
 Pitch Black/White, five pastel papers, sixteen preset ink colors and a native
 custom color picker. New sheets open immediately with an empty stored title;
 the underlined top title field names the sheet as the user types and can be
 cleared again. Mac pages initially fit the visible editor width; explicit zoom
 disables automatic fitting. Command-Plus/Minus zoom the existing Mac page and
 View → Fit Page Width restores automatic fitting. On **5 November 2026**, the
-user confirmed that the isolated Mac QA app works and explicitly authorized
-GitHub publication. Exact-source hosted Native checks, signed release packaging
-and independent public-asset verification are still pending at this preparation
-stage. Consult the dated v1.2 record in `docs/TESTING.md` for actual evidence and
-limits. Version defaults target 1.2.0 / prospective build **2018** from fresh
-release run **16**; recheck the public feed and counter before publishing.
-The last verified public release remains v1.1.0/build 2017 until the new release
-has actually published.
+user confirmed that the isolated 1.2.0 Mac QA app works and authorized publication.
+Source `ca051953ff5e89239ed1bbed51ac033e02df5e35` passed exact-source Native
+checks, including iPad compilation. Signed release run **16**, build **2018**,
+then failed the heading-restoration layout-height assertion before publication.
+Its Ed25519 signature probes and public-asset verification did not run; no 1.2.0
+release assets were published. Preserve the `v1.2.0` tag and reserved build 2018.
+The current **1.2.1 / build 2019** candidate adds diagnostic evidence without
+weakening that assertion; no cause or runtime fix is established yet. Its exact
+source must pass fresh Native checks before fresh release run **17**. Consult
+`docs/TESTING.md` for evidence and limits. The verified public release remains
+**1.1.0 / build 2017** until a new release actually publishes and is verified.
 
 ## Priorities
 
@@ -200,6 +203,14 @@ Do not treat callback-level cursor assertions alone as proof of the displayed cu
   not establish physical tablet pressure, tilt, Pencil hover, or palm rejection.
 
 ## Known regressions and testing traps
+
+- **Hosted heading restoration failed in unpublished v1.2.0.** Exact-source
+  Native checks passed at `ca051953`, but signed release run 16 failed
+  “restoring the heading restores its previous layout height” before publishing.
+  Preserve the assertion and gather the before/hidden/restored viewport geometry
+  and heading state. Do not claim a cause, a fix, or passing v1.2.1 validation
+  from the earlier passing run; no production runtime correction is established
+  by the diagnostic logging alone.
 
 - **Hosted load exhausted a sheet-switch sampling window.** Release run 12
   (unpublished build 2014) observed one sample after a slow run-loop turn, with
@@ -395,12 +406,14 @@ and v1.0.4 run 11 published 2012. Backup QA used 2013; dispatched run 12 built
 2014 but failed verification before publishing. Run 13 published 2015, and run 14
 published 2016. Run 15 published v1.1.0/build 2017 from `7946a931`; its exact-source
 Native checks and separately downloaded public assets passed on 4 November 2026.
-Defaults now target v1.2.0 / prospective build 2018; publication authorization
-and the local QA result were recorded on 5 November 2026. Exact-source hosted
-checks and public-build verification must be recorded separately. The v1.1.0 local QA
-identities use separate QA builds 1 and 2 (final Pen correction). The next new
-signed-release run (16) must produce 2018; recheck both feed and counter
-immediately before publication. A workflow rerun does not
+Run 16 built v1.2.0/build 2018 from `ca051953`, then failed the heading-restoration
+workspace assertion before publication; preserve that tag and build reservation.
+Defaults now target v1.2.1 / prospective build 2019. Initial v1.2.0 user QA and
+publication authorization were recorded on 5 November 2026; they do not establish
+later-source or public-build results. The v1.1.0 local QA identities use separate
+QA builds 1 and 2 (final Pen correction). The next new signed-release run (17)
+must produce 2019; recheck both feed and counter immediately before publication.
+A workflow rerun does not
 advance `GITHUB_RUN_NUMBER`. Never reuse its build number for an updated binary.
 The release workflow supports an explicit `workflow_dispatch` for the current
 stable version; wait for Native checks on its exact source commit first.

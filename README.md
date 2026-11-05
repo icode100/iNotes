@@ -1,13 +1,19 @@
 # iNotes
 
-The **v1.2.0 update** adds scenery-matched paper, Vintage Black,
-Pitch Black/White, five pastel papers, sixteen ink presets and a native custom
-color picker. New sheets open blank immediately; type in the underlined title
-at the top to name them, or leave it empty. Mac pages initially fit the visible
-page width. Command-Plus/Minus zoom manually; View → Fit Page Width restores fitting.
-The user confirmed the isolated Mac QA app works and authorized publication on
-5 November 2026. Hosted release checks and public-asset verification are pending.
-See the [v1.2 notes](docs/releases/1.2.0.md) and [validation record](docs/TESTING.md).
+The **v1.2.1 candidate** carries the v1.2 paper, ink, title and zoom changes:
+scenery-matched paper, Vintage Black, Pitch Black/White, five pastel papers,
+sixteen ink presets and a native custom color picker. New sheets open blank
+immediately; type in the underlined title at the top to name them, or leave it
+empty. Mac pages initially fit the visible page width; Command-Plus/Minus zoom
+manually and View → Fit Page Width restores fitting.
+
+The user passed the isolated 1.2.0 Mac QA app and authorized publication on
+5 November 2026. Its exact-source Native checks passed, but release run 16 failed
+a heading-restoration workspace assertion before publishing. Version 1.2.0/build
+2018 remains unpublished. The 1.2.1/build 2019 candidate adds diagnostics; a cause
+or runtime fix has not been established, and its fresh validation is pending.
+See the [candidate notes](docs/releases/1.2.1.md),
+[unpublished 1.2.0 record](docs/releases/1.2.0.md) and [validation](docs/TESTING.md).
 
 Version 1.1.0 (v1.1), build 2017, adds Arctic, Open Skyscape,
 Ruby Hills, and Nature scenery, replaces Forest, and adds Extra Broad nibs.
@@ -79,7 +85,7 @@ Requires an Apple silicon Mac and macOS 14+. Building the installer requires ful
 open dist/iNotes.app
 ```
 
-The default local installer target is `dist/iNotes-1.2.0-arm64.dmg` (version 1.2.0, prospective build 2018). Publication is authorized; the current published release remains 1.1.0/build 2017 while hosted checks and release preparation complete. Downloaded public builds are also ad hoc signed: **they are not Apple notarized**, so macOS may report that Apple could not verify iNotes is free of malware.
+The default local installer target is `dist/iNotes-1.2.1-arm64.dmg` (version 1.2.1, prospective build 2019). The current published release remains 1.1.0/build 2017. Failed, unpublished 1.2.0/build 2018 stays reserved; the new candidate requires fresh exact-source checks and release verification. Downloaded public builds are also ad hoc signed: **they are not Apple notarized**, so macOS may report that Apple could not verify iNotes is free of malware.
 
 If you trust the download from the [official releases](https://github.com/icode100/iNotes/releases), follow Apple's [per-app first-open procedure](https://support.apple.com/en-us/102445):
 

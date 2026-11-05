@@ -1,16 +1,93 @@
 # Validation
 
+## v1.2.1 / prospective build 2019 preparation — 5 November 2026
+
+The new candidate follows the unpublished v1.2.0/build 2018 failure recorded
+below. Version defaults target **1.2.1 / build 2019**, expected from fresh
+signed-release run **17**, subject to a live feed/counter check. The `v1.2.0`
+tag remains at `ca051953ff5e89239ed1bbed51ac033e02df5e35`; build 2018 stays
+reserved and must not be reused for changed source.
+
+Preparation adds diagnostic logging around the existing heading-restoration
+assertion; it does not weaken the assertion. At this stage, no cause or production
+runtime fix has been established. Fresh exact-source Native checks, signed
+release checks and public-asset verification for the new candidate are pending.
+The user's initial 1.2.0 QA result remains recorded below; no second manual pass
+or later-source success is implied. The latest verified public version remains
+**1.1.0 / build 2017**.
+
+## v1.2.0 exact-source Native checks — 5 November 2026
+
+Source [`ca051953`](https://github.com/icode100/iNotes/commit/ca051953ff5e89239ed1bbed51ac033e02df5e35)
+passed [Native checks 42014303977](https://github.com/icode100/iNotes/actions/runs/42014303977).
+The run used macOS **26.6.2 (25G83)**, `macos-26-arm64` image
+`20261026.0455.2`, Swift **6.3.3** (`swiftlang-6.3.3.1.3 clang-2100.1.1.101`),
+Xcode **26.6** and iPhoneSimulator SDK **26.5**.
+
+- **126 XCTest tests, zero failures**, 8.975 seconds (9.002 seconds wall time).
+- ARM64 optimized Mac packaging passed. Native diagnostics passed **802 editor**,
+  **520 workspace**, **31 equation**, **12 ruled-text**, **8 shortcut** and
+  **62 numbering/title/store** checks, plus store/updater, **16 updater
+  configurations** and independent backup integration.
+- Mounted-DMG verification passed checksum, strict ad hoc bundle/helper/framework
+  signatures, ARM64, deployment target, Applications link, all twelve scenery
+  hashes, math resources, adaptive icon/fallback and plain persistence smoke checks.
+- iPad simulator compilation reported **BUILD SUCCEEDED**. The logged AppIntents
+  metadata warning reported that no AppIntents.framework dependency was present;
+  this compilation does not establish physical-device behavior.
+- Six sheet-switch observations each retained **13 total / 12 post-turn samples**,
+  stable probe identity, zero measured drift and no collapse events. The injected
+  first-turn stall had a **0.871727625 s** maximum sample gap; late samples do
+  not establish continuity during that unsampled interval.
+- The 49,127-node hierarchy import measured **2.827 s**, with folder query
+  **0.083 s**. Logged disk sizes were rounded `du` results: **40M app**, **33M
+  DMG**, **1.5M Sparkle**; these are neither exact file-byte counts nor RAM.
+
+These passing results apply to this source and this Native-check build, not the
+separately built release attempt below. They do not establish actual displayed
+cursor captures, physical stylus/Pencil, older macOS, real cloud delivery or an
+updater installation. Temporary evidence is
+`/private/tmp/inotes-v1.2-native-evidence.json` and
+`/private/tmp/inotes-v1.2-native-logs.zip`.
+
+## v1.2.0 / build 2018 signed release failed before publication — 5 November 2026
+
+[Signed release run 42015405171](https://github.com/icode100/iNotes/actions/runs/42015405171)
+used fresh counter **16**, build **2018**, tag `v1.2.0`, and exact source
+`ca051953ff5e89239ed1bbed51ac033e02df5e35`. Its runner logged macOS
+**26.6.2 (25G83)** and image `macos-26-arm64` `20261026.0455.2`.
+
+The release repeated **126 XCTest tests, zero failures**, in **12.917 seconds**
+(12.955 seconds wall time), built the ARM64 app/DMG and passed the build's plain
+smoke checks, including **62 numbering/store** and **16 updater configuration**
+checks plus independent backup integration. The hierarchy fixture measured
+**3.545 s** import and **0.070 s** folder query. The build's disk-image checksum
+verification passed.
+
+The subsequent native verification exited **1** with the exact failure:
+“Workspace diagnostic failed: restoring the heading restores its previous
+layout height”. Before that failure, **802 native editor**, **31 equation**,
+**8 shortcut** and **12 ruled-text** checks passed. No completed workspace-suite
+pass is claimed for this release attempt. Ed25519 appcast preparation/signature
+probes and publication did not run. No public 1.2.0 release assets were created,
+so no independent public-asset result exists. Preserve the tag and build
+reservation; do not rerun changed source with build 2018.
+
+The earlier passing Native run and initial user QA do not establish the cause of
+this release-only observation or a fix. Added logging is diagnostic evidence
+only until the new exact source is validated. The concise failure record is
+`/private/tmp/inotes-v1.2-release-summary.json`.
+
 ## v1.2.0 local QA and publication preparation — 5 November 2026
 
 Source candidate based on `150d5466abcd8608f7a46ba07fa227585f50eb52`.
 This is not yet a published release. The user authorized building/opening an
 isolated QA app, with no computer control. On **5 November 2026**, the user
 confirmed that the QA app works and explicitly requested GitHub publication.
-That satisfies the manual-QA and publication-authorization gate for this
-candidate. Exact-source hosted Native checks, signed release packaging and
-independent public-asset verification remain separate, pending milestones.
-The expected release is **1.2.0 / build 2018** from fresh signed-release run
-**16**, subject to a live public-feed and workflow-counter recheck.
+That satisfied the manual-QA and publication-authorization gate for the initial
+candidate. The later exact-source Native pass and release run 16 failure are
+recorded separately above. This historical QA record does not claim that
+**1.2.0 / build 2018** was published or that a later-source candidate passed.
 The candidate changes paper/ink preferences, immediate blank-sheet creation,
 inline titles, Mac keyboard zoom and default fit-to-width. No archive format,
 dependency, pressure, pane policy or update-signing identity changes.
@@ -106,10 +183,10 @@ The user-facing QA checklist for this candidate was:
 
 Do not infer visible cursor/menu correctness or physical stylus behavior solely
 from callback/in-process checks. Physical tablet/Pencil, iPad, older macOS and
-cloud delivery remain separate. Hosted Native checks and independent public
-artifact verification are still pending and must be recorded against their exact
-source/build after they complete. The user's publishing authorization does not
-establish those hosted or public-asset results.
+cloud delivery remain separate. The later exact-source Native pass and failed
+release attempt are recorded above; no public 1.2.0 assets were published.
+The user's publishing authorization does not establish hosted or public-asset
+results for later source.
 
 ## Published v1.1.0 / build 2017 — 4 November 2026
 
@@ -178,8 +255,9 @@ No local computer control, interactive UI automation, editor harness or simulato
 launch was used. The installed app and real notes were not modified. Actual
 updater installation, physical stylus/iPad, older macOS and real provider
 delivery remain unverified for this build. Distribution remains ad hoc signed,
-not Apple notarized. The next fresh signed-release run is **16**, producing
-build **2018**; build 2017 remains reserved.
+not Apple notarized. At that publication, the next fresh signed-release run was
+**16**, targeting build **2018**; build 2017 remained reserved. The later run 16
+failure is recorded above.
 
 ## v1.1.0 final Pen width correction — 4 November 2026
 

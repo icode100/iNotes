@@ -38,9 +38,9 @@ bash scripts/verify-macos.sh
 The build creates:
 
 - `dist/iNotes.app`: native ARM64 app bundle.
-- `dist/iNotes-1.2.0-arm64.dmg`: compressed disk image containing the app, an
+- `dist/iNotes-1.2.1-arm64.dmg`: compressed disk image containing the app, an
   Applications shortcut, and installation instructions.
-- `dist/iNotes-1.2.0-arm64.dmg.sha256`: SHA-256 checksum.
+- `dist/iNotes-1.2.1-arm64.dmg.sha256`: SHA-256 checksum.
 
 Open the disk image and drag iNotes to Applications. The DMG does not install
 background services, kernel extensions, browser runtimes, or privileged helpers.
@@ -48,15 +48,19 @@ The build script validates the property list, architecture, app signature, and D
 before publishing outputs. The verification script mounts it read-only and checks
 the packaged app and Applications shortcut.
 
-Local defaults target **v1.2.0**, prospective build **2018** from fresh release
-run **16**. On 5 November 2026, the user confirmed the isolated Mac QA app works
-and explicitly authorized GitHub publication. Before tagging, complete
-exact-source hosted Native checks and a fresh public-feed/release-counter check;
-signed release packaging and independent public-asset verification are still
-pending at this preparation stage. The local QA app uses a
-separate bundle identity, QA build 1, a temporary library and no updater. Full
-installer packaging still requires Xcode's adaptive-icon compiler; a CLT-built
-QA app is not verification of the public release package.
+Local defaults target **v1.2.1**, prospective build **2019** from fresh release
+run **17**. The user confirmed the isolated 1.2.0 QA app works and authorized
+publication on 5 November 2026. Source `ca051953` passed hosted Native checks,
+including iPad compilation, but signed release run 16 failed a heading-restoration
+workspace assertion before publishing. Its 1.2.0/build 2018 tag and build number
+remain reserved; there are no public 1.2.0 assets to verify. Added diagnostic
+logging does not establish a cause or runtime fix. The new candidate requires
+fresh exact-source Native checks, a feed/counter recheck, release checks and
+independent public-asset verification.
+
+The local QA app uses a separate bundle identity, QA build 1, a temporary library
+and no updater. Full installer packaging requires Xcode's adaptive-icon compiler;
+a CLT-built QA app is not verification of the public release package.
 
 Published v1.1 (version 1.1.0), build 2017, added four new
 scenery themes replacing Forest and an Extra Broad nib preset. Source
@@ -67,9 +71,9 @@ The public feed advertised 1.1.0/build 2017 on 4 November 2026. For every later
 update, recheck the actual public appcast and choose a greater `CFBundleVersion`;
 Sparkle compares build numbers, not just the displayed version.
 The release workflow uses `2002 + GITHUB_RUN_NUMBER`: run 12 built 2014 but failed
-before publishing; runs 13/14/15 published 2015/2016/2017. The next fresh run 16
-produces 2018. A rerun does not increase its build number. The local v1.1.0 QA
-apps use separate identities, QA builds 1 and 2, temporary libraries and
+before publishing; runs 13/14/15 published 2015/2016/2017. Run 16 built 2018
+but failed before publication; the next fresh run 17 produces 2019. A rerun does
+not increase its build number. The local v1.1.0 QA apps use separate identities, QA builds 1 and 2, temporary libraries and
 disconnected updaters. User QA passed the initial candidate; the final Pen-only
 1.5 mm correction received compilation, plain smoke and hosted native checks.
 

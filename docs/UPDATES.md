@@ -43,12 +43,16 @@ does not publish a release.
 
 ## Build and sign a local update
 
-The v1.2.0 update targets prospective build **2018**. On 5 November 2026, the user
-confirmed that the isolated Mac QA app works and explicitly authorized GitHub
-publication. Wait for hosted Native checks on the exact source commit before
-tagging, and recheck the latest public feed and workflow counter. Build 2018 is
-the expected value for fresh release run **16**; signed release packaging and
-independent downloaded-public-asset verification remain pending at this stage.
+The v1.2.1 candidate targets prospective build **2019**, fresh release run **17**.
+The user passed the isolated 1.2.0 QA app and authorized v1.2 publication on
+5 November 2026. Source `ca051953` passed hosted Native checks, but signed release
+run **16** failed “restoring the heading restores its previous layout height”
+before publication. Its v1.2.0 tag and build **2018** remain reserved. Ed25519
+release signature probes did not run and no public 1.2.0 assets were published.
+Diagnostic logging in the new candidate does not establish a cause or runtime
+fix. Wait for fresh hosted Native checks on its exact source before tagging,
+then recheck the latest public feed and workflow counter. Signed release checks
+and independently downloaded-public-asset verification remain required.
 
 The published v1.1 update uses version **1.1.0** and build **2017**, from source
 `7946a931c8283e5fc0429fbd1d400f22d76312a5`. The user passed local manual QA and
@@ -69,10 +73,10 @@ identity, QA build 1, temporary library, and disconnected updater. Recheck the
 public feed and workflow counter before any later publication.
 
 ```sh
-VERSION=1.2.0 BUILD_NUMBER=2018 bash scripts/build-macos.sh
-VERSION=1.2.0 bash scripts/verify-macos.sh
-VERSION=1.2.0 bash scripts/generate-appcast.sh
-VERSION=1.2.0 bash scripts/test-update-signatures.sh
+VERSION=1.2.1 BUILD_NUMBER=2019 bash scripts/build-macos.sh
+VERSION=1.2.1 bash scripts/verify-macos.sh
+VERSION=1.2.1 bash scripts/generate-appcast.sh
+VERSION=1.2.1 bash scripts/test-update-signatures.sh
 ```
 
 The appcast command prepares `dist/update/appcast.xml`. It uses Sparkle's official
@@ -81,13 +85,13 @@ using Apple CryptoKit and the committed public key. It does not upload anything.
 For v1.0.3, the security rebuild 2011 exceeds the initial public build 2010 and
 shared local builds 1010–1012. Check both published and shared `CFBundleVersion`
 values and use a larger number for every update, including same-version rebuilds.
-Development defaults (`1.2.0`, prospective build 2018) target the authorized update and
+Development defaults (`1.2.1`, prospective build 2019) target the authorized update and
 are separate from the release workflow's
 `2002 + GITHUB_RUN_NUMBER`. Run 11 published v1.0.4 build 2012; isolated backup QA
 used build 2013. Run 12 built 2014 but stopped at native diagnostic verification before publication.
-Runs 13, 14 and 15 published 2015, 2016 and 2017. The next new release run (16)
-must produce 2018 or higher. Failed build 2014
-remains reserved alongside the original installer and QA slot.
+Runs 13, 14 and 15 published 2015, 2016 and 2017. Run 16 built 2018 but failed
+before publication. The next new release run (17) must produce 2019 or higher.
+Failed builds 2014 and 2018 remain reserved alongside original installers and QA slots.
 The public feed points to the matching `v1.1.0` release's DMG. Never edit a signed appcast
 after generation. Re-run the script if its contents change. The last command
 checks valid signatures and rejects changed feeds, unsigned feeds, changed
@@ -108,8 +112,9 @@ HTTPS feed; malformed configured channels are rejected before packaging.
 ## Publish a version
 
 After reviewing the source and configuring the secret, push a tag such as
-`v1.2.0` only after the user's publication approval and exact-source Native
-checks. The user authorized v1.2.0 publication on 5 November 2026.
+`v1.2.1` only after publication approval and exact-source Native checks. The user
+authorized v1.2 publication on 5 November 2026. Preserve the failed unpublished
+`v1.2.0` tag at `ca051953`; do not move it to the changed source or reuse build 2018.
 `.github/workflows/release.yml` runs unit/integration tests, builds the
 ARM64 DMG, verifies the mounted bundle, signs and independently verifies the
 appcast, then publishes the DMG, SHA-256 checksum, and `appcast.xml` as GitHub
