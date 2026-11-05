@@ -85,6 +85,15 @@ final class WorkspaceNavigationProbe: NSView {
     private var restoration: NavigationRestoration?
     private static let restorationOwners = NSMapTable<NSSplitViewController, NavigationRestoration>.weakToStrongObjects()
 
+    /// Read-only failure diagnostics. Never synchronizes, lays out, or publishes
+    /// presentation changes; normal workspace operation does not call this.
+    func diagnosticsState() -> String {
+        "fullPage=\(fullPage) sheetsVisible=\(sheetsVisible) wasFullPage=\(wasFullPage) previousCollapsed=\(previousCollapsed)"
+            + " applying=\(applying) transitionInProgress=\(transitionInProgress) transitionGeneration=\(transitionGeneration) scheduled=\(scheduled) geometryScheduled=\(geometryScheduled) dismantled=\(dismantled)"
+            + " leadingInset=\(String(describing: leadingInset)) expandedSheetsWidth=\(String(describing: expandedSheetsWidth)) restoreExpandedSheetsWidth=\(restoreExpandedSheetsWidth)"
+            + " savedCollapsed=\(savedItems.map(\.collapsed)) savedController=\(savedController.map { String(describing: ObjectIdentifier($0)) } ?? "nil") restoration={\(restoration?.diagnosticsState() ?? "nil")}"
+    }
+
     private struct ItemState {
         let item: NSSplitViewItem
         let collapsed: Bool
@@ -169,6 +178,10 @@ final class WorkspaceNavigationProbe: NSView {
         private var ownsController: Bool {
             guard let controller else { return false }
             return WorkspaceNavigationProbe.restorationOwners.object(forKey: controller) === self
+        }
+
+        func diagnosticsState() -> String {
+            "pending=\(pending) detached=\(detached) restoring=\(restoring) ownsController=\(ownsController) observers=\(observations.count) hasAfterRestoration=\(afterRestoration != nil)"
         }
 
         func beginTransition() { pending += 1 }

@@ -14,8 +14,12 @@ enum WorkspaceDiagnostics {
     static func run() throws -> String {
         var checks = 0
         var geometryHistory: [String] = []
+        var failureContext: (() -> String)?
         func check(_ condition: @autoclosure () -> Bool, _ message: String) throws {
             guard condition() else {
+                // The failed condition is already captured. Context queries
+                // cannot repair it or turn this check into a later pass.
+                if let failureContext { print(failureContext()) }
                 geometryHistory.forEach { print($0) }
                 throw Failure(description: "Workspace diagnostic failed: \(message)")
             }
@@ -249,6 +253,55 @@ enum WorkspaceDiagnostics {
         func headingNativeFields(in view: NSView) -> [NSTextField] {
             let own = (view as? NSTextField).map { [$0] } ?? []
             return own + view.subviews.flatMap { headingNativeFields(in: $0) }
+        }
+
+        failureContext = {
+            var context = ["Workspace captured failure context: checksCompleted=\(checks) baselineViewport=\(normalWidth)x\(normalHeight) originalSidebarCollapsed=\(sidebarWasCollapsed)"]
+            context.append("Failure presentation fullPage=\(presentation.fullPage) headingVisible=\(presentation.headingVisible) sheetsVisible=\(presentation.sheetsVisible) toolsVisible=\(presentation.toolsVisible) selectedSheet=\(String(describing: store.sheetID))")
+            context.append("Failure window frame=\(NSStringFromRect(window.frame)) contentLayout=\(NSStringFromRect(window.contentLayoutRect)) contentMin=\(NSStringFromSize(window.contentMinSize)) contentMax=\(NSStringFromSize(window.contentMaxSize)) hostFrame=\(NSStringFromRect(host.view.frame)) hostBounds=\(NSStringFromRect(host.view.bounds)) hostingSizingOptions=\(host.sizingOptions.rawValue)")
+            for (index, item) in navigation.splitViewItems.enumerated() {
+                let view = item.viewController.view
+                var policy = "Failure native pane\(index) collapsed=\(item.isCollapsed) canCollapse=\(item.canCollapse) canCollapseFromWindowResize=\(item.canCollapseFromWindowResize) collapseBehavior=\(item.collapseBehavior) springLoaded=\(item.isSpringLoaded) minimum=\(item.minimumThickness) maximum=\(item.maximumThickness) preferred=\(item.preferredThicknessFraction) automaticMaximum=\(item.automaticMaximumThickness)"
+                    + " frame=\(NSStringFromRect(view.frame)) bounds=\(NSStringFromRect(view.bounds)) inHost=\(NSStringFromRect(view.convert(view.bounds, to: host.view))) attached=\(view.window === window)"
+                if #available(macOS 26.0, *) { policy += " automaticallyAdjustsSafeArea=\(item.automaticallyAdjustsSafeAreaInsets)" }
+                context.append(policy)
+            }
+            if let activePage = findPage(host.view), let activeScroll = activePage.enclosingScrollView,
+               let activeDetail = navigation.splitViewItems.last?.viewController.view {
+                let detailRect = activeDetail.convert(activeDetail.bounds, to: host.view)
+                let viewport = activeScroll.convert(activeScroll.bounds, to: host.view)
+                let chrome = NSRect(x: viewport.minX, y: detailRect.minY, width: viewport.width,
+                                    height: max(0, viewport.minY - detailRect.minY))
+                context.append("Failure active page id=\(ObjectIdentifier(activePage)) frame=\(NSStringFromRect(activePage.frame)) bounds=\(NSStringFromRect(activePage.bounds)) detail=\(NSStringFromRect(detailRect)) chrome=\(NSStringFromRect(chrome)) viewport=\(NSStringFromRect(viewport))")
+                context.append("Failure active scroll frame=\(NSStringFromRect(activeScroll.frame)) bounds=\(NSStringFromRect(activeScroll.bounds)) clipFrame=\(NSStringFromRect(activeScroll.contentView.frame)) clipBounds=\(NSStringFromRect(activeScroll.contentView.bounds)) magnification=\(activeScroll.magnification) fitsPageWidth=\(String(describing: (activeScroll as? PageZoomScrollView)?.fitsPageWidth))")
+            } else { context.append("Failure active page unavailable") }
+            func currentProbes(in view: NSView) -> [WorkspaceNavigationProbe] {
+                let own = (view as? WorkspaceNavigationProbe).map { [$0] } ?? []
+                return own + view.subviews.flatMap { currentProbes(in: $0) }
+            }
+            for (index, probe) in currentProbes(in: host.view).enumerated() {
+                context.append("Failure navigation probe\(index) id=\(ObjectIdentifier(probe)) \(probe.diagnosticsState())")
+            }
+            let fields = headingNativeFields(in: host.view)
+            context.append("Failure native fields count=\(fields.count)")
+            // Preserve every native frame before asking any field for a font,
+            // intrinsic size, fitting size or cell measurement.
+            for (index, field) in fields.enumerated() {
+                context.append("Failure native field\(index) id=\(ObjectIdentifier(field)) placeholder=\(field.placeholderString ?? "nil") frame=\(NSStringFromRect(field.frame)) bounds=\(NSStringFromRect(field.bounds)) inHost=\(NSStringFromRect(field.convert(field.bounds, to: host.view)))")
+            }
+            // Emit the immutable frame/state snapshot before any metric query
+            // can alter native sizing caches or fail on a damaged fixture.
+            print(context.joined(separator: "\n"))
+            context = ["Failure native metrics below are queried only after the complete initial snapshot"]
+            for (index, field) in fields.enumerated() {
+                let fontName = field.font?.fontName ?? "nil"
+                let pointSize = field.font?.pointSize ?? 0
+                let intrinsic = field.intrinsicContentSize
+                let fitting = field.fittingSize
+                let cellSize = field.cell?.cellSize
+                context.append("Failure native field metrics\(index) id=\(ObjectIdentifier(field)) placeholder=\(field.placeholderString ?? "nil") font=\(fontName) pointSize=\(pointSize) intrinsic=\(NSStringFromSize(intrinsic)) fitting=\(NSStringFromSize(fitting)) cellSize=\(String(describing: cellSize)) frameAfterMetrics=\(NSStringFromRect(field.frame))")
+            }
+            return context.joined(separator: "\n")
         }
 
         func logHeadingGeometry(_ phase: String) {
