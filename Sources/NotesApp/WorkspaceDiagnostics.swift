@@ -246,6 +246,11 @@ enum WorkspaceDiagnostics {
         let expectedLeadingInset = initialViewportRect.minX - max(initialDetailRect.minX, initialNavigationRight)
         let expectedTrailingInset = initialDetailRect.maxX - initialViewportRect.maxX
 
+        func headingNativeFields(in view: NSView) -> [NSTextField] {
+            let own = (view as? NSTextField).map { [$0] } ?? []
+            return own + view.subviews.flatMap { headingNativeFields(in: $0) }
+        }
+
         func logHeadingGeometry(_ phase: String) {
             let detailRect = detailView.convert(detailView.bounds, to: host.view)
             let viewportRect = scroll.convert(scroll.bounds, to: host.view)
@@ -259,24 +264,17 @@ enum WorkspaceDiagnostics {
                 + " headingVisible=\(presentation.headingVisible) sidebarCollapsed=\(sidebarItem.isCollapsed) sheetsCollapsed=\(sheetsItem.isCollapsed)"
             geometryHistory.append(message)
             print(message)
-            func titleFields(in view: NSView) -> [NSTextField] {
-                var fields: [NSTextField] = []
-                if let field = view as? NSTextField,
-                   field.placeholderString == "Page title"
-                    || (field.isEditable && abs((field.font?.pointSize ?? 0) - 28) < 0.1) {
-                    fields.append(field)
-                }
-                for child in view.subviews { fields.append(contentsOf: titleFields(in: child)) }
-                return fields
-            }
-            let fields = titleFields(in: detailView)
-            let countMessage = "Heading title fields [\(phase)] count=\(fields.count)"
+            // Include Tags as well as Title: they use different font sizes,
+            // and a stale native field height can shift the whole heading.
+            // Frame/font reads do not request a new intrinsic/layout measure.
+            let fields = headingNativeFields(in: detailView)
+            let countMessage = "Heading native fields [\(phase)] count=\(fields.count)"
             geometryHistory.append(countMessage)
             print(countMessage)
             for (index, field) in fields.enumerated() {
-                let fieldMessage = "Heading title field [\(phase)] index=\(index) type=\(type(of: field))"
+                let fieldMessage = "Heading native field [\(phase)] index=\(index) id=\(ObjectIdentifier(field)) type=\(type(of: field))"
+                    + " placeholder=\(field.placeholderString ?? "nil") font=\(field.font?.fontName ?? "nil") pointSize=\(field.font?.pointSize ?? 0)"
                     + " frame=\(NSStringFromRect(field.frame)) bounds=\(NSStringFromRect(field.bounds)) inHost=\(NSStringFromRect(field.convert(field.bounds, to: host.view)))"
-                    + " intrinsic=\(NSStringFromSize(field.intrinsicContentSize)) fitting=\(NSStringFromSize(field.fittingSize))"
                     + " hidden=\(field.isHiddenOrHasHiddenAncestor) editable=\(field.isEditable)"
                 geometryHistory.append(fieldMessage)
                 print(fieldMessage)
@@ -307,6 +305,19 @@ enum WorkspaceDiagnostics {
                 + " initialHeight=\(initialHeight) baselineHeight=\(normalHeight) finalHeight=\(scroll.bounds.height) initialResult=\(initialResult)"
             geometryHistory.append(summary)
             print(summary)
+            // Only after preserving a failed result and all passive evidence
+            // may the diagnostic ask for metrics that can initiate layout.
+            for (index, field) in headingNativeFields(in: detailView).enumerated() {
+                let observedFrame = field.frame
+                let intrinsic = field.intrinsicContentSize
+                let fitting = field.fittingSize
+                let cellSize = field.cell?.cellSize
+                let metrics = "Heading failed native metrics [\(phase)] index=\(index) id=\(ObjectIdentifier(field))"
+                    + " placeholder=\(field.placeholderString ?? "nil") font=\(field.font?.fontName ?? "nil") pointSize=\(field.font?.pointSize ?? 0)"
+                    + " observedFrame=\(NSStringFromRect(observedFrame)) intrinsic=\(NSStringFromSize(intrinsic)) fitting=\(NSStringFromSize(fitting)) cellSize=\(String(describing: cellSize)) frameAfterMetrics=\(NSStringFromRect(field.frame))"
+                geometryHistory.append(metrics)
+                print(metrics)
+            }
         }
 
         func checkDetailGeometry(_ transition: String) throws {
