@@ -241,6 +241,7 @@ enum WorkspaceDiagnostics {
         }
         let normalWidth = scroll.bounds.width
         let normalHeight = scroll.bounds.height
+        let expectedTagHeight = MacTagFieldMetrics.current.height
         let detailView = navigation.splitViewItems[navigation.splitViewItems.count - 1].viewController.view
         let initialDetailRect = detailView.convert(detailView.bounds, to: host.view)
         let initialViewportRect = scroll.convert(scroll.bounds, to: host.view)
@@ -332,6 +333,15 @@ enum WorkspaceDiagnostics {
                 geometryHistory.append(fieldMessage)
                 print(fieldMessage)
             }
+        }
+
+        func checkTagAllocation(_ phase: String) throws {
+            let fields = headingNativeFields(in: detailView).filter {
+                $0.placeholderString == "Add tags, separated by commas" && !$0.isHiddenOrHasHiddenAncestor
+            }
+            let heights = fields.map { $0.frame.height }
+            try check(fields.count == 1 && heights.allSatisfy { $0.isFinite && abs($0 - expectedTagHeight) < 0.5 },
+                      "\(phase) allocates one tag field at its native caption height (actual=\(heights), expected=\(expectedTagHeight))")
         }
 
         func recordFailedHeadingRestore(_ phase: String, initialHeight: CGFloat, initialResult: Bool) {
@@ -460,6 +470,7 @@ enum WorkspaceDiagnostics {
         try check(presentation.headingVisible && presentation.sheetsVisible && !sheetsItem.isCollapsed,
                   "heading and native sheets pane begin independently visible")
         try checkPassiveSidebarCycle(sheetsVisible: true, tool: .text)
+        try checkTagAllocation("initial heading")
 
         logHeadingGeometry("before hide")
         presentation.toggleHeading()
@@ -482,6 +493,7 @@ enum WorkspaceDiagnostics {
         recordFailedHeadingRestore("restored initial", initialHeight: restoredHeadingHeight, initialResult: restoredHeadingMatchesBaseline)
         try check(restoredHeadingMatchesBaseline,
                   "restoring the heading restores its previous layout height (initial=\(restoredHeadingHeight), baseline=\(normalHeight), delta=\(restoredHeadingHeight - normalHeight), tolerance<5)")
+        try checkTagAllocation("restored heading")
 
         // Repeat real heading transitions without forced layout, preference
         // changes, or page clicks. Every restore uses the original baseline;
@@ -517,6 +529,7 @@ enum WorkspaceDiagnostics {
             recordFailedHeadingRestore("\(phase) restored initial", initialHeight: restoredHeight, initialResult: matchesBaseline)
             try check(matchesBaseline,
                       "\(phase) restored heading matches the original viewport height (initial=\(restoredHeight), baseline=\(normalHeight), delta=\(restoredHeight - normalHeight), tolerance<5)")
+            try checkTagAllocation(phase)
         }
 
         presentation.toggleSheets()
@@ -924,6 +937,7 @@ enum WorkspaceDiagnostics {
                 }
                 defer { observations.forEach { $0.invalidate() } }
                 var stableIdentity = true, maximumFrameDrift: CGFloat = 0, samples = 0
+                var maximumTagHeightDrift: CGFloat = 0
                 var turns = 0, postTurnSamples = 0
                 let start = ProcessInfo.processInfo.systemUptime
                 let deadline = start + 5
@@ -954,6 +968,13 @@ enum WorkspaceDiagnostics {
                                 abs(actual.height - expected.height)].max() ?? 0)
                         }
                         maximumFrameDrift = max(maximumFrameDrift, frameDrift)
+                        if expectedPresentation[2] && !expectedPresentation[0],
+                           let activeDetail = navigation.splitViewItems.last?.viewController.view {
+                            for field in headingNativeFields(in: activeDetail)
+                                where field.placeholderString == "Add tags, separated by commas" && !field.isHiddenOrHasHiddenAncestor {
+                                maximumTagHeightDrift = max(maximumTagHeightDrift, abs(field.frame.height - expectedTagHeight))
+                            }
+                        }
                         let phase = "\(mode) target=\(target) sample\(samples) postTurn=\(afterTurn) turn=\(turns) elapsed=\(now - start) gap=\(sampleGap) drift=\(frameDrift)"
                         if frameDrift > 0 && !capturedFirstDrift {
                             capturedFirstDrift = true
@@ -1000,7 +1021,7 @@ enum WorkspaceDiagnostics {
                     + " turns=\(turns) elapsed=\(elapsed) firstPostTurnSampleDelay=\(firstPostTurnSampleDelay.map { String($0) } ?? "none")"
                     + " maximumSampleGap=\(maximumSampleGap) injectedStallDuration=\(injectedStallDuration)"
                     + " injectedStallTurn=\(injectedStallTurn.map { String($0) } ?? "none") probeStable=\(stableIdentity)"
-                    + " frameDrift=\(maximumFrameDrift) nativeCollapseChanges=\(collapseChanges)"
+                    + " frameDrift=\(maximumFrameDrift) tagHeightDrift=\(maximumTagHeightDrift) nativeCollapseChanges=\(collapseChanges)"
                 geometryHistory.append(sampleLog)
                 print(sampleLog)
                 try check(postTurnSamples >= 12 && elapsed >= 0.6 && elapsed < 5,
@@ -1017,6 +1038,11 @@ enum WorkspaceDiagnostics {
                           "\(mode) sheet switch preserves independent chrome preferences")
                 try check(samples > 1 && maximumFrameDrift <= 2,
                           "\(mode) sheet switch keeps detail, heading/tools region, and viewport steady in every sample")
+                if expectedPresentation[2] && !expectedPresentation[0] {
+                    try check(maximumTagHeightDrift < 0.5,
+                              "\(mode) sheet switch keeps every observed tag allocation at the native caption height (drift=\(maximumTagHeightDrift))")
+                    try checkTagAllocation("\(mode) switched heading")
+                }
                 let activePage = try require(findPage(host.view), "selected switch page")
                 try check(activePage.textView.string == text && store.selectedSheet?.id == target
                           && store.selectedSheet?.body == text,

@@ -623,13 +623,55 @@ struct SheetDetail: View {
     }
 }
 
+#if os(macOS)
+/// Keep the caption field's allocation tied to its own native font metrics.
+/// Hosted diagnostics observed a title-sized allocation persisting on this
+/// smaller field after heading reinsertion despite correct native cell metrics.
+@MainActor
+enum MacTagFieldMetrics {
+    struct Value {
+        let font: NSFont
+        let height: CGFloat
+    }
+    private static var cached: Value?
+
+    static var current: Value {
+        let font = NSFont.preferredFont(forTextStyle: .caption1, options: [:])
+        if let cached, cached.font == font { return cached }
+        let field = NSTextField(string: "")
+        field.font = font
+        field.isBezeled = false
+        field.isBordered = false
+        field.drawsBackground = false
+        field.maximumNumberOfLines = 1
+        field.cell?.usesSingleLineMode = true
+        field.cell?.wraps = false
+        field.cell?.isScrollable = true
+        let measured = field.cell?.cellSize.height ?? field.intrinsicContentSize.height
+        let nativeLineHeight = font.ascender - font.descender + font.leading
+        let value = Value(font: font, height: ceil(measured.isFinite && measured > 0 ? measured : nativeLineHeight))
+        // One entry, replaced if the preferred system/accessibility font changes.
+        cached = value
+        return value
+    }
+}
+#endif
+
 struct TagsField: View {
     @Binding var tags: [String]
     @ViewState private var draft = ""
     @FocusState private var focused: Bool
     var body: some View {
+        #if os(macOS)
+        let metrics = MacTagFieldMetrics.current
+        #endif
         TextField("Add tags, separated by commas", text: $draft)
-            .font(.caption).textFieldStyle(.plain).foregroundStyle(.secondary)
+            #if os(macOS)
+            .font(Font(metrics.font)).frame(height: metrics.height)
+            #else
+            .font(.caption)
+            #endif
+            .textFieldStyle(.plain).foregroundStyle(.secondary)
             .focused($focused).onSubmit(commit)
             .onAppear { draft = tags.joined(separator: ", ") }
             .onDisappear(perform: commit)
