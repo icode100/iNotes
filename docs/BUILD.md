@@ -48,12 +48,24 @@ The build script validates the property list, architecture, app signature, and D
 before publishing outputs. The verification script mounts it read-only and checks
 the packaged app and Applications shortcut.
 
-Local defaults target **v1.2.2**, prospective build **2020** from fresh release
-run **18**. The user confirmed the isolated 1.2.0 QA app works and authorized
-publication on 5 November 2026. Source `ca051953` passed hosted Native checks,
-including iPad compilation, but signed release run 16 failed a heading-restoration
-workspace assertion before publishing. Its 1.2.0/build 2018 tag and build number
-remain reserved; there are no public 1.2.0 assets to verify. Diagnostics captured
+Defaults match published **v1.2.2 / build 2020**, released on 5 November 2026
+from source `aa392994ed290e38819a74e0a21f5dad520642a3`.
+[Branch Native checks 42041114016](https://github.com/icode100/iNotes/actions/runs/42041114016)
+and [main Native checks 42046399201](https://github.com/icode100/iNotes/actions/runs/42046399201)
+passed, including iPad compilation.
+[Signed release run 18](https://github.com/icode100/iNotes/actions/runs/42046511381)
+passed, followed by independent downloaded-public-asset verification: API digests,
+checksum, exact latest-feed bytes, Ed25519 signatures and all five tamper probes,
+plus read-only mounted bundle/resource/signature and persistence checks.
+The verified production bundle is `io.inotes.app`, version 1.2.2/build 2020, with
+the existing updater key/configuration and no QA environment overrides.
+The public DMG is **34,632,864 bytes**; the app has **41,809,499 regular-file
+bytes**. These are file sizes, not RAM measurements. See [validation](TESTING.md)
+for checksums, logs and limits; metadata is in `dist/public-v1.2.2/verification.json`.
+
+The user confirmed the initial isolated 1.2.0 QA app works and authorized
+publication. Source `ca051953` passed hosted Native checks, but release run 16
+failed a heading-restoration assertion before publication. Diagnostics captured
 title/tag native height mismatches that outer SwiftUI frames did not resolve.
 The owned-input replacement at `adf533e4f4ad190422111e531c8c038e72bbfbb6`
 passed [branch Native checks 42035913994](https://github.com/icode100/iNotes/actions/runs/42035913994)
@@ -64,12 +76,11 @@ generation 12 still had one pending completion; its 100 heading cycles retained
 the correct native allocations. Preserve the unpublished `v1.2.1` tag and build
 2019 as well as `v1.2.0`/2018.
 
-The 1.2.2 diagnostic correction replaces a fixed 0.4-second settling assumption
+The released 1.2.2 diagnostic correction replaces a fixed 0.4-second settling assumption
 with a passive wait for native completion callbacks, bounded at five seconds.
 The original pane and geometry assertions remain. This is a harness correction,
-without a runtime pane-policy change or a proven native pane fix. The new source
-still requires exact-source Native checks, a feed/counter recheck, release checks
-and independent public-asset verification. No additional manual QA is implied.
+without a runtime pane-policy change or a proven native pane fix. No additional
+manual QA is implied by the later automated or public-asset checks.
 
 The local QA app uses a separate bundle identity, QA build 1, a temporary library
 and no updater. Full installer packaging requires Xcode's adaptive-icon compiler;
@@ -85,8 +96,9 @@ update, recheck the actual public appcast and choose a greater `CFBundleVersion`
 Sparkle compares build numbers, not just the displayed version.
 The release workflow uses `2002 + GITHUB_RUN_NUMBER`: run 12 built 2014 but failed
 before publishing; runs 13/14/15 published 2015/2016/2017. Runs 16 and 17 built
-2018 and 2019 but failed before publication; the next fresh run 18 produces 2020.
-A rerun does not increase its build number. The local v1.1.0 QA apps use separate
+2018 and 2019 but failed before publication; run 18 published 2020. The next fresh
+run 19 must produce **2021**, subject to a feed/counter recheck. A rerun does not
+increase its build number. The local v1.1.0 QA apps use separate
 identities, QA builds 1 and 2, temporary libraries and
 disconnected updaters. User QA passed the initial candidate; the final Pen-only
 1.5 mm correction received compilation, plain smoke and hosted native checks.

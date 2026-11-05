@@ -1,34 +1,34 @@
 # iNotes
 
-The **v1.2.2 candidate** carries the v1.2 paper, ink, title and zoom changes:
+The **v1.2 update (1.2.2, build 2020)** adds paper, ink, title and zoom changes:
 scenery-matched paper, Vintage Black, Pitch Black/White, five pastel papers,
 sixteen ink presets and a native custom color picker. New sheets open blank
 immediately; type in the underlined title at the top to name them, or leave it
 empty. Mac pages initially fit the visible page width; Command-Plus/Minus zoom
 manually and View → Fit Page Width restores fitting.
 
-The user passed the isolated 1.2.0 Mac QA app and authorized publication on
-5 November 2026. Its exact-source Native checks passed, but release run 16 failed
-a heading-restoration workspace assertion before publishing. Version 1.2.0/build
-2018 remains unpublished. The owned Mac title/tag controls in 1.2.1 passed both
-exact-source Native runs, including iPad compilation. Its release run 17/build
-2019 then stopped at a pane-width assertion while a native animation completion
-was still pending. Neither version published assets; preserve both tags and build
-numbers. The 1.2.2/prospective build 2020 candidate corrects diagnostic waiting
-for native completion callbacks, retaining the original geometry limits. It does
-not claim a runtime pane fix. New exact-source checks, release verification and
-public-asset verification remain pending.
-See the [candidate notes](docs/releases/1.2.2.md),
-[1.2.1 record](docs/releases/1.2.1.md),
-[1.2.0 record](docs/releases/1.2.0.md) and [validation](docs/TESTING.md).
+The current Mac release is **1.2.2, build 2020**, published on 5 November 2026.
+[Download the Mac installer](https://github.com/icode100/iNotes/releases/download/v1.2.2/iNotes-1.2.2-arm64.dmg).
+Exact-source Native checks passed on both branch and main, including iPad
+compilation; signed release run 18 and independent downloaded-public-asset
+verification also passed. See the [release notes](docs/releases/1.2.2.md) and
+[validation record](docs/TESTING.md) for evidence and remaining limits.
 
-Version 1.1.0 (v1.1), build 2017, adds Arctic, Open Skyscape,
-Ruby Hills, and Nature scenery, replaces Forest, and adds Extra Broad nibs.
+The user passed the initial isolated 1.2.0 Mac QA app and authorized publication.
+The unpublished [1.2.0](docs/releases/1.2.0.md) and
+[1.2.1](docs/releases/1.2.1.md) attempts stopped during verification; their tags
+and builds 2018/2019 remain preserved. The released version owns its Mac heading
+controls and waits for native completion callbacks in diagnostics, retaining the
+original geometry limits. This does not claim a runtime pane-policy fix or a new
+manual QA pass.
+
+Version 1.1.0 (v1.1), build 2017, introduced Arctic, Open Skyscape,
+Ruby Hills, and Nature scenery, replaced Forest, and added Extra Broad nibs.
 Coast and Alpine remain available. Extra Broad uses 1.5 mm for Pen, 1.3 mm for
 Pencil and Straight Line, and 2 mm for Brush/Marker.
 
-The current Mac release is version 1.1.0, build 2017. [Download the Mac installer](https://github.com/icode100/iNotes/releases/download/v1.1.0/iNotes-1.1.0-arm64.dmg). See [release notes](docs/releases/1.1.0.md)
-and [validation](docs/TESTING.md) for local results and separately recorded public-build verification.
+Its earlier results remain in the [v1.1 release notes](docs/releases/1.1.0.md)
+and [validation history](docs/TESTING.md).
 
 The existing fixes keep active sheets numbered consecutively after
 deletion, restoration, moves, and drag reordering. They also make **⌘A** select
@@ -92,7 +92,7 @@ Requires an Apple silicon Mac and macOS 14+. Building the installer requires ful
 open dist/iNotes.app
 ```
 
-The default local installer target is `dist/iNotes-1.2.2-arm64.dmg` (version 1.2.2, prospective build 2020). The current published release remains 1.1.0/build 2017. Failed, unpublished 1.2.0/build 2018 and 1.2.1/build 2019 stay reserved; the new candidate requires fresh exact-source checks and release verification. Downloaded public builds are also ad hoc signed: **they are not Apple notarized**, so macOS may report that Apple could not verify iNotes is free of malware.
+The default local installer target is `dist/iNotes-1.2.2-arm64.dmg`; version 1.2.2/build 2020 matches the verified public release. Failed, unpublished 1.2.0/build 2018 and 1.2.1/build 2019 stay reserved. Downloaded public builds are ad hoc signed: **they are not Apple notarized**, so macOS may report that Apple could not verify iNotes is free of malware.
 
 If you trust the download from the [official releases](https://github.com/icode100/iNotes/releases), follow Apple's [per-app first-open procedure](https://support.apple.com/en-us/102445):
 

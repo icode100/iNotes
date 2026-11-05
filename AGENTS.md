@@ -44,14 +44,19 @@ while native exit generation 12 still had one pending completion. All 100 headin
 cycles retained correct field heights. Mounted verification, Ed25519 probes and
 publication were not reached; preserve both failed tags/build reservations.
 
-The current **1.2.2 / prospective build 2020** candidate corrects the diagnostic's
-fixed 0.4-second settled-state assumption using bounded passive observation of
-native completion and queued callbacks. Geometry thresholds and early motion
-observations remain required. No production pane correction is established by
-an in-flight snapshot alone. Fresh exact-source Native checks and release run
-**18** remain required before publication. Consult `docs/TESTING.md` for evidence
-and limits. The verified public release remains **1.1.0 / build 2017** until a
-new release actually publishes and is independently verified.
+Published **1.2.2 / build 2020**, source
+`aa392994ed290e38819a74e0a21f5dad520642a3`, corrects the diagnostic's fixed
+0.4-second settled-state assumption with bounded passive native-completion and
+queued-callback observation. It retains geometry limits, first completed-state
+failures and early motion evidence; production pane policy is unchanged.
+Both exact-source Native runs (including iPad compilation), signed release run
+**18**, and independent public-download verification passed on **5 November
+2026**. Hosted checks recorded 126 core tests, 852 editor and 2,000 workspace
+checks; consult `docs/TESTING.md` for complete evidence and limits. The public
+installer, checksum and signed feed match the verified release bytes. Initial
+manual QA applies to the earlier isolated 1.2.0 app; later heading/input and test
+changes received native fixtures without a new physical IME/stylus or manual QA
+claim. Preserve the failed 1.2.0 and 1.2.1 tags/build reservations.
 
 ## Priorities
 
@@ -438,12 +443,15 @@ Run 16 built v1.2.0/build 2018 from `ca051953`, then failed the heading-restorat
 workspace assertion before publication; preserve that tag and build reservation.
 Run 17 built v1.2.1/build 2019 from `adf533e4`, then failed the pane-width
 assertion during an unfinished native exit before publication. Preserve that
-tag and reservation too. Defaults now target v1.2.2 / prospective build 2020.
-Initial v1.2.0 user QA and
-publication authorization were recorded on 5 November 2026; they do not establish
+tag and reservation too. Run 18 published v1.2.2/build 2020 from `aa392994`;
+exact-source Native checks,
+signed release checks and independently downloaded public assets passed.
+Defaults match published v1.2.2/build 2020.
+Initial v1.2.0 user QA and publication authorization were recorded on
+5 November 2026; they do not establish
 later-source or public-build results. The v1.1.0 local QA identities use separate
-QA builds 1 and 2 (final Pen correction). The next new signed-release run (18)
-must produce 2020; recheck both feed and counter immediately before publication.
+QA builds 1 and 2 (final Pen correction). The next new signed-release run (19)
+must produce 2021; recheck both feed and counter immediately before publication.
 A workflow rerun does not
 advance `GITHUB_RUN_NUMBER`. Never reuse its build number for an updated binary.
 The release workflow supports an explicit `workflow_dispatch` for the current

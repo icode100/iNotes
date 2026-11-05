@@ -43,7 +43,17 @@ does not publish a release.
 
 ## Build and sign a local update
 
-The v1.2.2 candidate targets prospective build **2020**, fresh release run **18**.
+The current release is **v1.2.2 / build 2020**, from source
+`aa392994ed290e38819a74e0a21f5dad520642a3`, published on 5 November 2026.
+[Branch Native checks 42041114016](https://github.com/icode100/iNotes/actions/runs/42041114016)
+and [main Native checks 42046399201](https://github.com/icode100/iNotes/actions/runs/42046399201)
+passed, including iPad compilation. [Signed release run 18](https://github.com/icode100/iNotes/actions/runs/42046511381)
+passed. Independent downloads then matched the API digests and checksum; latest
+and versioned feeds matched exact signed bytes, Ed25519 verification and all five
+signature probes passed, and read-only mounted bundle checks confirmed production
+identity/version/build, the existing update key and no QA overrides. See
+[validation](TESTING.md) for measured artifacts and limits.
+
 The user passed the isolated 1.2.0 QA app and authorized v1.2 publication on
 5 November 2026. Source `ca051953` passed hosted Native checks, but signed release
 run **16** failed “restoring the heading restores its previous layout height”
@@ -59,13 +69,12 @@ navigation generation 12 had one pending native completion. All 100 heading
 cycles retained correct native allocations. No public 1.2.1 assets were created;
 preserve its tag and build 2019 too.
 
-The 1.2.2 harness correction waits passively for native completion callbacks,
+The released 1.2.2 harness correction waits passively for native completion callbacks,
 bounded at five seconds, rather than assuming 0.4 seconds completes an animation.
 It retains the original pane/geometry limits and makes no runtime pane-policy
-change or claim of a proven native pane fix. Wait for fresh hosted Native checks
-on the new exact source before tagging, then recheck the latest public feed and
-workflow counter. Signed release checks and independently downloaded-public-asset
-verification remain required.
+change or claim of a proven native pane fix. Every later source update still
+requires exact-source Native checks before tagging, a fresh feed/counter check,
+signed release checks and independently downloaded-public-asset verification.
 
 The published v1.1 update uses version **1.1.0** and build **2017**, from source
 `7946a931c8283e5fc0429fbd1d400f22d76312a5`. The user passed local manual QA and
@@ -98,15 +107,16 @@ using Apple CryptoKit and the committed public key. It does not upload anything.
 For v1.0.3, the security rebuild 2011 exceeds the initial public build 2010 and
 shared local builds 1010–1012. Check both published and shared `CFBundleVersion`
 values and use a larger number for every update, including same-version rebuilds.
-Development defaults (`1.2.2`, prospective build 2020) target the authorized update and
-are separate from the release workflow's
+Development defaults (`1.2.2`, build 2020) match the verified public release and
+remain separate from the release workflow's
 `2002 + GITHUB_RUN_NUMBER`. Run 11 published v1.0.4 build 2012; isolated backup QA
 used build 2013. Run 12 built 2014 but stopped at native diagnostic verification before publication.
 Runs 13, 14 and 15 published 2015, 2016 and 2017. Runs 16 and 17 built 2018 and
-2019 but failed before publication. The next new release run (18) must produce
-2020 or higher. Failed builds 2014, 2018 and 2019 remain reserved alongside
+2019 but failed before publication. Run 18 published 2020. The next new release
+run (19) must produce **2021**, subject to a feed/counter recheck. Failed builds
+2014, 2018 and 2019 remain reserved alongside
 original installers and QA slots.
-The public feed points to the matching `v1.1.0` release's DMG. Never edit a signed appcast
+The public feed points to the matching `v1.2.2` release's DMG. Never edit a signed appcast
 after generation. Re-run the script if its contents change. The last command
 checks valid signatures and rejects changed feeds, unsigned feeds, changed
 archives, and a different public key.
@@ -125,11 +135,12 @@ HTTPS feed; malformed configured channels are rejected before packaging.
 
 ## Publish a version
 
-After reviewing the source and configuring the secret, push a tag such as
-`v1.2.2` only after publication approval and exact-source Native checks. The user
+After reviewing the next source and configuring the secret, push a new
+`vX.Y.Z` tag only after publication approval and exact-source Native checks. The user
 authorized v1.2 publication on 5 November 2026. Preserve the failed unpublished
 `v1.2.0` tag at `ca051953` and `v1.2.1` tag at `adf533e4`; do not move either to
-changed source or reuse builds 2018/2019.
+changed source or reuse builds 2018/2019. Published `v1.2.2` identifies
+`aa392994`; preserve its build 2020 and use a higher number for an updated binary.
 `.github/workflows/release.yml` runs unit/integration tests, builds the
 ARM64 DMG, verifies the mounted bundle, signs and independently verifies the
 appcast, then publishes the DMG, SHA-256 checksum, and `appcast.xml` as GitHub

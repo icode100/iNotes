@@ -1,21 +1,120 @@
 # Validation
 
-## v1.2.2 / prospective build 2020 preparation — 5 November 2026
+## v1.2.2 / build 2020 published and independently verified — 5 November 2026
 
-The current candidate follows the two unpublished releases below. Defaults target
-**1.2.2 / prospective build 2020**, expected from fresh signed-release run **18**,
-subject to a live feed/counter gate. Preserve `v1.2.0` at `ca051953` (build 2018)
-and `v1.2.1` at `adf533e4` (build 2019); neither has published release assets.
-The verified public release remains **1.1.0 / build 2017**.
+Published [v1.2.2](https://github.com/icode100/iNotes/releases/tag/v1.2.2) uses
+source `aa392994ed290e38819a74e0a21f5dad520642a3`, tag `v1.2.2`, version
+**1.2.2** and build **2020**. Both exact-source hosted Native runs passed:
+[branch 42041114016](https://github.com/icode100/iNotes/actions/runs/42041114016)
+and [main 42046399201](https://github.com/icode100/iNotes/actions/runs/42046399201),
+including mounted-DMG verification and iPad compilation.
 
-The candidate corrects a diagnostic readiness assumption: a fixed 0.4-second
-wait did not establish that native animations and their coalesced callbacks had
-finished. Final-state assertions now require bounded passive observation of
-accepted intent, native completions, ownership and queued callbacks, while
-retaining early frames, first completed-state geometry, sample gaps and motion
-checks. Geometry is not the readiness predicate. This is a harness correction,
-not a speculative production pane change. Fresh local/hosted exact-source checks,
-signed-release checks and independent public-asset verification remain pending.
+[Signed release run 18 / 42046511381](https://github.com/icode100/iNotes/actions/runs/42046511381)
+completed **successfully** on macOS **26.6.2**, image **20261026.0455.2**.
+It repeated **126 XCTest tests, zero failures, 13.675 seconds** (13.707 wall),
+ARM64 packaging, **852 editor / 2,000 workspace / 31 equation / 12 ruled-text /
+8 shortcut / 62 numbering-title-store checks**, the existing updater/backup
+integration and mounted-bundle/resource/icon/persistence verification.
+All 100 heading cycles retained correct native allocations. Fifty-five completion
+waits included **17** pending observations beyond 0.4 seconds; the maximum
+completion time was **0.611975 seconds**. All six sheet switches retained zero
+observed frame/field-height drift; the first injected-stall gap was **0.913775
+seconds**. Sampling gaps do not establish unsampled continuity. Feed/archive
+Ed25519 verification, all five tamper probes, asset publication and signing-seed
+cleanup passed. The release compiler/SDK was not separately printed; iPad
+compilation belongs to the Native runs above.
+
+Independent verification downloaded the three assets from public release
+**435327898**, published at **14:45:40 UTC**. API SHA-256 digests and lengths,
+the checksum file, and versioned/latest feed byte equality passed on the first
+readback attempt. The signed feed advertises **1.2.2/build 2020**, the exact
+versioned HTTPS enclosure and its measured installer length.
+
+- Public DMG: **34,632,864 bytes**, SHA-256
+  `8e54abc82f09d00c9cff36e76ffbba4ee32e71a39b275538b646839b9eefc645`.
+- Public feed: **1,268 bytes**, SHA-256
+  `968b72d9c7afcc300f160f9f43bd3784510b612c187f6eab5ddf10632de8bed0`.
+- Mounted app: **41,809,499 regular-file bytes** across 106 files; executable
+  **6,842,480 bytes**, SHA-256
+  `091762ecb137731322a4411a0d28bed5245868e55bad512a9878fc8faeaac7e1`.
+  These are artifact file sizes, not RAM measurements.
+
+The existing signature script independently passed all **five** public
+feed/archive checks against the committed Ed25519 key. `verify-macos.sh` mounted
+the downloaded DMG read-only and passed checksum, strict ad hoc signatures,
+ARM64, macOS 14 deployment target, Applications link, all twelve scenery hashes,
+math resources, native light/dark icon stacks and isolated persistence/backup
+smoke checks. Additional read-only inspection confirmed production identity
+`io.inotes.app`, version/build, no QA/environment overrides, the unchanged update
+public key and required production updater settings. The public tag resolves to
+the exact validated source. Prior v1.1.0/v1.0.4 asset identities/digests and tags,
+and failed v1.2.0/v1.2.1 tags, remain unchanged.
+
+Public evidence is in ignored `dist/public-v1.2.2/verification.json` and temporary
+logs `inotes-v1.2.2-public-download.log`, `inotes-v1.2.2-public-signatures.log`,
+`inotes-v1.2.2-public-bundle-verification.log`, `inotes-v1.2.2-public-inspection.log`
+and `inotes-v1.2.2-prior-preservation.log` under `/private/tmp`.
+The release evidence is
+`/private/tmp/inotes-v1.2.2-signed-release-evidence-summary.json`.
+Initial user manual QA applies to 1.2.0; these results do not add a physical
+stylus/Pencil/IME, displayed-cursor capture, older-OS, cloud-delivery or actual
+updater-installation result. No production notes or external computer control
+were used. Current distribution remains ad hoc signed and not Apple notarized.
+Failed unpublished builds 2018/2019 remain reserved; the next fresh release run
+19 must use build 2021 or higher after a live feed/counter check.
+
+## v1.2.2 exact-source local and hosted validation — 5 November 2026
+
+Source `aa392994ed290e38819a74e0a21f5dad520642a3` passed the final isolated local
+native harness and [hosted Native checks 42041114016](https://github.com/icode100/iNotes/actions/runs/42041114016).
+
+The local optimized ARM64 build ran on macOS **27.2**, Swift **6.4.2**, with
+Command Line Tools. Its native executable exited **0**. Hosted checks used macOS
+**26.6.2**, image `macos-26-arm64` `20261026.0455.2`, Swift **6.3.3**, Xcode
+**26.6**, and iPhoneSimulator SDK **26.5**.
+
+| Check | Local | Hosted |
+| --- | --- | --- |
+| Native editor | 853 passed | 852 passed |
+| Workspace | 2,000 passed | 2,000 passed |
+| Equations / ruled text / shortcuts | 31 / 12 / 8 passed | 31 / 12 / 8 passed |
+| Numbering/title/store | 62 passed | 62 passed |
+| Core XCTest | Not rerun in this final local native invocation | 126 tests, zero failures, 15.311 seconds (15.361 wall) |
+
+Hosted ARM64 packaging, mounted-DMG verification and iPad simulator compilation
+passed. The local CLT native harness is a separate artifact and does not establish
+full installer packaging. Both runs passed **100 heading hide/restore cycles**;
+actual owned native controls retained **34-point title** and **13-point Tags**
+heights. Native input checks cover raw multiword/Unicode drafts, local Select All,
+direct undo/redo synchronization, caret preservation/clamping, synthetic marked
+text, rejection/truncation, tag commits, and read-only transitions.
+
+The completion-wait correction leaves production pane policy unchanged. Readiness
+uses accepted intent, native completion/ownership and queued work, with an
+absolute **five-second** timeout; it does not wait for desired geometry. The first
+completed geometry result is retained, so later recovery cannot replace a failure.
+Deterministic virtual-clock checks enforce that rule and reject stalled or
+permanently pending callbacks.
+
+Hosted evidence contains **55 completion waits**: **16** were still pending beyond
+the former 0.4-second window; the longest completed at **0.649535 seconds**. For
+“exit full page with tools hidden”, the preserved **0.429329-second** observation
+still had generation 12 pending with last completion 11. The first idle observation
+at **0.451123 seconds** had pending zero, completion 12 and the correct **582-point**
+viewport width. Geometry thresholds were unchanged.
+
+Each run passed all **six sheet switches**, retaining the strict **0.6-second
+minimum, 12 post-turn observations and five-second deadline**, zero observed
+frame/title/tag drift, stable probe identity and no collapse events. The largest
+logged sample gap was **0.740945 seconds locally** and **1.102507 seconds hosted**,
+including the injected stall. These observations do not establish continuity
+through unsampled intervals.
+
+Healthy hosted logs print motion summaries and collapse observations, but detailed
+actual action-delivery traces remain unprinted on success; nominal rapid-action
+offsets alone do not establish delivery cadence. These are isolated in-process
+fixtures and simulator compilation, not physical stylus/Pencil, actual IME,
+displayed-hover, older-OS or cloud-delivery validation.
 
 ## v1.2.1 exact-source hosted Native checks — 5 November 2026
 
