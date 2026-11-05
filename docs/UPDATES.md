@@ -49,8 +49,10 @@ The user passed the isolated 1.2.0 QA app and authorized v1.2 publication on
 run **16** failed “restoring the heading restores its previous layout height”
 before publication. Its v1.2.0 tag and build **2018** remain reserved. Ed25519
 release signature probes did not run and no public 1.2.0 assets were published.
-Diagnostic logging in the new candidate does not establish a cause or runtime
-fix. Wait for fresh hosted Native checks on its exact source before tagging,
+Diagnostics captured title/tag native field-height mismatches; the candidate
+replaces those Mac controls. Its fresh input/layout validation and a separate
+pane failure investigation remain pending. Wait for fresh hosted Native checks
+on its exact source before tagging,
 then recheck the latest public feed and workflow counter. Signed release checks
 and independently downloaded-public-asset verification remain required.
 

@@ -10,8 +10,9 @@ manually and View → Fit Page Width restores fitting.
 The user passed the isolated 1.2.0 Mac QA app and authorized publication on
 5 November 2026. Its exact-source Native checks passed, but release run 16 failed
 a heading-restoration workspace assertion before publishing. Version 1.2.0/build
-2018 remains unpublished. The 1.2.1/build 2019 candidate adds diagnostics; a cause
-or runtime fix has not been established, and its fresh validation is pending.
+2018 remains unpublished. The 1.2.1/build 2019 candidate replaces the affected
+Mac title/tag controls after diagnostics exposed incorrect native field heights;
+fresh validation and a separate pane-layout investigation are pending.
 See the [candidate notes](docs/releases/1.2.1.md),
 [unpublished 1.2.0 record](docs/releases/1.2.0.md) and [validation](docs/TESTING.md).
 

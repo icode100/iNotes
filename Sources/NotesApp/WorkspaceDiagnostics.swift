@@ -25,6 +25,8 @@ enum WorkspaceDiagnostics {
             }
             checks += 1
         }
+        WorkspaceNavigationProbe.beginDiagnosticCapture()
+        defer { WorkspaceNavigationProbe.endDiagnosticCapture() }
 
         // Exercise the installed resource lookup, not a source-tree path. This
         // catches missing SwiftPM bundles and Xcode resource-phase omissions.
@@ -259,11 +261,12 @@ enum WorkspaceDiagnostics {
 
         failureContext = {
             var context = ["Workspace captured failure context: checksCompleted=\(checks) baselineViewport=\(normalWidth)x\(normalHeight) originalSidebarCollapsed=\(sidebarWasCollapsed)"]
+            context.append("Failure asserted references controller=\(ObjectIdentifier(navigation)) sidebarItem=\(ObjectIdentifier(sidebarItem)) sidebarCollapsed=\(sidebarItem.isCollapsed) sheetsItem=\(ObjectIdentifier(sheetsItem)) sheetsCollapsed=\(sheetsItem.isCollapsed) currentSidebarMatches=\(navigation.splitViewItems.first === sidebarItem) currentSheetsMatches=\(navigation.splitViewItems.dropLast().last === sheetsItem)")
             context.append("Failure presentation fullPage=\(presentation.fullPage) headingVisible=\(presentation.headingVisible) sheetsVisible=\(presentation.sheetsVisible) toolsVisible=\(presentation.toolsVisible) selectedSheet=\(String(describing: store.sheetID))")
             context.append("Failure window frame=\(NSStringFromRect(window.frame)) contentLayout=\(NSStringFromRect(window.contentLayoutRect)) contentMin=\(NSStringFromSize(window.contentMinSize)) contentMax=\(NSStringFromSize(window.contentMaxSize)) hostFrame=\(NSStringFromRect(host.view.frame)) hostBounds=\(NSStringFromRect(host.view.bounds)) hostingSizingOptions=\(host.sizingOptions.rawValue)")
             for (index, item) in navigation.splitViewItems.enumerated() {
                 let view = item.viewController.view
-                var policy = "Failure native pane\(index) collapsed=\(item.isCollapsed) canCollapse=\(item.canCollapse) canCollapseFromWindowResize=\(item.canCollapseFromWindowResize) collapseBehavior=\(item.collapseBehavior) springLoaded=\(item.isSpringLoaded) minimum=\(item.minimumThickness) maximum=\(item.maximumThickness) preferred=\(item.preferredThicknessFraction) automaticMaximum=\(item.automaticMaximumThickness)"
+                var policy = "Failure native pane\(index) id=\(ObjectIdentifier(item)) collapsed=\(item.isCollapsed) canCollapse=\(item.canCollapse) canCollapseFromWindowResize=\(item.canCollapseFromWindowResize) collapseBehavior=\(item.collapseBehavior) springLoaded=\(item.isSpringLoaded) minimum=\(item.minimumThickness) maximum=\(item.maximumThickness) preferred=\(item.preferredThicknessFraction) automaticMaximum=\(item.automaticMaximumThickness)"
                     + " frame=\(NSStringFromRect(view.frame)) bounds=\(NSStringFromRect(view.bounds)) inHost=\(NSStringFromRect(view.convert(view.bounds, to: host.view))) attached=\(view.window === window)"
                 if #available(macOS 26.0, *) { policy += " automaticallyAdjustsSafeArea=\(item.automaticallyAdjustsSafeAreaInsets)" }
                 context.append(policy)
@@ -284,6 +287,12 @@ enum WorkspaceDiagnostics {
             for (index, probe) in currentProbes(in: host.view).enumerated() {
                 context.append("Failure navigation probe\(index) id=\(ObjectIdentifier(probe)) \(probe.diagnosticsState())")
             }
+            let retainedOwners = WorkspaceNavigationProbe.diagnosticsRestorationOwners()
+            context.append("Failure retained restoration owners count=\(retainedOwners.count)")
+            context.append(contentsOf: retainedOwners)
+            let navigationEvents = WorkspaceNavigationProbe.diagnosticsEventTrace()
+            context.append("Failure navigation event trace count=\(navigationEvents.count) limit=512")
+            context.append(contentsOf: navigationEvents)
             let fields = headingNativeFields(in: host.view)
             context.append("Failure native fields count=\(fields.count)")
             // Preserve every native frame before asking any field for a font,

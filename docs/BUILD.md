@@ -53,8 +53,10 @@ run **17**. The user confirmed the isolated 1.2.0 QA app works and authorized
 publication on 5 November 2026. Source `ca051953` passed hosted Native checks,
 including iPad compilation, but signed release run 16 failed a heading-restoration
 workspace assertion before publishing. Its 1.2.0/build 2018 tag and build number
-remain reserved; there are no public 1.2.0 assets to verify. Added diagnostic
-logging does not establish a cause or runtime fix. The new candidate requires
+remain reserved; there are no public 1.2.0 assets to verify. Diagnostics captured
+title/tag native height mismatches that outer SwiftUI frames did not resolve.
+The candidate replaces those Mac inputs and requires fresh input/layout checks;
+a separate pane failure also reproduced on unchanged v1.1. It requires
 fresh exact-source Native checks, a feed/counter recheck, release checks and
 independent public-asset verification.
 

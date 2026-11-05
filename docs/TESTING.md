@@ -8,13 +8,44 @@ signed-release run **17**, subject to a live feed/counter check. The `v1.2.0`
 tag remains at `ca051953ff5e89239ed1bbed51ac033e02df5e35`; build 2018 stays
 reserved and must not be reused for changed source.
 
-Preparation adds diagnostic logging around the existing heading-restoration
-assertion; it does not weaken the assertion. At this stage, no cause or production
-runtime fix has been established. Fresh exact-source Native checks, signed
-release checks and public-asset verification for the new candidate are pending.
+The candidate replaces the Mac title/tag inputs with owned AppKit controls after
+diagnostics captured wrong native field allocations. Input/layout validation,
+fresh exact-source Native checks, signed release checks and public-asset
+verification for the new candidate are pending. A separate full-page pane
+assertion also failed on unchanged v1.1 source; its cause remains unresolved.
 The user's initial 1.2.0 QA result remains recorded below; no second manual pass
 or later-source success is implied. The latest verified public version remains
 **1.1.0 / build 2017**.
+
+The investigation retained the original heading-height tolerance, sheet-switch
+drift limit, minimum post-turn observations, sampling window and timeout. Added
+heading repetitions process only the normal run loop; they do not force layout,
+click the page or change unrelated preferences. Native allocation checks inspect
+actual title/tag frames as well as the editor viewport. Healthy frame logging
+does not query font/cell sizing metrics; failure snapshots capture all frames and
+state before querying those metrics. A later recovery cannot convert an earlier
+failed observation into a pass.
+
+| Source / Native run | Observed result |
+| --- | --- |
+| `933bce66` / [42018290677](https://github.com/icode100/iNotes/actions/runs/42018290677) | Diagnostic run passed; baseline/restored viewport height 382 points, hidden 534, title 34. This did not establish a fix. |
+| `3c7bcd46` / [42019767732](https://github.com/icode100/iNotes/actions/runs/42019767732) | Heading repetitions passed; later sheet switching retained a 21-point viewport drift with stable probe identity and no collapse events. |
+| `dad48d47` / [42021928675](https://github.com/icode100/iNotes/actions/runs/42021928675) | Heading cycle 10 retained viewport height 361 instead of 382 through a passive one-second follow-up. |
+| `30fd6c4e` / [42023202047](https://github.com/icode100/iNotes/actions/runs/42023202047) | All-field diagnostic run passed 802 editor / 664 workspace checks and iPad compilation; no runtime correction was present. |
+| `1def2cbb` / [42025617036](https://github.com/icode100/iNotes/actions/runs/42025617036) | All 100 heading repetitions passed, then full-page exit failed its independently hidden heading/sheets assertion. |
+| Unchanged v1.1 `7946a931` / [42027214828](https://github.com/icode100/iNotes/actions/runs/42027214828) | The same full-page exit assertion failed on macOS 26.7.2 (25G332), image `20261102.0473.1`. This establishes a baseline reproduction, not its cause. |
+| `a7a76638` / [42027587653](https://github.com/icode100/iNotes/actions/runs/42027587653) | Tags had a native 34-point frame despite its 10-point font and 13-point cell height; title remained 34 and viewport became 361. |
+| `09d460ee` / [42029638895](https://github.com/icode100/iNotes/actions/runs/42029638895) | Fixing only the outer Tags frame exposed the inverse: title native frame 13 despite its 28-point font and 34-point cell height; viewport became 403. |
+| `14484535` / [42030903619](https://github.com/icode100/iNotes/actions/runs/42030903619) | Constraining both outer frames held viewport height at 382, but Tags still overflowed its 13-point wrapper with a native 34-point frame at cycle 22. The added allocation assertion correctly failed. |
+
+The last mismatch also reproduced locally on macOS 27.2 (26B123): title had a
+13-point frame at cycle 18 while the viewport remained stable. These observations
+establish incorrect native allocations and show why outer frame constraints were
+insufficient; they do not prove an internal SwiftUI/AppKit cache mechanism.
+The replacement must pass field-local typing, Unicode/trailing-space title
+handling, selection, direct UndoManager undo/redo, focus, read-only and composition
+regressions as well as the existing workspace suite. In-process fixtures do not
+establish physical IME, displayed system cursor or stylus behavior.
 
 ## v1.2.0 exact-source Native checks — 5 November 2026
 

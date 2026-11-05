@@ -478,18 +478,16 @@ struct SheetTitleField: View {
     var body: some View {
         VStack(alignment: .leading, spacing: 6) {
             #if os(macOS)
-            let metrics = MacSheetTitleFieldMetrics.current
-            #endif
+            MacHeadingField(text: $draft, role: .title, isReadOnly: isReadOnly)
+                .id(MacHeadingFieldRole.title)
+            #else
             TextField("Page title", text: $draft)
                 .textFieldStyle(.plain)
-                #if os(macOS)
-                .font(Font(metrics.font)).frame(height: metrics.height)
-                #else
                 .font(.system(size: 28, weight: .semibold, design: .serif))
-                #endif
                 .disabled(isReadOnly)
                 .accessibilityLabel("Page title")
                 .accessibilityHint("Optional. Leave blank to identify the sheet by its number.")
+            #endif
             Rectangle().fill(.secondary.opacity(0.4)).frame(height: 1)
         }
         .onChange(of: draft) { _, value in

@@ -38,9 +38,13 @@ checks, including iPad compilation. Signed release run **16**, build **2018**,
 then failed the heading-restoration layout-height assertion before publication.
 Its Ed25519 signature probes and public-asset verification did not run; no 1.2.0
 release assets were published. Preserve the `v1.2.0` tag and reserved build 2018.
-The current **1.2.1 / build 2019** candidate adds diagnostic evidence without
-weakening that assertion; no cause or runtime fix is established yet. Its exact
-source must pass fresh Native checks before fresh release run **17**. Consult
+The current **1.2.1 / build 2019** candidate replaces the two Mac heading inputs
+with owned AppKit controls after diagnostics captured title/tag fields receiving
+the other role's native height. An outer SwiftUI frame alone retained an
+overflowing native control and is not a sufficient fix. The replacement still
+requires fresh input and layout validation. A separate full-page pane assertion
+also failed on unchanged v1.1 source; its cause remains unresolved. The exact
+final source must pass fresh Native checks before fresh release run **17**. Consult
 `docs/TESTING.md` for evidence and limits. The verified public release remains
 **1.1.0 / build 2017** until a new release actually publishes and is verified.
 
@@ -62,6 +66,9 @@ source must pass fresh Native checks before fresh release run **17**. Consult
 - `ContentView.swift`, `SheetDetail.swift`, `WorkspaceAppearance.swift`: navigation,
   sheet UI, tools, themes, and workspace presentation. Keep layout changes here
   separate from drawing/input behavior unless the task requires both.
+- `MacHeadingFields.swift`: owned Mac title/tag native controls and field-editor
+  synchronization. Keep each control's role, actual font-derived height, native
+  selection, marked text and field-local undo handling intact.
 - `Editors/UnifiedPageEditor.swift`: shared Mac page using AppKit text and ink layers.
   `RichTextEditor.swift`, `MacPageObjects.swift`, and `MacPageSelection.swift`
   participate in native text, object, selection, undo, and cursor behavior.
@@ -204,13 +211,18 @@ Do not treat callback-level cursor assertions alone as proof of the displayed cu
 
 ## Known regressions and testing traps
 
-- **Hosted heading restoration failed in unpublished v1.2.0.** Exact-source
-  Native checks passed at `ca051953`, but signed release run 16 failed
-  “restoring the heading restores its previous layout height” before publishing.
-  Preserve the assertion and gather the before/hidden/restored viewport geometry
-  and heading state. Do not claim a cause, a fix, or passing v1.2.1 validation
-  from the earlier passing run; no production runtime correction is established
-  by the diagnostic logging alone.
+- **Heading fields received another role's native height.** Signed release run
+  16 failed heading restoration after exact-source Native checks passed. Later
+  passive repetitions captured a 10-point Tags field allocated 34 points instead
+  of its native 13, and a 28-point Title allocated 13 instead of its native 34.
+  Constraining only outer SwiftUI frames kept the viewport stable while a native
+  field still overflowed. Check actual native field frames as well as viewport
+  geometry, including passive hide/show and sheet switching. Preserve original
+  failure observations, drift thresholds and sampling requirements. Owned Mac
+  heading controls must retain field-local Select All, direct UndoManager
+  undo/redo synchronization, raw editing spaces, marked text and read-only
+  behavior. The internal framework mechanism is not established by these
+  observations. Consult the versioned validation record for the candidate result.
 
 - **Hosted load exhausted a sheet-switch sampling window.** Release run 12
   (unpublished build 2014) observed one sample after a slow run-loop turn, with

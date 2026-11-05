@@ -84,6 +84,40 @@ final class WorkspaceNavigationProbe: NSView {
     private var savedDetail: ItemState?
     private var restoration: NavigationRestoration?
     private static let restorationOwners = NSMapTable<NSSplitViewController, NavigationRestoration>.weakToStrongObjects()
+    private static var diagnosticCaptureDepth = 0
+    private static var diagnosticEvents: [String] = []
+    private static let maximumDiagnosticEvents = 512
+    private var diagnosticLastTransitionEntry = "none"
+    private var diagnosticLastTransitionTargets: [String] = []
+    private var diagnosticLastCompletion = "none"
+
+    /// The native fixture enables capture explicitly. Production navigation does
+    /// not allocate trace messages or emit logs; only immutable strings are kept.
+    static func beginDiagnosticCapture() {
+        if diagnosticCaptureDepth == 0 { diagnosticEvents = [] }
+        diagnosticCaptureDepth += 1
+    }
+
+    static func endDiagnosticCapture() {
+        diagnosticCaptureDepth = max(0, diagnosticCaptureDepth - 1)
+        if diagnosticCaptureDepth == 0 { diagnosticEvents = [] }
+    }
+
+    private static func recordDiagnosticEvent(_ message: @autoclosure () -> String) {
+        guard diagnosticCaptureDepth > 0 else { return }
+        if diagnosticEvents.count == maximumDiagnosticEvents { diagnosticEvents.removeFirst() }
+        diagnosticEvents.append("Navigation event uptime=\(ProcessInfo.processInfo.systemUptime) \(message())")
+    }
+
+    static func diagnosticsEventTrace() -> [String] { diagnosticEvents }
+
+    static func diagnosticsRestorationOwners() -> [String] {
+        restorationOwners.keyEnumerator().allObjects.compactMap { key in
+            guard let controller = key as? NSSplitViewController,
+                  let owner = restorationOwners.object(forKey: controller) else { return nil }
+            return "Retained restoration controller=\(ObjectIdentifier(controller)) \(owner.diagnosticsState())"
+        }
+    }
 
     /// Read-only failure diagnostics. Never synchronizes, lays out, or publishes
     /// presentation changes; normal workspace operation does not call this.
@@ -92,6 +126,7 @@ final class WorkspaceNavigationProbe: NSView {
             + " applying=\(applying) transitionInProgress=\(transitionInProgress) transitionGeneration=\(transitionGeneration) scheduled=\(scheduled) geometryScheduled=\(geometryScheduled) dismantled=\(dismantled)"
             + " leadingInset=\(String(describing: leadingInset)) expandedSheetsWidth=\(String(describing: expandedSheetsWidth)) restoreExpandedSheetsWidth=\(restoreExpandedSheetsWidth)"
             + " savedCollapsed=\(savedItems.map(\.collapsed)) savedController=\(savedController.map { String(describing: ObjectIdentifier($0)) } ?? "nil") restoration={\(restoration?.diagnosticsState() ?? "nil")}"
+            + " lastTransitionEntry={\(diagnosticLastTransitionEntry)} lastTransitionTargets=\(diagnosticLastTransitionTargets) lastCompletion={\(diagnosticLastCompletion)}"
     }
 
     private struct ItemState {
@@ -181,10 +216,15 @@ final class WorkspaceNavigationProbe: NSView {
         }
 
         func diagnosticsState() -> String {
-            "pending=\(pending) detached=\(detached) restoring=\(restoring) ownsController=\(ownsController) observers=\(observations.count) hasAfterRestoration=\(afterRestoration != nil)"
+            "id=\(ObjectIdentifier(self)) controller=\(controller.map { String(describing: ObjectIdentifier($0)) } ?? "nil")"
+                + " pending=\(pending) detached=\(detached) restoring=\(restoring) ownsController=\(ownsController) observers=\(observations.count) hasAfterRestoration=\(afterRestoration != nil)"
+                + " itemIDs=\(items.map { String(describing: ObjectIdentifier($0.item)) }) savedCollapsed=\(items.map(\.collapsed)) currentCollapsed=\(items.map { $0.item.isCollapsed })"
         }
 
-        func beginTransition() { pending += 1 }
+        func beginTransition() {
+            pending += 1
+            WorkspaceNavigationProbe.recordDiagnosticEvent("restoration begin \(diagnosticsState())")
+        }
 
         func waitForRestoration(_ continuation: @escaping () -> Void) -> Bool {
             guard ownsController else { return false }
@@ -192,11 +232,13 @@ final class WorkspaceNavigationProbe: NSView {
             // request; the continuation weakly owns the replacement view.
             // SwiftUI may attach the replacement before dismantling this owner.
             afterRestoration = continuation
+            WorkspaceNavigationProbe.recordDiagnosticEvent("restoration wait \(diagnosticsState())")
             return true
         }
 
         func completeTransition() {
             pending = max(0, pending - 1)
+            WorkspaceNavigationProbe.recordDiagnosticEvent("restoration complete \(diagnosticsState())")
             guard detached, ownsController else { return }
             restore()
             if pending == 0 {
@@ -207,6 +249,7 @@ final class WorkspaceNavigationProbe: NSView {
 
         func detach() {
             detached = true
+            WorkspaceNavigationProbe.recordDiagnosticEvent("restoration detach \(diagnosticsState())")
             if pending > 0 {
                 observations = items.map { state in
                     state.item.observe(\.isCollapsed, options: [.new]) { [weak self] item, _ in
@@ -223,6 +266,7 @@ final class WorkspaceNavigationProbe: NSView {
         }
 
         private func finishRestoration() {
+            WorkspaceNavigationProbe.recordDiagnosticEvent("restoration finish \(diagnosticsState())")
             relinquish()
             let continuation = afterRestoration
             afterRestoration = nil
@@ -238,6 +282,7 @@ final class WorkspaceNavigationProbe: NSView {
         }
 
         private func relinquish() {
+            WorkspaceNavigationProbe.recordDiagnosticEvent("restoration relinquish \(diagnosticsState())")
             observations = []
             if let controller, ownsController {
                 WorkspaceNavigationProbe.restorationOwners.removeObject(forKey: controller)
@@ -307,6 +352,7 @@ final class WorkspaceNavigationProbe: NSView {
         guard navigationItems.count >= 2 else { return }
         if let previous = Self.restorationOwners.object(forKey: controller), previous !== restoration,
            previous.waitForRestoration({ [weak self] in self?.scheduleSynchronization() }) {
+            Self.recordDiagnosticEvent("probe=\(ObjectIdentifier(self)) waiting for controller=\(ObjectIdentifier(controller)) owner={\(previous.diagnosticsState())}")
             // Do not observe an old transaction as a user's divider change or
             // snapshot its intermediate state for a new navigation owner.
             return
@@ -375,6 +421,11 @@ final class WorkspaceNavigationProbe: NSView {
         if changesPresentation {
             transitionGeneration += 1
             let generation = transitionGeneration
+            if Self.diagnosticCaptureDepth > 0 {
+                diagnosticLastTransitionEntry = "probe=\(ObjectIdentifier(self)) controller=\(ObjectIdentifier(controller)) generation=\(generation) fullPage=\(fullPage) wasFullPage=\(wasFullPage) sheetsVisible=\(sheetsVisible) wasTransitioning=\(wasTransitioning) previousCollapsed=\(previousCollapsed) itemIDs=\(navigationItems.map { String(describing: ObjectIdentifier($0)) }) collapsed=\(navigationItems.map(\.isCollapsed))"
+                diagnosticLastTransitionTargets = []
+                Self.recordDiagnosticEvent("transition entry \(diagnosticLastTransitionEntry)")
+            }
             transitionInProgress = true
             NSAnimationContext.beginGrouping()
             let animation = NSAnimationContext.current
@@ -386,6 +437,10 @@ final class WorkspaceNavigationProbe: NSView {
             animation.completionHandler = { [weak self] in
                 MainActor.assumeIsolated {
                     restoration?.completeTransition()
+                    if Self.diagnosticCaptureDepth > 0, let self {
+                        self.diagnosticLastCompletion = "generation=\(generation) currentGeneration=\(self.transitionGeneration) fullPage=\(self.fullPage) wasFullPage=\(self.wasFullPage) dismantled=\(self.dismantled) previousCollapsed=\(self.previousCollapsed) collapsed=\(self.savedItems.map { $0.item.isCollapsed })"
+                        Self.recordDiagnosticEvent("transition completion probe=\(ObjectIdentifier(self)) \(self.diagnosticLastCompletion)")
+                    }
                     guard let self, !self.dismantled, self.transitionGeneration == generation else { return }
                     self.transitionInProgress = false
                     // Retain this snapshot only through an interrupted exit.
@@ -397,6 +452,11 @@ final class WorkspaceNavigationProbe: NSView {
         }
         defer { if changesPresentation { NSAnimationContext.endGrouping() } }
         func collapse(_ item: NSSplitViewItem, _ collapsed: Bool) {
+            if Self.diagnosticCaptureDepth > 0 {
+                let target = "generation=\(transitionGeneration) item=\(ObjectIdentifier(item)) current=\(item.isCollapsed) target=\(collapsed) animated=\(changesPresentation) fullPage=\(fullPage) wasFullPage=\(wasFullPage) previousCollapsed=\(previousCollapsed)"
+                if changesPresentation { diagnosticLastTransitionTargets.append(target) }
+                Self.recordDiagnosticEvent("collapse target probe=\(ObjectIdentifier(self)) \(target)")
+            }
             // Even an equal model value may have an older animation pending.
             // The newest explicit transition must replace that animation.
             if changesPresentation { item.animator().isCollapsed = collapsed }
@@ -407,6 +467,7 @@ final class WorkspaceNavigationProbe: NSView {
             // snapshot columns still finishing the interrupted restore animation.
             if !wasFullPage && (!wasTransitioning || previousCollapsed.isEmpty) {
                 previousCollapsed = navigationItems.map(\.isCollapsed)
+                Self.recordDiagnosticEvent("full-page snapshot probe=\(ObjectIdentifier(self)) generation=\(transitionGeneration) saved=\(previousCollapsed)")
             }
             for item in navigationItems {
                 if !item.canCollapse { item.canCollapse = true }
@@ -501,6 +562,7 @@ final class WorkspaceNavigationProbe: NSView {
     }
 
     private func restoreNavigation() {
+        Self.recordDiagnosticEvent("restoreNavigation probe=\(ObjectIdentifier(self)) generation=\(transitionGeneration) wasFullPage=\(wasFullPage) previousCollapsed=\(previousCollapsed) savedController=\(savedController.map { String(describing: ObjectIdentifier($0)) } ?? "nil")")
         transitionGeneration += 1
         transitionInProgress = false
         collapseObservation = nil

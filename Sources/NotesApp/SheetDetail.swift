@@ -623,85 +623,38 @@ struct SheetDetail: View {
     }
 }
 
-#if os(macOS)
-/// Measure a fresh plain field only after assigning its intended native font.
-/// Both heading fields have exhibited another font role's allocation despite
-/// retaining their correct font and native cell metrics.
-@MainActor
-struct MacTextFieldMetrics {
-    let font: NSFont
-    let height: CGFloat
-
-    init(font: NSFont) {
-        let field = NSTextField(string: "")
-        field.font = font
-        field.isBezeled = false
-        field.isBordered = false
-        field.drawsBackground = false
-        field.maximumNumberOfLines = 1
-        field.cell?.usesSingleLineMode = true
-        field.cell?.wraps = false
-        field.cell?.isScrollable = true
-        let measured = field.cell?.cellSize.height ?? field.intrinsicContentSize.height
-        let nativeLineHeight = font.ascender - font.descender + font.leading
-        self.font = font
-        height = ceil(measured.isFinite && measured > 0 ? measured : nativeLineHeight)
-    }
-}
-
-@MainActor
-enum MacTagFieldMetrics {
-    private static var cached: MacTextFieldMetrics?
-
-    static var current: MacTextFieldMetrics {
-        let font = NSFont.preferredFont(forTextStyle: .caption1, options: [:])
-        if let cached, cached.font == font { return cached }
-        let value = MacTextFieldMetrics(font: font)
-        // One entry, replaced if the preferred system/accessibility font changes.
-        cached = value
-        return value
-    }
-}
-
-@MainActor
-enum MacSheetTitleFieldMetrics {
-    private static var cached: MacTextFieldMetrics?
-
-    static var current: MacTextFieldMetrics {
-        let system = NSFont.systemFont(ofSize: 28, weight: .semibold)
-        let descriptor = system.fontDescriptor.withDesign(.serif) ?? system.fontDescriptor
-        let font = NSFont(descriptor: descriptor, size: 28) ?? system
-        if let cached, cached.font == font { return cached }
-        let value = MacTextFieldMetrics(font: font)
-        // A separate single entry keeps the two heading roles bounded.
-        cached = value
-        return value
-    }
-}
-#endif
 
 struct TagsField: View {
     @Binding var tags: [String]
     @ViewState private var draft = ""
+    #if os(macOS)
+    @ViewState private var nativeDraft = MacHeadingFieldDraft()
+    #else
     @FocusState private var focused: Bool
+    #endif
+
     var body: some View {
         #if os(macOS)
-        let metrics = MacTagFieldMetrics.current
-        #endif
+        MacHeadingField(text: $draft, role: .tags, nativeDraft: nativeDraft, onCommit: commit)
+            .id(MacHeadingFieldRole.tags)
+            .onAppear {
+                let value = tags.joined(separator: ", ")
+                nativeDraft.text = value
+                draft = value
+            }
+            .onDisappear { commit(nativeDraft.text) }
+        #else
         TextField("Add tags, separated by commas", text: $draft)
-            #if os(macOS)
-            .font(Font(metrics.font)).frame(height: metrics.height)
-            #else
-            .font(.caption)
-            #endif
-            .textFieldStyle(.plain).foregroundStyle(.secondary)
-            .focused($focused).onSubmit(commit)
+            .font(.caption).textFieldStyle(.plain).foregroundStyle(.secondary)
+            .focused($focused).onSubmit { commit(draft) }
             .onAppear { draft = tags.joined(separator: ", ") }
-            .onDisappear(perform: commit)
-            .onChange(of: focused) { _, value in if !value { commit() } }
+            .onDisappear { commit(draft) }
+            .onChange(of: focused) { _, value in if !value { commit(draft) } }
+        #endif
     }
-    private func commit() {
-        let result = draft.split(separator: ",").map { $0.trimmingCharacters(in: .whitespacesAndNewlines) }.filter { !$0.isEmpty }
+
+    private func commit(_ raw: String) {
+        let result = raw.split(separator: ",").map { $0.trimmingCharacters(in: .whitespacesAndNewlines) }.filter { !$0.isEmpty }
         if tags != result { tags = result }
     }
 }

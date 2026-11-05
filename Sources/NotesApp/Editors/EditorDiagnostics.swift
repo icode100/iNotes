@@ -16,6 +16,39 @@ private final class EditorDiagnosticWindow: NSWindow {
     }
 }
 
+@MainActor
+private final class HeadingFieldDiagnosticState: ObservableObject {
+    @Published var identity = 0
+    @Published var visible = true
+    @Published var readOnly = false
+    @Published var rejectRenames = false
+    @Published var dark = false
+}
+
+private struct HeadingFieldDiagnosticView: View {
+    @ObservedObject var store: NotesStore
+    @ObservedObject var state: HeadingFieldDiagnosticState
+    let sheetID: UUID
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 12) {
+            if state.visible {
+                VStack(alignment: .leading, spacing: 12) {
+                    SheetTitleField(title: store.library.node(id: sheetID)?.title ?? "", isReadOnly: state.readOnly) { candidate in
+                        guard !state.rejectRenames else { return false }
+                        store.rename(sheetID, to: candidate)
+                        return store.library.node(id: sheetID)?.title == candidate
+                    }
+                    TagsField(tags: store.binding(sheetID, \.tags, fallback: []))
+                        .disabled(state.readOnly)
+                }.id(state.identity)
+            }
+            Spacer(minLength: 0)
+        }.padding(16).frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
+            .preferredColorScheme(state.dark ? .dark : .light)
+    }
+}
+
 /// Explicitly invoked by --self-test. No global input events or user files are used.
 @MainActor
 enum EditorDiagnostics {
@@ -1082,7 +1115,287 @@ enum EditorDiagnostics {
                   "textbox editing continues after a model refresh in Text mode")
         checks += try selectAllChecks(window: window)
         checks += try imageChecks(window: window)
+        checks += try headingFieldChecks()
         return "\(checks) native editor integration checks passed (shared text/ink page, straight lines, formatting, pressure, dark/light, searchable export, mixed text/ink lasso, atomic move/delete/undo, canonical rich text, native PencilKit masks and clipboard validation)."
+    }
+
+    /// Exercise the actual heading components and AppKit field editor, including
+    /// direct native undo-manager calls rather than coordinator callbacks.
+    private static func headingFieldChecks() throws -> Int {
+        var checks = 0
+        func check(_ condition: @autoclosure () -> Bool, _ message: String) throws {
+            guard condition() else { throw Failure(description: "Heading field diagnostic failed: \(message)") }
+            checks += 1
+        }
+        let directory = FileManager.default.temporaryDirectory.appendingPathComponent("iNotes-heading-fields-\(UUID())")
+        let suite = "io.inotes.heading-field-diagnostics.\(UUID())"
+        guard let preferences = UserDefaults(suiteName: suite) else { throw Failure(description: "Missing isolated heading preferences") }
+        let store = NotesStore(directory: directory, preferences: preferences)
+        guard let sheetID = store.selectedSheet?.id else { throw Failure(description: "Missing isolated heading sheet") }
+        store.rename(sheetID, to: "")
+        store.update(sheetID) {
+            $0.body = "Untouched page — नमस्ते"
+            $0.strokes = [InkStroke(points: [InkPoint(x: 20, y: 30), InkPoint(x: 60, y: 70)])]
+            $0.textBoxes = [PageTextBox(x: 100, y: 120, text: "Keep this object")]
+            $0.tags = ["existing"]
+        }
+        guard let originalContent = store.library.node(id: sheetID)?.pageContent else { throw Failure(description: "Missing heading page content") }
+        let state = HeadingFieldDiagnosticState()
+        let host = NSHostingView(rootView: HeadingFieldDiagnosticView(store: store, state: state, sheetID: sheetID))
+        host.frame = NSRect(x: 0, y: 60, width: 560, height: 190)
+        host.autoresizingMask = [.width]
+        let outer = NSView(frame: NSRect(x: 0, y: 0, width: 560, height: 280))
+        outer.addSubview(host)
+        let unrelated = NSTextField(string: "Unrelated input")
+        unrelated.frame = NSRect(x: 20, y: 15, width: 450, height: 24)
+        outer.addSubview(unrelated)
+        let window = EditorDiagnosticWindow(contentRect: outer.bounds,
+            styleMask: [.titled, .resizable], backing: .buffered, defer: false)
+        window.isReleasedWhenClosed = false
+        window.contentView = outer
+        window.testPointerLocation = .zero // Local key-window fixture; no global input.
+        window.makeKeyAndOrderFront(nil)
+        window.setFrameOrigin(NSPoint(x: -6500, y: -6500))
+        defer {
+            window.makeFirstResponder(nil)
+            window.orderOut(nil)
+            window.close()
+            _ = store.prepareForQuit()
+            preferences.removePersistentDomain(forName: suite)
+            try? FileManager.default.removeItem(at: directory)
+        }
+        func passive(_ duration: TimeInterval = 0.08) {
+            let deadline = Date(timeIntervalSinceNow: duration)
+            repeat { RunLoop.main.run(until: min(deadline, Date(timeIntervalSinceNow: 0.016))) } while Date() < deadline
+        }
+        func waitUntil(_ condition: () -> Bool) {
+            let deadline = Date(timeIntervalSinceNow: 1)
+            repeat {
+                RunLoop.main.run(until: min(deadline, Date(timeIntervalSinceNow: 0.016)))
+            } while !condition() && Date() < deadline
+        }
+        func fields(in view: NSView) -> [MacHeadingNativeTextField] {
+            let own = (view as? MacHeadingNativeTextField).map { [$0] } ?? []
+            return own + view.subviews.flatMap { fields(in: $0) }
+        }
+        func mountedControls() throws -> (title: MacHeadingNativeTextField, tags: MacHeadingNativeTextField) {
+            let all = fields(in: host)
+            guard let title = all.first(where: { $0.role == .title }),
+                  let tags = all.first(where: { $0.role == .tags }) else {
+                throw Failure(description: "Actual title/tags components did not mount their owned native controls")
+            }
+            return (title, tags)
+        }
+        func checkHeights(_ controls: (title: MacHeadingNativeTextField, tags: MacHeadingNativeTextField), _ phase: String) throws {
+            try check(abs(controls.title.bounds.height - MacSheetTitleFieldMetrics.current.height) < 0.5,
+                      "\(phase) actual title control uses its own native font height")
+            try check(abs(controls.tags.bounds.height - MacTagFieldMetrics.current.height) < 0.5,
+                      "\(phase) actual tags control uses its own native font height")
+        }
+        func focus(_ field: NSTextField) throws -> NSTextView {
+            try check(window.makeFirstResponder(field), "native heading/input field accepts first responder")
+            guard let editor = field.currentEditor() as? NSTextView, window.firstResponder === editor else {
+                throw Failure(description: "Actual native field editor did not receive heading focus")
+            }
+            return editor
+        }
+        func edit(_ editor: NSTextView, _ value: String, replacing range: NSRange? = nil) throws {
+            guard let manager = editor.undoManager else { throw Failure(description: "Native field editor has no real undo manager") }
+            editor.breakUndoCoalescing()
+            manager.beginUndoGrouping()
+            editor.insertText(value, replacementRange: range ?? editor.selectedRange())
+            editor.breakUndoCoalescing()
+            manager.endUndoGrouping()
+        }
+        func replace(_ editor: NSTextView, _ value: String) throws {
+            try edit(editor, value, replacing: NSRange(location: 0, length: (editor.string as NSString).length))
+        }
+
+        waitUntil { fields(in: host).count == 2 }
+        passive()
+        var controls = try mountedControls()
+        try checkHeights(controls, "initial")
+        try check(controls.title.stringValue.isEmpty && store.library.node(id: sheetID)?.title == "",
+                  "new title component displays and stores a blank title")
+        let titleEditor = try focus(controls.title)
+        try replace(titleEditor, "Physics ")
+        waitUntil { store.library.node(id: sheetID)?.title == "Physics" }
+        try check(titleEditor.string == "Physics " && controls.title.stringValue == "Physics ",
+                  "live title normalization preserves an in-progress trailing space")
+        try edit(titleEditor, "notes — café 日本語 नमस्ते vlpbhet VLPBHET")
+        let unicodeTitle = "Physics notes — café 日本語 नमस्ते vlpbhet VLPBHET"
+        waitUntil { store.library.node(id: sheetID)?.title == unicodeTitle }
+        try check(titleEditor.string == unicodeTitle && store.library.node(id: sheetID)?.title == unicodeTitle,
+                  "actual native title typing preserves multiword Unicode and plain tool letters")
+        let selectAll = #selector(NSText.selectAll(_:))
+        try check(window.firstResponder?.tryToPerform(selectAll, with: nil) == true
+                  && titleEditor.selectedRange() == NSRange(location: 0, length: (unicodeTitle as NSString).length),
+                  "Select All remains local to the actual title field editor")
+        guard let plainToolLetter = NSEvent.keyEvent(with: .keyDown, location: .zero, modifierFlags: [], timestamp: 0,
+            windowNumber: window.windowNumber, context: nil, characters: "p", charactersIgnoringModifiers: "p", isARepeat: false, keyCode: 35) else {
+            throw Failure(description: "Cannot create local title typing shortcut fixture")
+        }
+        try check(ToolShortcutMonitor.eligibleTool(for: plainToolLetter, in: window, activeTool: .pen) == nil,
+                  "plain tool letters remain native title input while Pen is selected")
+        titleEditor.setSelectedRange(NSRange(location: (unicodeTitle as NSString).length, length: 0))
+        guard let titleUndo = titleEditor.undoManager else { throw Failure(description: "Missing title undo manager") }
+        titleUndo.removeAllActions()
+        try edit(titleEditor, " undo")
+        waitUntil { store.library.node(id: sheetID)?.title == unicodeTitle + " undo" }
+        try check(titleUndo.canUndo, "actual title typing registers a native field-editor undo action")
+        titleUndo.undo()
+        waitUntil { store.library.node(id: sheetID)?.title == unicodeTitle }
+        try check(titleEditor.string == unicodeTitle && store.library.node(id: sheetID)?.title == unicodeTitle && titleUndo.canRedo,
+                  "direct real undo-manager undo synchronizes title control, draft and stored model")
+        titleUndo.redo()
+        waitUntil { store.library.node(id: sheetID)?.title == unicodeTitle + " undo" }
+        try check(titleEditor.string == unicodeTitle + " undo" && store.library.node(id: sheetID)?.title == unicodeTitle + " undo",
+                  "direct real undo-manager redo synchronizes title control, draft and stored model")
+
+        let caret = NSRange(location: 3, length: 2)
+        titleEditor.setSelectedRange(caret)
+        state.dark.toggle()
+        store.update(sheetID) { $0.isFavorite.toggle() }
+        passive()
+        let refreshedControls = try mountedControls()
+        try check(refreshedControls.title === controls.title && window.firstResponder === titleEditor
+                  && titleEditor.selectedRange() == caret && titleEditor.undoManager === titleUndo,
+                  "theme and unrelated model refresh retain native title instance, focus, caret and undo manager")
+        store.rename(sheetID, to: "External title")
+        waitUntil { titleEditor.string == "External title" }
+        try check(titleEditor.string == "External title" && titleEditor.selectedRange() == caret && window.firstResponder === titleEditor,
+                  "external title rename updates the active native field without stealing focus or resetting the caret")
+
+        titleEditor.setSelectedRange(NSRange(location: (titleEditor.string as NSString).length, length: 0))
+        let beforeComposition = store.library.node(id: sheetID)?.title ?? ""
+        titleEditor.setMarkedText("かな", selectedRange: NSRange(location: 2, length: 0), replacementRange: titleEditor.selectedRange())
+        try check(titleEditor.hasMarkedText(), "native title field editor accepts a synthetic IME marked range")
+        store.update(sheetID) { $0.isFavorite.toggle() }
+        state.dark.toggle()
+        passive()
+        try check(titleEditor.hasMarkedText() && titleEditor.string.contains("かな")
+                  && store.library.node(id: sheetID)?.title == beforeComposition,
+                  "model/theme refresh preserves marked title text and does not save partial composition")
+        titleEditor.insertText("かな", replacementRange: titleEditor.markedRange())
+        waitUntil { store.library.node(id: sheetID)?.title == beforeComposition + "かな" }
+        try check(!titleEditor.hasMarkedText() && titleEditor.string == beforeComposition + "かな"
+                  && store.library.node(id: sheetID)?.title == beforeComposition + "かな",
+                  "committing native marked title text publishes the completed composition")
+
+        state.rejectRenames = true
+        passive()
+        let acceptedTitle = store.library.node(id: sheetID)?.title ?? ""
+        try replace(titleEditor, "Rejected rename")
+        waitUntil { titleEditor.string == acceptedTitle }
+        try check(titleEditor.string == acceptedTitle && store.library.node(id: sheetID)?.title == acceptedTitle,
+                  "rejected live title rename restores the saved model and actual native field")
+        state.rejectRenames = false
+        passive()
+        let oversizedTitle = String(repeating: "📝", count: 300)
+        try replace(titleEditor, oversizedTitle)
+        waitUntil { titleEditor.string.count == 256 && store.library.node(id: sheetID)?.title.count == 256 }
+        try check(titleEditor.string == String(oversizedTitle.prefix(256))
+                  && store.library.node(id: sheetID)?.title == titleEditor.string
+                  && titleEditor.selectedRange().location <= (titleEditor.string as NSString).length,
+                  "actual title input bounds a Unicode paste to 256 characters and keeps a valid native caret")
+        try replace(titleEditor, "")
+        waitUntil { store.library.node(id: sheetID)?.title == "" }
+        try check(titleEditor.string.isEmpty && store.library.node(id: sheetID)?.title == "",
+                  "clearing the actual title control restores the blank stored title")
+
+        var tagsEditor = try focus(controls.tags)
+        try replace(tagsEditor, "math, physics,  , café")
+        passive()
+        try check(store.library.node(id: sheetID)?.tags == ["existing"], "tags remain a native editing draft until committed")
+        tagsEditor.doCommand(by: NSSelectorFromString("insertNewline:"))
+        waitUntil { store.library.node(id: sheetID)?.tags == ["math", "physics", "café"] }
+        try check(store.library.node(id: sheetID)?.tags == ["math", "physics", "café"],
+                  "native Return commits parsed tags through the actual component")
+        tagsEditor = try focus(controls.tags)
+        try replace(tagsEditor, "algebra, विश्लेषण")
+        _ = try focus(unrelated)
+        waitUntil { store.library.node(id: sheetID)?.tags == ["algebra", "विश्लेषण"] }
+        try check(store.library.node(id: sheetID)?.tags == ["algebra", "विश्लेषण"],
+                  "native focus loss commits trimmed Unicode tags")
+        tagsEditor = try focus(controls.tags)
+        let baseTags = tagsEditor.string
+        guard let tagsUndo = tagsEditor.undoManager else { throw Failure(description: "Missing tags undo manager") }
+        tagsUndo.removeAllActions()
+        tagsEditor.setSelectedRange(NSRange(location: (baseTags as NSString).length, length: 0))
+        try edit(tagsEditor, ", geometry")
+        tagsUndo.undo()
+        store.update(sheetID) { $0.isFavorite.toggle() }
+        passive()
+        try check(tagsEditor.string == baseTags && tagsUndo.canRedo,
+                  "direct tags undo keeps the private draft synchronized through an unrelated model refresh")
+        tagsUndo.redo()
+        passive()
+        try check(tagsEditor.string == baseTags + ", geometry", "direct tags redo restores the actual native draft")
+        let titleBeforeUnrelated = store.library.node(id: sheetID)?.title
+        let unrelatedEditor = try focus(unrelated)
+        // The plain unrelated field has no heading coordinator to enable its
+        // field editor's native undo support when editing begins.
+        unrelatedEditor.allowsUndo = true
+        waitUntil { store.library.node(id: sheetID)?.tags == ["algebra", "विश्लेषण", "geometry"] }
+        print("Heading field scope fixture titleEditor=\(ObjectIdentifier(titleEditor)) tagsEditor=\(ObjectIdentifier(tagsEditor)) unrelatedEditor=\(ObjectIdentifier(unrelatedEditor))"
+              + " titleManager=\(ObjectIdentifier(titleUndo)) tagsManager=\(ObjectIdentifier(tagsUndo)) unrelatedManager=\(unrelatedEditor.undoManager.map { String(describing: ObjectIdentifier($0)) } ?? "nil") allowsUndo=\(unrelatedEditor.allowsUndo)")
+        guard let unrelatedUndo = unrelatedEditor.undoManager else { throw Failure(description: "Missing unrelated field undo manager") }
+        try check(unrelatedEditor === tagsEditor && unrelatedEditor.allowsUndo,
+                  "fixture exercises the shared native field editor with its actual undo manager")
+        print("Heading field scope manager relationship unrelatedSharesTags=\(unrelatedUndo === tagsUndo) unrelatedSharesTitle=\(unrelatedUndo === titleUndo)")
+        // AppKit may share the field editor while providing different managers
+        // for each control. A stale heading-manager notification must remain
+        // scoped even though its old editor object is now editing another field.
+        let unrelatedBeforeNotifications = unrelatedEditor.string
+        NotificationCenter.default.post(name: .NSUndoManagerDidUndoChange, object: tagsUndo)
+        NotificationCenter.default.post(name: .NSUndoManagerDidRedoChange, object: titleUndo)
+        passive()
+        try check(unrelatedEditor.string == unrelatedBeforeNotifications
+                  && store.library.node(id: sheetID)?.title == titleBeforeUnrelated
+                  && store.library.node(id: sheetID)?.tags == ["algebra", "विश्लेषण", "geometry"],
+                  "old heading undo-manager notifications cannot publish another control's shared-editor text")
+        unrelatedUndo.removeAllActions()
+        try replace(unrelatedEditor, "Unrelated changed")
+        unrelatedUndo.undo()
+        passive()
+        try check(unrelatedEditor.string == "Unrelated input" && store.library.node(id: sheetID)?.title == titleBeforeUnrelated
+                  && store.library.node(id: sheetID)?.tags == ["algebra", "विश्लेषण", "geometry"],
+                  "undo in another control sharing the field editor never publishes into title or tags")
+
+        tagsEditor = try focus(controls.tags)
+        try replace(tagsEditor, "pending, last native edit")
+        state.visible = false // Same turn: no draft-refresh turn before disappearance.
+        waitUntil { store.library.node(id: sheetID)?.tags == ["pending", "last native edit"] }
+        try check(store.library.node(id: sheetID)?.tags == ["pending", "last native edit"],
+                  "heading disappearance commits the latest native tags without relying on a stale SwiftUI closure")
+        state.visible = true
+        waitUntil { fields(in: host).count == 2 }
+        passive()
+        controls = try mountedControls()
+        try checkHeights(controls, "reinserted")
+        for cycle in 1...4 {
+            state.identity += 1
+            passive()
+            controls = try mountedControls()
+            try checkHeights(controls, "component identity cycle\(cycle)")
+        }
+        window.makeFirstResponder(nil)
+        state.readOnly = true
+        waitUntil { fields(in: host).allSatisfy { !$0.isEditable && !$0.isSelectable && !$0.isEnabled } }
+        controls = try mountedControls()
+        try check(!controls.title.isEditable && !controls.title.isSelectable && !controls.title.isEnabled
+                  && !controls.tags.isEditable && !controls.tags.isSelectable && !controls.tags.isEnabled,
+                  "both actual native heading fields honor read-only state")
+        try checkHeights(controls, "read-only")
+        try check(store.library.node(id: sheetID)?.pageContent == originalContent,
+                  "all heading input, undo, composition and reinsertions leave page text, ink and objects unchanged")
+        try check(store.flush(), "native heading edits save to isolated storage")
+        let reopened = NotesStore(directory: directory, preferences: preferences)
+        try check(reopened.library.node(id: sheetID)?.title == ""
+                  && reopened.library.node(id: sheetID)?.tags == ["pending", "last native edit"]
+                  && reopened.library.node(id: sheetID)?.pageContent == originalContent,
+                  "actual heading edits reopen with blank title, final tags and unchanged page payloads")
+        return checks
     }
 
     /// Responder-chain checks complement manual Cmd-A/menu testing; no global
