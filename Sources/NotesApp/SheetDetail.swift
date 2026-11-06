@@ -7,6 +7,57 @@ import AppKit
 import UIKit
 #endif
 
+#if os(macOS)
+/// Code-drawn icons avoid native menu image stripping.
+private struct DiagramToolGlyph: View {
+    let kind: PageDiagram.Kind
+    var route: PageDiagram.ConnectorRoute = .straight
+    var heads: PageDiagram.ArrowHeads = .none
+
+    var body: some View {
+        Path { path in
+            let rect = CGRect(x: 2, y: 2, width: 24, height: 20)
+            switch kind {
+            case .rectangle, .table: path.addRect(rect)
+            case .roundedRectangle: path.addRoundedRect(in: rect, cornerSize: CGSize(width: 5, height: 5))
+            case .ellipse: path.addEllipse(in: rect)
+            case .triangle:
+                path.move(to: CGPoint(x: 14, y: 2)); path.addLine(to: CGPoint(x: 26, y: 22))
+                path.addLine(to: CGPoint(x: 2, y: 22)); path.closeSubpath()
+            case .diamond:
+                path.move(to: CGPoint(x: 14, y: 2)); path.addLine(to: CGPoint(x: 26, y: 12))
+                path.addLine(to: CGPoint(x: 14, y: 22)); path.addLine(to: CGPoint(x: 2, y: 12)); path.closeSubpath()
+            case .connector:
+                let startY: CGFloat = route == .straight ? 12 : 5
+                let endY: CGFloat = route == .straight ? 12 : 19
+                path.move(to: CGPoint(x: 3, y: startY))
+                if route == .elbow {
+                    path.addLine(to: CGPoint(x: 14, y: startY)); path.addLine(to: CGPoint(x: 14, y: endY))
+                }
+                path.addLine(to: CGPoint(x: 25, y: endY))
+                if heads != .none {
+                    path.move(to: CGPoint(x: 20, y: endY - 4)); path.addLine(to: CGPoint(x: 25, y: endY))
+                    path.addLine(to: CGPoint(x: 20, y: endY + 4))
+                }
+                if heads == .both {
+                    path.move(to: CGPoint(x: 8, y: startY - 4)); path.addLine(to: CGPoint(x: 3, y: startY))
+                    path.addLine(to: CGPoint(x: 8, y: startY + 4))
+                }
+            }
+            if kind == .table {
+                for x in [10.0, 18.0] {
+                    path.move(to: CGPoint(x: x, y: 2)); path.addLine(to: CGPoint(x: x, y: 22))
+                }
+                for y in [9.0, 15.0] {
+                    path.move(to: CGPoint(x: 2, y: y)); path.addLine(to: CGPoint(x: 26, y: y))
+                }
+            }
+        }.stroke(style: StrokeStyle(lineWidth: 1.7, lineCap: .round, lineJoin: .round))
+            .frame(width: 28, height: 24).accessibilityHidden(true)
+    }
+}
+#endif
+
 /// Canonical sRGB values. Paper themes adapt their display without changing
 /// the selected color or the colors of strokes already stored in a notebook.
 enum InkColors {
@@ -129,7 +180,7 @@ struct SheetDetail: View {
     @ViewState private var equationDraft: NoteEquation?
     @ViewState private var renameRequest: NameRequest?
     @ViewState private var showInkColors = false
-    @ViewState private var showTableOptions = false
+    @ViewState private var showDiagramPalette = false
     private var sheet: NoteNode? { store.library.node(id: sheetID) }
     private var inkTool: InkTool { InkTool(rawValue: selectedTool) ?? .pen }
     private var diagramKind: PageDiagram.Kind { PageDiagram.Kind(rawValue: diagramKindPreference) ?? .rectangle }
@@ -270,7 +321,8 @@ struct SheetDetail: View {
                                   onPageChange: { content in store.update(sheet.id) { $0.pageContent = content } },
                                   onEquationEdit: { equationDraft = $0 },
                                   onPageValidate: { store.validatePageChange(sheet.id, content: $0) },
-                                  onPageError: { store.errorMessage = $0 })
+                                  onPageError: { store.errorMessage = $0 },
+                                  onObjectPlacement: { selectedTool = InkTool.select.rawValue })
                     .frame(maxWidth: .infinity, maxHeight: .infinity).disabled(sheet.isTrashed)
                     .overlay(alignment: .topTrailing) {
                         VStack(alignment: .trailing, spacing: 8) {
@@ -457,56 +509,89 @@ struct SheetDetail: View {
     }
 
     #if os(macOS)
-    private var diagramChoices: [(kind: PageDiagram.Kind, title: String, symbol: String)] {
-        [(.rectangle, "Rectangle", "rectangle"), (.roundedRectangle, "Rounded rectangle", "rectangle"),
-         (.ellipse, "Ellipse", "circle"), (.triangle, "Triangle", "triangle"), (.diamond, "Diamond", "diamond")]
+    private var diagramChoices: [(kind: PageDiagram.Kind, title: String)] {
+        [(.rectangle, "Rectangle"), (.roundedRectangle, "Rounded rectangle"),
+         (.ellipse, "Ellipse"), (.triangle, "Triangle"), (.diamond, "Diamond")]
     }
 
     private func chooseDiagram(_ kind: PageDiagram.Kind) {
         diagramKindPreference = kind.rawValue
+        showDiagramPalette = false
         selectTool(.diagram)
     }
 
-    private var diagramTools: some View {
-        Menu {
-            ForEach(diagramChoices, id: \.kind) { choice in
-                CheckedMenuButton(title: choice.title,
-                                  isSelected: diagramKind == choice.kind) {
-                    chooseDiagram(choice.kind)
-                }
-            }
-            Divider()
-            Menu("Connector") {
-                ForEach([(PageDiagram.ArrowHeads.none, "Line"), (.end, "Arrow"), (.both, "Double arrow")], id: \.0) { value, title in
-                    CheckedMenuButton(title: title, isSelected: diagramKind == .connector && arrowHeads == value) {
-                        arrowHeadsPreference = value.rawValue
-                        chooseDiagram(.connector)
+    private func diagramChoice(_ title: String, kind: PageDiagram.Kind,
+                               route: PageDiagram.ConnectorRoute = .straight,
+                               heads: PageDiagram.ArrowHeads = .none,
+                               selected: Bool, action: @escaping () -> Void) -> some View {
+        Button(action: action) {
+            DiagramToolGlyph(kind: kind, route: route, heads: heads)
+                .frame(width: 46, height: 38)
+                .foregroundStyle(selected ? workspaceAccent : Color.primary)
+                .background(selected ? workspaceAccent.opacity(0.16) : Color.primary.opacity(0.04),
+                            in: RoundedRectangle(cornerRadius: 7))
+                .overlay(alignment: .topTrailing) {
+                    if selected {
+                        Image(systemName: "checkmark.circle.fill").font(.system(size: 10))
+                            .foregroundStyle(workspaceAccent).padding(2)
                     }
                 }
-                Divider()
-                CheckedMenuButton(title: "Straight", isSelected: connectorRoute == .straight) { connectorRoutePreference = "straight" }
-                CheckedMenuButton(title: "Elbow", isSelected: connectorRoute == .elbow) { connectorRoutePreference = "elbow" }
-            }
-            CheckedMenuButton(title: "Table…", isSelected: diagramKind == .table) { showTableOptions = true }
-            Divider()
-            Toggle("Fill shapes", isOn: $diagramFill)
-            Text("Drag to draw. Select to move or resize; double-click to edit text.")
-        } label: {
+        }.buttonStyle(.plain).help(title)
+            .accessibilityLabel(title)
+            .accessibilityValue(selected ? "Selected" : "Not selected")
+            .accessibilityAddTraits(selected ? .isSelected : [])
+    }
+
+    private var diagramTools: some View {
+        Button { showDiagramPalette.toggle() } label: {
             Image(systemName: "square.on.circle").font(.system(size: 15)).frame(width: 30, height: 30)
                 .background(inkTool == .diagram ? workspaceAccent.opacity(0.18) : .clear, in: RoundedRectangle(cornerRadius: 6))
-        }.help("Shapes, arrow connectors and tables")
+        }.buttonStyle(.plain).help("Shapes, arrow connectors and tables")
             .accessibilityLabel("Shapes and tables")
             .accessibilityValue(inkTool == .diagram ? diagramKindPreference : "Not selected")
-            .popover(isPresented: $showTableOptions) {
-                VStack(alignment: .leading, spacing: 14) {
-                    Label("Draw a table", systemImage: "tablecells").font(.headline)
-                    Stepper("Rows: \(min(20, max(1, tableRows)))", value: $tableRows, in: 1...20)
-                    Stepper("Columns: \(min(12, max(1, tableColumns)))", value: $tableColumns, in: 1...12)
-                    Text("Drag on the page to size the table. Double-click a cell with Select to edit it.")
+            .popover(isPresented: $showDiagramPalette) {
+                VStack(alignment: .leading, spacing: 12) {
+                    Text("Shapes").font(.headline)
+                    HStack(spacing: 8) {
+                        ForEach(diagramChoices, id: \.kind) { choice in
+                            diagramChoice(choice.title, kind: choice.kind, selected: diagramKind == choice.kind) {
+                                chooseDiagram(choice.kind)
+                            }
+                        }
+                    }
+                    Divider()
+                    Text("Connectors").font(.headline)
+                    HStack(spacing: 8) {
+                        ForEach([(PageDiagram.ArrowHeads.none, "Line"), (.end, "Arrow"), (.both, "Double arrow")], id: \.0) { value, title in
+                            diagramChoice(title, kind: .connector, route: connectorRoute, heads: value,
+                                          selected: diagramKind == .connector && arrowHeads == value) {
+                                arrowHeadsPreference = value.rawValue
+                                chooseDiagram(.connector)
+                            }
+                        }
+                    }
+                    HStack(spacing: 8) {
+                        Text("Route").font(.caption).foregroundStyle(.secondary)
+                        diagramChoice("Straight connector", kind: .connector,
+                                      selected: connectorRoute == .straight) { connectorRoutePreference = "straight" }
+                        diagramChoice("Elbow connector", kind: .connector, route: .elbow,
+                                      selected: connectorRoute == .elbow) { connectorRoutePreference = "elbow" }
+                    }
+                    Divider()
+                    Text("Table").font(.headline)
+                    HStack(spacing: 12) {
+                        diagramChoice("Draw table", kind: .table, selected: diagramKind == .table) {
+                            chooseDiagram(.table)
+                        }
+                        VStack(alignment: .leading, spacing: 6) {
+                            Stepper("Rows: \(tableRows)", value: $tableRows, in: 1...20)
+                            Stepper("Columns: \(tableColumns)", value: $tableColumns, in: 1...12)
+                        }.controlSize(.small)
+                    }
+                    Toggle("Fill shapes", isOn: $diagramFill)
+                    Text("Choose an icon, then drag once. Click blank paper to deselect; double-click an object to edit its text.")
                         .font(.caption).foregroundStyle(.secondary).fixedSize(horizontal: false, vertical: true)
-                    Button("Draw table") { chooseDiagram(.table); showTableOptions = false }
-                        .buttonStyle(.borderedProminent)
-                }.padding(18).frame(width: 300)
+                }.padding(16).frame(width: 302)
                     .onAppear { tableRows = min(20, max(1, tableRows)); tableColumns = min(12, max(1, tableColumns)) }
             }
     }

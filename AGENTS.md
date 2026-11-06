@@ -74,6 +74,21 @@ boundary releases its native objects before the next suite. Preserve the failed
 traces and strict assertions. Production pane policy was unchanged; no internal
 AppKit mechanism, hosted/iPad compile, physical-device or user-QA pass is claimed.
 
+The user tried the initial 1.3 QA app and requested placement UX changes on
+6 November 2026. Successful image/diagram insertion now selects the new objects
+and returns to Select immediately; blank clicks deselect without repeating the
+shape. A shape icon or S arms the next single placement. Ordinary native text
+paste and rejected transactions must preserve their tool/focus behavior. The
+shape chooser is an icon palette with tooltips, visible checks and accessibility
+names/selected values. QA build 2 uses a separate identity and an independent copy
+of temporary QA notes; initial QA remains intact. Consult the follow-up validation
+record for results specific to these changes. QA build 2 compiled and passed
+119 diagram / 979 editor / 31 equation / 12 ruled-text / 9 shortcut checks, then
+failed the same narrow-window native completion boundary despite released
+fixture objects. Do not claim the autorelease pool fully resolves that issue,
+a full follow-up pass, or release readiness. Preserve the strict five-second
+boundary and failure trace; hosted/iPad and manual UX checks remain pending.
+
 ## Priorities
 
 - Protect saved notes, archive compatibility, undo history, and recoverability.

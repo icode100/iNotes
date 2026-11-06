@@ -84,6 +84,7 @@ final class MacPageSelectionController: NSObject {
     var onValidate: ((PageContent) -> Bool)?
     var onPasteError: ((String) -> Void)?
     var onEquationEdit: ((NoteEquation) -> Void)?
+    var onObjectPlacement: (() -> Void)?
     let history = PageUndoManager()
     private var observer: NSObjectProtocol?
     private var isApplying = false
@@ -121,6 +122,21 @@ final class MacPageSelectionController: NSObject {
         cancelPreview()
         selection = MacPageSelection()
         page?.selectionView.needsDisplay = true
+    }
+
+    /// Placement ends before SwiftUI refreshes the toolbar, so the very next
+    /// native gesture can move/resize this object or deselect it on blank paper.
+    /// This applies only after a successful commit, never during undo/redo.
+    func finishObjectPlacement(selecting selected: MacPageSelection) {
+        guard let page else { return }
+        // A prior Cmd-A may temporarily own the page from any tool. Retiring
+        // that override must not clear the newly inserted object's selection.
+        hasToolIndependentSelection = false
+        if page.activeTool == .select { page.focus(tool: .select) }
+        else { page.activeTool = .select }
+        selection = selected
+        page.selectionView.needsDisplay = true
+        onObjectPlacement?()
     }
 
     func select(polygon: [InkPoint], extending: Bool = false) {
@@ -396,7 +412,7 @@ final class MacPageSelectionController: NSObject {
                     editor.paste(nil)
                     return
                 }
-                paste(payload, offset: 20, action: "Paste Selection")
+                guard paste(payload, offset: 20, action: "Paste Selection") else { return }
                 if page.activeTool != .text || payload.images.isEmpty || !payload.diagrams.isEmpty {
                     page.window?.makeFirstResponder(page.selectionView)
                 }
@@ -522,16 +538,17 @@ final class MacPageSelectionController: NSObject {
         if commit(value, action: "Delete Selection") { selection = MacPageSelection() }
     }
 
-    func paste(_ payload: PageClipboardPayload, offset: Double, action: String) {
+    @discardableResult
+    func paste(_ payload: PageClipboardPayload, offset: Double, action: String) -> Bool {
         do { try PageDiagramLimits.validate(payload.diagrams) }
         catch {
             onPasteError?(error.localizedDescription)
             NSSound.beep()
-            return
+            return false
         }
         let nativeAddition: PKDrawing?
         if content.pencilKitData != nil || payload.pencilKitData != nil {
-            guard let drawing = try? PortableInkConverter.validatedClipboardDrawing(payload.pencilKitData, fallback: payload.strokes) else { NSSound.beep(); return }
+            guard let drawing = try? PortableInkConverter.validatedClipboardDrawing(payload.pencilKitData, fallback: payload.strokes) else { NSSound.beep(); return false }
             nativeAddition = drawing
         } else { nativeAddition = nil }
         let containsTypedText = !payload.textBoxes.isEmpty || (!payload.text.isEmpty && payload.equations.isEmpty && payload.diagrams.isEmpty)
@@ -540,7 +557,7 @@ final class MacPageSelectionController: NSObject {
         if payload.textBoxes.isEmpty && payload.equations.isEmpty && payload.diagrams.isEmpty && !payload.text.isEmpty { payloadContent.textBoxes = [PageTextBox(x: 80, y: 80, width: 500, text: payload.text)] }
         let horizontal = horizontalBounds(payloadContent)
         let paperWidth = Double(page?.bounds.width ?? InkExport.paperSize.width)
-        guard (horizontal?.width ?? 0) <= paperWidth else { NSSound.beep(); return }
+        guard (horizontal?.width ?? 0) <= paperWidth else { NSSound.beep(); return false }
         let offsetX = max(-Double(horizontal?.minX ?? 0), min(paperWidth - Double(horizontal?.maxX ?? 0), offset))
         var value = content, selected = MacPageSelection()
         for var stroke in payload.strokes {
@@ -548,7 +565,7 @@ final class MacPageSelectionController: NSObject {
             value.strokes.append(stroke); selected.strokes.insert(stroke.id)
         }
         if let addition = nativeAddition {
-            guard let before = try? PortableInkConverter.validatedDrawing(content.pencilKitData, fallback: content.strokes) else { NSSound.beep(); return }
+            guard let before = try? PortableInkConverter.validatedDrawing(content.pencilKitData, fallback: content.strokes) else { NSSound.beep(); return false }
             let moved = addition.strokes.map { stroke -> PKStroke in
                 let transform = stroke.transform.concatenating(CGAffineTransform(translationX: offsetX, y: offset))
                 #if compiler(>=6.4)
@@ -561,7 +578,7 @@ final class MacPageSelectionController: NSObject {
                 return PKStroke(ink: stroke.ink, path: stroke.path, transform: transform, mask: stroke.mask, randomSeed: stroke.randomSeed)
             }
             let combined = PKDrawing(strokes: before.strokes + moved)
-            guard let portable = try? PortableInkConverter.validatedStrokes(from: combined) else { NSSound.beep(); return }
+            guard let portable = try? PortableInkConverter.validatedStrokes(from: combined) else { NSSound.beep(); return false }
             value.pencilKitData = combined.dataRepresentation(); value.strokes = portable
             selected.nativeStrokes = Set(before.strokes.count..<combined.strokes.count)
             selected.strokes = Set(value.strokes.suffix(payload.strokes.count).map(\.id))
@@ -593,9 +610,12 @@ final class MacPageSelectionController: NSObject {
         catch {
             onPasteError?(error.localizedDescription)
             NSSound.beep()
-            return
+            return false
         }
-        if commit(value, action: action) { selection = selected }
+        guard commit(value, action: action) else { return false }
+        if !payload.images.isEmpty || !payload.diagrams.isEmpty { finishObjectPlacement(selecting: selected) }
+        else { selection = selected }
+        return true
     }
 
     private func nativeDrawing(_ content: PageContent) -> PKDrawing? {
@@ -783,7 +803,9 @@ final class MacPageSelectionView: NSView {
         let end = pagePoint(event)
         if let id = creatingDiagramID, let before {
             let value = controller.diagramCandidate(from: start, to: end, id: id, base: before)
-            if controller.commit(value, previous: before, action: "Insert Diagram") { controller.selection = MacPageSelection(diagrams: [id]) }
+            if controller.commit(value, previous: before, action: "Insert Diagram") {
+                controller.finishObjectPlacement(selecting: MacPageSelection(diagrams: [id]))
+            }
         } else if reconnectingDiagram != nil {
             if let value = lastPreview, let before { controller.commit(value, previous: before, action: "Reconnect Arrow") }
         } else if resizingDiagramID != nil {

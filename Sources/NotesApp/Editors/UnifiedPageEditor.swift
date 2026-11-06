@@ -34,6 +34,7 @@ struct UnifiedPageEditor: NSViewRepresentable {
     var onTextChange: ((String, Data?) -> Void)? = nil
     var onInkChange: (([InkStroke], Data?) -> Void)? = nil
     var onInputChange: ((String) -> Void)? = nil
+    var onObjectPlacement: (() -> Void)? = nil
 
     init(text: Binding<String>, rtfData: Binding<Data?>, strokes: Binding<[InkStroke]>, pencilKitData: Binding<Data?>,
          textBoxes: Binding<[PageTextBox]> = .constant([]), equations: Binding<[NoteEquation]> = .constant([]), images: Binding<[PageImage]> = .constant([]),
@@ -45,7 +46,8 @@ struct UnifiedPageEditor: NSViewRepresentable {
          arrowHeads: PageDiagram.ArrowHeads = .end, tableRows: Int = 3, tableColumns: Int = 3, diagramFill: Bool = false,
          onTextChange: ((String, Data?) -> Void)? = nil, onInkChange: (([InkStroke], Data?) -> Void)? = nil,
          onInputChange: ((String) -> Void)? = nil, onPageChange: ((PageContent) -> Void)? = nil,
-         onEquationEdit: ((NoteEquation) -> Void)? = nil, onPageValidate: ((PageContent) -> Bool)? = nil, onPageError: ((String) -> Void)? = nil) {
+         onEquationEdit: ((NoteEquation) -> Void)? = nil, onPageValidate: ((PageContent) -> Bool)? = nil, onPageError: ((String) -> Void)? = nil,
+         onObjectPlacement: (() -> Void)? = nil) {
         _text = text; _rtfData = rtfData; _strokes = strokes; _pencilKitData = pencilKitData
         _textBoxes = textBoxes; _equations = equations; _images = images; _diagrams = diagrams
         self.diagramKind = diagramKind; self.connectorRoute = connectorRoute; self.arrowHeads = arrowHeads
@@ -55,6 +57,7 @@ struct UnifiedPageEditor: NSViewRepresentable {
         self.linePattern = linePattern; self.pageTemplate = pageTemplate; self.templateLinePattern = templateLinePattern
         self.onTextChange = onTextChange; self.onInkChange = onInkChange; self.onInputChange = onInputChange
         self.onPageChange = onPageChange; self.onEquationEdit = onEquationEdit; self.onPageValidate = onPageValidate; self.onPageError = onPageError
+        self.onObjectPlacement = onObjectPlacement
     }
 
     func makeCoordinator() -> Coordinator { Coordinator(self) }
@@ -110,6 +113,7 @@ struct UnifiedPageEditor: NSViewRepresentable {
         coordinator.selection.onEquationEdit = onEquationEdit
         coordinator.selection.onValidate = onPageValidate
         coordinator.selection.onPasteError = onPageError
+        coordinator.selection.onObjectPlacement = { [weak coordinator] in coordinator?.parent.onObjectPlacement?() }
         coordinator.selection.onRender = { [weak page, weak coordinator] content in
             guard let page, let coordinator else { return }
             coordinator.richText.parent = RichTextEditor(text: .constant(content.text), rtfData: .constant(content.rtfData), theme: theme,

@@ -5,10 +5,13 @@ editable table cells. It is undergoing validation and is not published; the
 current verified release and download remain listed below.
 
 In the candidate, choose **Shapes and tables** in the toolbar and drag on the
-page. Use **Select** to move or resize a shape/table, drag an arrow endpoint to
-reconnect it, or double-click a label/cell to edit its text. The menu offers five
+page. Each placement returns to **Select**, ready to move or resize the object;
+click blank paper to deselect. Pasted images also enter Select immediately.
+Drag an arrow endpoint to reconnect it, or double-click a label/cell to edit its text.
+The icon palette offers five
 basic shapes, straight/elbow connectors, arrowheads, tinted fills and table
-dimensions. **S** selects this tool from page focus; **⌘⌥S** works while typing.
+dimensions, with names on hover. Choose another icon or press **S** to arm the
+next placement; **⌘⌥S** works while typing.
 Diagram pages are read-only on iPad. Archives containing diagrams use format 4
 and require this version; older archives still open.
 

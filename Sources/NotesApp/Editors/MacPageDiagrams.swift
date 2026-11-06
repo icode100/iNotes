@@ -201,7 +201,7 @@ extension MacPageSelectionController {
         guard page?.inkView.isInputEnabled == true else { return false }
         let id = UUID(), value = diagramCandidate(from: start, to: end, id: id)
         guard commit(value, action: "Insert Diagram") else { return false }
-        selection = MacPageSelection(diagrams: [id]); page?.selectionView.needsDisplay = true
+        finishObjectPlacement(selecting: MacPageSelection(diagrams: [id]))
         return true
     }
 

@@ -12,6 +12,7 @@ private final class DiagramDiagnosticState: ObservableObject {
     @Published var theme = PageTheme.light
     @Published var readOnly = false
     var rejectChanges = false
+    var placementCount = 0
 }
 
 private struct DiagramDiagnosticEditor: View {
@@ -33,7 +34,8 @@ private struct DiagramDiagnosticEditor: View {
             onTextChange: { text, rtf in store.update(sheetID) { $0.body = text; $0.richTextRTF = rtf } },
             onInkChange: { strokes, native in store.update(sheetID) { $0.strokes = strokes; $0.pencilKitData = native } },
             onPageChange: { value in store.update(sheetID) { $0.pageContent = value } },
-            onPageValidate: { !state.rejectChanges && store.validatePageChange(sheetID, content: $0) })
+            onPageValidate: { !state.rejectChanges && store.validatePageChange(sheetID, content: $0) },
+            onObjectPlacement: { state.placementCount += 1; state.tool = .select })
             .disabled(state.readOnly)
     }
 }
@@ -201,6 +203,17 @@ enum DiagramDiagnostics {
             "Native drag creates the requested editable rectangle in page coordinates (\(creationGeometry))")
         try check(inserted.text == initial.text && inserted.strokes == initial.strokes && inserted.images == initial.images,
             "Diagram insertion preserves shared text, ink and image content")
+        try check(state.tool == .select && page.activeTool == .select && state.placementCount == 1
+            && controller.selection.diagrams == [shape.id] && window.firstResponder === page.selectionView
+            && scroll.documentCursor === NSCursor.arrow,
+            "Successful placement synchronizes the toolbar to Select and immediately focuses native object manipulation")
+        let blank = InkPoint(x: 1400, y: 1800)
+        let creationUndoAction = controller.history.undoActionName
+        page.selectionView.mouseDown(with: try event(.leftMouseDown, blank))
+        page.selectionView.mouseUp(with: try event(.leftMouseUp, blank))
+        try check(try saved() == inserted && controller.selection.isEmpty && state.placementCount == 1
+            && page.activeTool == .select && controller.history.undoActionName == creationUndoAction,
+            "The next blank click deselects without creating another shape or an undo action")
         let beforeCreationUndo = historyContext()
         controller.history.undo()
         let immediateUndoContent = try saved()
@@ -216,20 +229,33 @@ enum DiagramDiagnostics {
         controller.history.redo(); passive()
         try check(try saved() == inserted && mountedPage(in: host).map(ObjectIdentifier.init) == pageID,
             "Redo restores the same object ID without replacing the native page")
-        state.kind = .table; passive()
+        state.tool = .diagram; passive()
+        controller.selection = MacPageSelection(diagrams: [shape.id])
+        let rejectedUndoAction = controller.history.undoActionName
+        state.rejectChanges = true
+        try check(!controller.insertDiagram(from: InkPoint(x: 1000, y: 900), to: InkPoint(x: 1150, y: 1000))
+            && (try saved()) == inserted && state.tool == .diagram && page.activeTool == .diagram
+            && controller.selection.diagrams == [shape.id] && state.placementCount == 1
+            && controller.history.undoActionName == rejectedUndoAction && !controller.history.canRedo,
+            "A rejected placement retains the armed tool, selection, exact page and native undo action")
+        state.rejectChanges = false
+        state.kind = .table; state.tool = .diagram; passive()
         try check(controller.insertDiagram(from: InkPoint(x: 550, y: 360), to: InkPoint(x: 850, y: 540)),
             "The actual diagram insertion action creates a table")
         passive()
         guard let table = try saved().diagrams.first(where: { $0.kind == .table }) else { throw Failure(description: "Missing table") }
         try check(table.rows == 2 && table.columns == 3 && table.cells.count == 6,
             "Table creation retains requested dimensions and bounded editable cells")
-        state.kind = .connector; passive()
+        try check(state.tool == .select && page.activeTool == .select && state.placementCount == 2,
+            "Explicitly re-arming Shapes inserts the next object and returns the toolbar to Select again")
+        state.kind = .connector; state.tool = .diagram; passive()
         try check(controller.insertDiagram(from: PageDiagramGeometry.anchorPoint(on: shape, side: .right),
             to: PageDiagramGeometry.anchorPoint(on: table, side: .left)), "The actual connector action inserts an arrow")
         passive()
         guard let connector = try saved().diagrams.first(where: { $0.kind == .connector }) else { throw Failure(description: "Missing connector") }
         try check(connector.startAttachment?.targetDiagramID == shape.id && connector.endAttachment?.targetDiagramID == table.id
-            && connector.route == .elbow && connector.arrowHeads == .both,
+            && connector.route == .elbow && connector.arrowHeads == .both
+            && state.tool == .select && page.activeTool == .select && state.placementCount == 3,
             "A routed arrow attaches to both native shape/table anchors")
         state.tool = .select; passive()
         controller.selection = MacPageSelection(diagrams: [shape.id])
@@ -528,6 +554,61 @@ enum DiagramDiagnostics {
         controller.history.undo(); passive()
         try check(try saved() == beforeLabel,
             "Diagram-only undo preserves exact rich text after genuine body/text-box formatting changes")
+        // Use a real raster with a center outside its resize handle, and a
+        // named board so the actual native Paste hook never reads user data.
+        guard let pasteContext = CGContext(data: nil, width: 240, height: 120, bitsPerComponent: 8, bytesPerRow: 240 * 4,
+            space: CGColorSpaceCreateDeviceRGB(), bitmapInfo: CGImageAlphaInfo.premultipliedLast.rawValue) else {
+            throw Failure(description: "Cannot create an immediately movable image fixture")
+        }
+        pasteContext.draw(image, in: CGRect(x: 0, y: 0, width: 240, height: 120))
+        guard let pasteImage = pasteContext.makeImage(),
+              let pastePNG = NSBitmapImageRep(cgImage: pasteImage).representation(using: .png, properties: [:]) else {
+            throw Failure(description: "Cannot encode the native image-paste fixture")
+        }
+        let imageBoard = NSPasteboard.withUniqueName()
+        defer { imageBoard.releaseGlobally() }
+        imageBoard.setData(pastePNG, forType: .png)
+        state.tool = .text; passive()
+        guard window.makeFirstResponder(page.textView) else { throw Failure(description: "Native Text paste could not focus its actual body editor") }
+        let beforeImagePaste = try saved(), placementsBeforeImage = state.placementCount
+        let previousPasteHook = page.textView.onPagePaste
+        page.textView.onPagePaste = { controller.pasteImage(from: imageBoard) }
+        defer { page.textView.onPagePaste = previousPasteHook }
+        page.textView.paste(nil); passive()
+        let afterImagePaste = try saved()
+        guard let pastedImage = afterImagePaste.images.first(where: { candidate in
+            !beforeImagePaste.images.contains(where: { $0.id == candidate.id })
+        }) else { throw Failure(description: "Native Text paste did not insert an image") }
+        try check(afterImagePaste.images.count == beforeImagePaste.images.count + 1
+            && afterImagePaste.text == beforeImagePaste.text && afterImagePaste.rtfData == beforeImagePaste.rtfData
+            && state.tool == .select && page.activeTool == .select && state.placementCount == placementsBeforeImage + 1
+            && controller.singleSelectedImageID == pastedImage.id && window.firstResponder === page.selectionView
+            && scroll.documentCursor === NSCursor.arrow,
+            "Real native image Paste from Text immediately selects the new image, updates the toolbar and preserves text")
+        let imageCenter = InkPoint(x: pastedImage.x + pastedImage.width / 2, y: pastedImage.y + pastedImage.height / 2)
+        let movedImageCenter = InkPoint(x: imageCenter.x + 30, y: imageCenter.y + 20)
+        page.selectionView.mouseDown(with: try event(.leftMouseDown, imageCenter))
+        page.selectionView.mouseDragged(with: try event(.leftMouseDragged, movedImageCenter))
+        page.selectionView.mouseUp(with: try event(.leftMouseUp, movedImageCenter)); passive()
+        let afterImageMove = try saved()
+        guard let movedImage = afterImageMove.images.first(where: { $0.id == pastedImage.id }) else { throw Failure(description: "The first image drag lost its pasted object") }
+        try check(sameCoordinate(movedImage.x, pastedImage.x + 30) && sameCoordinate(movedImage.y, pastedImage.y + 20)
+            && movedImage.width == pastedImage.width && movedImage.height == pastedImage.height
+            && state.tool == .select && state.placementCount == placementsBeforeImage + 1,
+            "The very first native gesture after image Paste drags it without a manual tool change")
+        page.selectionView.mouseDown(with: try event(.leftMouseDown, blank))
+        page.selectionView.mouseUp(with: try event(.leftMouseUp, blank))
+        try check(try saved() == afterImageMove && controller.selection.isEmpty && page.activeTool == .select,
+            "A blank click immediately deselects a pasted image without creating or editing page content")
+        state.tool = .pen; passive()
+        controller.selection = MacPageSelection(diagrams: [shape.id])
+        let imageRejectionUndo = controller.history.undoActionName
+        state.rejectChanges = true
+        try check(controller.pasteImage(from: imageBoard) && (try saved()) == afterImageMove
+            && state.tool == .pen && page.activeTool == .pen && controller.selection.diagrams == [shape.id]
+            && state.placementCount == placementsBeforeImage + 1 && controller.history.undoActionName == imageRejectionUndo,
+            "Rejected image Paste preserves the chosen tool, existing selection, exact content and undo action")
+        state.rejectChanges = false
         print("Diagram native checks passed: \(checks) (offscreen creation, attached arrows, native resize/reconnect, table Save/undo, mixed clipboard and persistence; no physical input claim)")
         return checks
     }

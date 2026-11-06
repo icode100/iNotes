@@ -2,6 +2,53 @@
 
 ## 1.3.0 shapes, connectors and tables candidate — 6 November 2026
 
+### Placement UX follow-up / QA build 2
+
+The user tried the initial QA app and requested single-placement tools, easier
+image deselection and icons in the shape chooser. The follow-up switches native
+input and toolbar state to Select only after successful image/diagram insertion;
+the next blank click deselects instead of creating another diagram. Ordinary
+text paste and rejected transactions keep their tool/focus behavior. A compact
+icon palette replaces the text list and retains tooltips, visible checks and
+accessibility names/selection values. NotesCore sources are unchanged from
+`c4e8753`; the 133 core-test result below covers that same portable model.
+
+Optimized ARM64 compilation passed on the same Swift 6.4.2 / macOS SDK 27.2
+host (`/private/tmp/inotes-v1.3-ux-build-1.log`). The full native invocation
+passed **119 diagram / 979 total editor / 31 equation / 12 ruled-text / 9
+shortcut checks**. New cases deliver actual app-local pointer events and native
+image paste: successful placement updates Select/focus/arrow, the next blank
+click clears selection without content/undo changes, re-arming permits another
+shape, the first post-paste image drag moves it, and rejected insertions preserve
+the tool, selected objects, stored page, callback count and undo action.
+
+The full run then **failed**, exit **1**, at “Hide sheets at narrow width reaches
+callback quiescence on the same native owner within five seconds”. Generation
+17 retained one pending completion and the old 236.5-point viewport through the
+five-second boundary. All 100 heading cycles had correct native heights. Weak
+fixture observations reported window/host/page/controller released after the
+autorelease pool, so object release alone does not establish a complete remedy
+for this recurring failure. Production navigation policy and strict assertions
+are unchanged. Preserve `/private/tmp/inotes-v1.3-ux-native-tests-1.log`; no full
+suite pass or release readiness is claimed for this follow-up. The remaining
+store/backup steps were not reached in this invocation.
+
+QA build 2 is `dist/iNotes-QA-1.3.0-UX.app`, identity
+`io.inotes.qa.v130.ux2.20261106`, with an independent copy of prior temporary QA
+notes at `/private/tmp/inotes-v1.3-ux-7a11us_8`. QA build 1 and its notes were not
+changed. Updater configuration is absent. Strict deep ad hoc signatures and
+plist syntax passed. Executable **7,457,024 bytes**, SHA-256
+`babaade7e5078e3930c1d0201e91a706a72bd359ee7a9d979c431b4719a633e1`;
+source/package manifest SHA-256
+`bc1b44837767c8785aced59fd2fff6477ccce0ea67013aee173c3cf352ddcf0a`.
+The QA bundle has **47,482,259 regular-file bytes** across **127 files**, not a
+RAM or distribution-size measurement. Ignored `dist/qa-v1.3-ux.json` and
+`dist/qa-v1.3-ux-source-manifest.json` record its inputs. User QA of the new
+interaction/icon palette, hosted validation, iPad compilation and full installer
+packaging remain pending; publication is blocked by unresolved validation.
+
+### Initial candidate / QA build 1
+
 This candidate is local and unpublished. The previous 1.2.2 results below do not
 establish validation of this new patch. The worktree adds archive-format-4 vector
 objects, bounded tables/cell text, attached connectors, native Mac editing and a

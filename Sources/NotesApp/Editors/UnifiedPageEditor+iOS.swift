@@ -35,6 +35,7 @@ struct UnifiedPageEditor: UIViewRepresentable {
     var onPageChange: ((PageContent) -> Void)? = nil
     var onPageValidate: ((PageContent) -> Bool)? = nil
     var onPageError: ((String) -> Void)? = nil
+    var onObjectPlacement: (() -> Void)? = nil
     var onEquationEdit: ((NoteEquation) -> Void)? = nil
 
     init(text: Binding<String>, rtfData: Binding<Data?>, strokes: Binding<[InkStroke]>, pencilKitData: Binding<Data?>,
@@ -46,7 +47,8 @@ struct UnifiedPageEditor: UIViewRepresentable {
          arrowHeads: PageDiagram.ArrowHeads = .end, tableRows: Int = 3, tableColumns: Int = 3, diagramFill: Bool = false,
          onTextChange: ((String, Data?) -> Void)? = nil, onInkChange: (([InkStroke], Data?) -> Void)? = nil,
          onInputChange: ((String) -> Void)? = nil, onPageChange: ((PageContent) -> Void)? = nil,
-         onEquationEdit: ((NoteEquation) -> Void)? = nil, onPageValidate: ((PageContent) -> Bool)? = nil, onPageError: ((String) -> Void)? = nil) {
+         onEquationEdit: ((NoteEquation) -> Void)? = nil, onPageValidate: ((PageContent) -> Bool)? = nil, onPageError: ((String) -> Void)? = nil,
+         onObjectPlacement: (() -> Void)? = nil) {
         _text = text; _rtfData = rtfData; _strokes = strokes; _pencilKitData = pencilKitData
         _textBoxes = textBoxes; _equations = equations; _images = images; _diagrams = diagrams; self.tool = tool; self.colorHex = colorHex
         self.lineWidth = lineWidth ?? InkNibPreset.defaultWidth(for: tool); self.paper = paper; self.theme = theme
@@ -55,6 +57,7 @@ struct UnifiedPageEditor: UIViewRepresentable {
         self.tableRows = tableRows; self.tableColumns = tableColumns; self.diagramFill = diagramFill
         self.onTextChange = onTextChange; self.onInkChange = onInkChange; self.onInputChange = onInputChange
         self.onPageChange = onPageChange; self.onEquationEdit = onEquationEdit; self.onPageValidate = onPageValidate; self.onPageError = onPageError
+        self.onObjectPlacement = onObjectPlacement
     }
 
     func makeCoordinator() -> Coordinator { Coordinator(self) }
