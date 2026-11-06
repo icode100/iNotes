@@ -54,16 +54,17 @@ final class MacPageTextBoxView: NSView {
 }
 
 extension UnifiedMacPageView {
-    func displayObjects(textBoxes: [PageTextBox], equations: [NoteEquation], images: [PageImage] = [], editable: Bool,
+    func displayObjects(textBoxes: [PageTextBox], equations: [NoteEquation], images: [PageImage] = [], diagrams: [PageDiagram] = [], editable: Bool,
                         onTextBoxChange: @escaping (UUID, String, Data?) -> Void,
                         onEquationEdit: ((NoteEquation) -> Void)?) {
+        diagramView.diagrams = diagrams
         let imageIDs = Set(images.map(\.id))
         for id in Array(imageViews.keys) where !imageIDs.contains(id) { imageViews.removeValue(forKey: id)?.removeFromSuperview() }
         // Stable views, ordered behind every native text and ink layer.
         for image in images {
             let view = imageViews[image.id] ?? MacPageImageView(frame: .zero)
             if view.superview == nil { imageViews[image.id] = view }
-            addSubview(view, positioned: .below, relativeTo: textView)
+            addSubview(view, positioned: .below, relativeTo: diagramView)
             view.configure(image)
         }
         let boxIDs = Set(textBoxes.map(\.id)), equationIDs = Set(equations.map(\.id))
@@ -204,18 +205,18 @@ final class MacPageImageView: NSView {
 extension UnifiedMacPageView {
     func canPastePage() -> Bool {
         let board = NSPasteboard.general
-        let types = [PageClipboardPayload.pasteboardType, PageClipboardPayload.legacyPasteboardType].map { NSPasteboard.PasteboardType($0) }
+        let types = [PageClipboardPayload.pasteboardType, PageClipboardPayload.imagePasteboardType, PageClipboardPayload.legacyPasteboardType].map { NSPasteboard.PasteboardType($0) }
         return inkView.isInputEnabled && (board.availableType(from: types) != nil || MacPageImageCodec.canRead(board))
     }
 
     /// Only page payloads/images leave NSTextView's normal rich-text paste path.
     func handlePagePaste() -> Bool {
         let board = NSPasteboard.general
-        let types = [PageClipboardPayload.pasteboardType, PageClipboardPayload.legacyPasteboardType].map { NSPasteboard.PasteboardType($0) }
+        let types = [PageClipboardPayload.pasteboardType, PageClipboardPayload.imagePasteboardType, PageClipboardPayload.legacyPasteboardType].map { NSPasteboard.PasteboardType($0) }
         guard let controller = selectionController, inkView.isInputEnabled,
               board.availableType(from: types) != nil || MacPageImageCodec.canRead(board) else { return false }
         if let type = board.availableType(from: types), let data = board.data(forType: type),
-           let payload = try? PageClipboardPayload.decodeValidated(data), payload.images.isEmpty {
+           let payload = try? PageClipboardPayload.decodeValidated(data), payload.images.isEmpty && payload.diagrams.isEmpty {
             // Keep rich text copied from a selection on NSTextView's caret path.
             return false
         }
@@ -227,7 +228,7 @@ extension UnifiedMacPageView {
 extension MacPageSelectionController {
     @discardableResult
     func pasteImage(from board: NSPasteboard) -> Bool {
-        let payloadTypes = [PageClipboardPayload.pasteboardType, PageClipboardPayload.legacyPasteboardType].map { NSPasteboard.PasteboardType($0) }
+        let payloadTypes = [PageClipboardPayload.pasteboardType, PageClipboardPayload.imagePasteboardType, PageClipboardPayload.legacyPasteboardType].map { NSPasteboard.PasteboardType($0) }
         guard board.availableType(from: payloadTypes) == nil, MacPageImageCodec.canRead(board) else { return false }
         guard let page, page.inkView.isInputEnabled else { return true }
         do {

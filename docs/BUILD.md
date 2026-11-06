@@ -38,9 +38,9 @@ bash scripts/verify-macos.sh
 The build creates:
 
 - `dist/iNotes.app`: native ARM64 app bundle.
-- `dist/iNotes-1.2.2-arm64.dmg`: compressed disk image containing the app, an
+- `dist/iNotes-1.3.0-arm64.dmg`: compressed disk image containing the app, an
   Applications shortcut, and installation instructions.
-- `dist/iNotes-1.2.2-arm64.dmg.sha256`: SHA-256 checksum.
+- `dist/iNotes-1.3.0-arm64.dmg.sha256`: SHA-256 checksum.
 
 Open the disk image and drag iNotes to Applications. The DMG does not install
 background services, kernel extensions, browser runtimes, or privileged helpers.
@@ -48,7 +48,12 @@ The build script validates the property list, architecture, app signature, and D
 before publishing outputs. The verification script mounts it read-only and checks
 the packaged app and Applications shortcut.
 
-Defaults match published **v1.2.2 / build 2020**, released on 5 November 2026
+Development defaults now target **1.3.0 / prospective build 2021** for shapes,
+connectors and tables. Local QA uses an isolated identity, temporary notes and
+a disconnected updater. Fresh Native/release/public verification and a new user
+heads-up remain required before publication.
+
+The verified public release is **v1.2.2 / build 2020**, released on 5 November 2026
 from source `aa392994ed290e38819a74e0a21f5dad520642a3`.
 [Branch Native checks 42041114016](https://github.com/icode100/iNotes/actions/runs/42041114016)
 and [main Native checks 42046399201](https://github.com/icode100/iNotes/actions/runs/42046399201)
@@ -215,6 +220,13 @@ of saving a copy that discards those objects. Moving or pasting a selected text
 range creates a positioned rich-text box. Rectangular Select and freehand Lasso
 can operate on typed text, handwriting, text boxes, and equations in one atomic
 page transaction and undo snapshot.
+
+The 1.3 candidate also reads format 3 (page images) and introduces format 4 for
+editable diagrams. It promotes a library only when newer objects are present
+and never downgrades after removal. Diagram snapshots, attachment references
+and table cells survive archives, copies and mixed page undo. Mac PDF/PNG export
+renders them with other page content; iPad displays them read-only. Older apps
+reject format 4 rather than saving a copy without its diagrams.
 
 Ruled-page alignment uses native text-layout delegates and per-view geometry.
 Body lines and wrapped Unicode follow 28pt ruled rows; larger fonts use whole

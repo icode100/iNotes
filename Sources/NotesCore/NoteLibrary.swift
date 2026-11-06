@@ -1,12 +1,12 @@
 import Foundation
 
 public struct NoteLibrary: Codable, Equatable, Sendable {
-    public static let currentFormatVersion = 3
+    public static let currentFormatVersion = 4
     public var formatVersion: Int
     public private(set) var nodes: [NoteNode]
     public private(set) var modifiedAt: Date
 
-    // Keep image-free notebooks readable by previous releases until an image is added.
+    // Keep new notebooks readable by previous releases until newer objects are added.
     public init(nodes: [NoteNode] = [], modifiedAt: Date = Date(), formatVersion: Int = 2) {
         self.formatVersion = formatVersion; self.nodes = nodes; self.modifiedAt = modifiedAt
         // Invalid programmatically constructed libraries remain available to validate(), which
@@ -113,7 +113,8 @@ public struct NoteLibrary: Codable, Equatable, Sendable {
         }
         replacement.updatedAt = Date()
         candidate.nodes[index] = replacement
-        if !replacement.images.isEmpty { candidate.formatVersion = max(candidate.formatVersion, 3) }
+        if !replacement.diagrams.isEmpty { candidate.formatVersion = max(candidate.formatVersion, 4) }
+        else if !replacement.images.isEmpty { candidate.formatVersion = max(candidate.formatVersion, 3) }
         else if !replacement.textBoxes.isEmpty || !replacement.equations.isEmpty {
             candidate.formatVersion = max(candidate.formatVersion, 2)
         }
@@ -251,7 +252,8 @@ public struct NoteLibrary: Codable, Equatable, Sendable {
         let tokens = query.split(whereSeparator: \.isWhitespace).map { String($0) }
         return nodes.filter { item in
             guard includingTrash || !item.isTrashed, !favoritesOnly || item.isFavorite else { return false }
-            let haystack = ([item.title, item.body] + item.tags + item.textBoxes.map(\.text) + item.equations.map(\.latex)).joined(separator: "\n")
+            let haystack = ([item.title, item.body] + item.tags + item.textBoxes.map(\.text) + item.equations.map(\.latex)
+                + item.diagrams.map(\.plainText)).joined(separator: "\n")
             return tokens.allSatisfy { haystack.range(of: $0, options: [.caseInsensitive, .diacriticInsensitive]) != nil }
         }.sorted { $0.updatedAt > $1.updatedAt }
     }
@@ -263,6 +265,9 @@ public struct NoteLibrary: Codable, Equatable, Sendable {
         }
         if formatVersion < 3, nodes.contains(where: { !$0.images.isEmpty }) {
             throw LibraryError.invalidData("Page images require archive format 3.")
+        }
+        if formatVersion < 4, nodes.contains(where: { !$0.diagrams.isEmpty }) {
+            throw LibraryError.invalidData("Shapes, connectors, and tables require archive format 4.")
         }
         guard nodes.count <= 50_000 else { throw LibraryError.invalidData("Too many items.") }
         guard Set(nodes.map(\.id)).count == nodes.count else { throw LibraryError.duplicateID }
@@ -327,6 +332,7 @@ public struct NoteLibrary: Codable, Equatable, Sendable {
     private static func validatePayload(_ node: NoteNode, previous: NoteNode? = nil) throws {
         _ = try cleanTitle(node.title, kind: node.kind)
         if previous?.images != node.images { try PageImageLimits.validate(node.images) }
+        if previous?.diagrams != node.diagrams { try PageDiagramLimits.validate(node.diagrams) }
         guard node.lastSheetNumber >= 0,
               (node.kind == .chapter || node.kind == .topic || node.lastSheetNumber == 0),
               (node.kind == .sheet ? node.sheetNumber.map { $0 > 0 } == true : node.sheetNumber == nil) else {

@@ -1,5 +1,17 @@
 # iNotes
 
+Development candidate **1.3.0** adds Mac shapes, attached arrow connectors and
+editable table cells. It is undergoing validation and is not published; the
+current verified release and download remain listed below.
+
+In the candidate, choose **Shapes and tables** in the toolbar and drag on the
+page. Use **Select** to move or resize a shape/table, drag an arrow endpoint to
+reconnect it, or double-click a label/cell to edit its text. The menu offers five
+basic shapes, straight/elbow connectors, arrowheads, tinted fills and table
+dimensions. **S** selects this tool from page focus; **⌘⌥S** works while typing.
+Diagram pages are read-only on iPad. Archives containing diagrams use format 4
+and require this version; older archives still open.
+
 The **v1.2 update (1.2.2, build 2020)** adds paper, ink, title and zoom changes:
 scenery-matched paper, Vintage Black, Pitch Black/White, five pastel papers,
 sixteen ink presets and a native custom color picker. New sheets open blank
@@ -92,7 +104,7 @@ Requires an Apple silicon Mac and macOS 14+. Building the installer requires ful
 open dist/iNotes.app
 ```
 
-The default local installer target is `dist/iNotes-1.2.2-arm64.dmg`; version 1.2.2/build 2020 matches the verified public release. Failed, unpublished 1.2.0/build 2018 and 1.2.1/build 2019 stay reserved. Downloaded public builds are ad hoc signed: **they are not Apple notarized**, so macOS may report that Apple could not verify iNotes is free of malware.
+The development installer target is `dist/iNotes-1.3.0-arm64.dmg` (unpublished candidate, prospective build 2021). The verified public release remains 1.2.2/build 2020. Failed, unpublished 1.2.0/build 2018 and 1.2.1/build 2019 stay reserved. Downloaded public builds are ad hoc signed: **they are not Apple notarized**, so macOS may report that Apple could not verify iNotes is free of malware.
 
 If you trust the download from the [official releases](https://github.com/icode100/iNotes/releases), follow Apple's [per-app first-open procedure](https://support.apple.com/en-us/102445):
 

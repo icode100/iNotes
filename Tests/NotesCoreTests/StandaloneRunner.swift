@@ -84,7 +84,15 @@ struct StandaloneTestRunner {
         let presentation = PagePresentationTests()
         let inkValidation = InkValidationTests()
         let images = PageImageTests()
+        let diagrams = PageDiagramTests()
         let tests: [(String, XCTestCase, () throws -> Void)] = [
+            ("diagram archive persistence import search snapshots", diagrams, diagrams.testDiagramArchivePersistenceDuplicateImportSearchAndSnapshots),
+            ("legacy diagram defaults and format promotion", diagrams, diagrams.testLegacyDiagramDefaultsAndStickyFormatFourPromotion),
+            ("diagram geometry style attachment atomic rejection", diagrams, diagrams.testInvalidDiagramGeometryStyleAndAttachmentRejectAtomically),
+            ("diagram table text and pattern budgets", diagrams, diagrams.testTableAndDiagramTextObjectAndPatternBudgets),
+            ("connector anchors routing hit testing", diagrams, diagrams.testConnectorAnchorsRoutingHitTestingAndBoundaryDetachment),
+            ("diagram move delete clipboard graph", diagrams, diagrams.testDiagramMoveDeleteAndCopyRemapPreserveConnectorGraph),
+            ("mixed diagram clipboard validation", diagrams, diagrams.testDiagramMixedClipboardRoundTripAndValidation),
             ("annotated image save duplicate import", images, images.testImageArchiveSaveDuplicateAndImportPreserveAnnotatedPage),
             ("legacy image defaults and version promotion", images, images.testLegacyArchivesSnapshotsAndClipboardDefaultImagesAndPromoteOnlyWhenNeeded),
             ("image geometry atomic rejection", images, images.testImageGeometryAndIDsRejectAtomicallyAcrossArchiveAndClipboard),

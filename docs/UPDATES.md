@@ -107,8 +107,8 @@ using Apple CryptoKit and the committed public key. It does not upload anything.
 For v1.0.3, the security rebuild 2011 exceeds the initial public build 2010 and
 shared local builds 1010–1012. Check both published and shared `CFBundleVersion`
 values and use a larger number for every update, including same-version rebuilds.
-Development defaults (`1.2.2`, build 2020) match the verified public release and
-remain separate from the release workflow's
+Development defaults (`1.3.0`, prospective build 2021) target the unpublished
+diagram feature. They remain separate from the release workflow's
 `2002 + GITHUB_RUN_NUMBER`. Run 11 published v1.0.4 build 2012; isolated backup QA
 used build 2013. Run 12 built 2014 but stopped at native diagnostic verification before publication.
 Runs 13, 14 and 15 published 2015, 2016 and 2017. Runs 16 and 17 built 2018 and

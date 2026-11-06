@@ -1116,6 +1116,7 @@ enum EditorDiagnostics {
         checks += try selectAllChecks(window: window)
         checks += try imageChecks(window: window)
         checks += try headingFieldChecks()
+        checks += try DiagramDiagnostics.run()
         return "\(checks) native editor integration checks passed (shared text/ink page, straight lines, formatting, pressure, dark/light, searchable export, mixed text/ink lasso, atomic move/delete/undo, canonical rich text, native PencilKit masks and clipboard validation)."
     }
 
@@ -1468,7 +1469,7 @@ enum EditorDiagnostics {
         for tool in InkTool.allCases {
             controller.perform(.clear)
             page.activeTool = tool; page.inkView.tool = tool == .text ? .pen : tool; page.focus(tool: tool)
-            let selecting = tool == .select || tool == .lasso
+            let selecting = tool == .select || tool == .lasso || tool == .diagram
             let first: NSResponder = tool == .text ? page.textView : (selecting ? page.selectionView : page.inkView)
             let target: NSResponder = tool == .text || selecting ? first : page
             try sendSelectAll(from: first, to: target, context: tool.rawValue)

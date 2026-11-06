@@ -10,16 +10,18 @@ public struct PageClipboardPayload: Codable, Equatable, Sendable {
     public var textBoxes: [PageTextBox]
     public var equations: [NoteEquation]
     public var images: [PageImage]
+    public var diagrams: [PageDiagram]
     public init(text: String = "", rtfData: Data? = nil, strokes: [InkStroke] = [],
                 pencilKitData: Data? = nil, textBoxes: [PageTextBox] = [], equations: [NoteEquation] = [],
-                images: [PageImage] = []) {
+                images: [PageImage] = [], diagrams: [PageDiagram] = []) {
         self.text = text; self.rtfData = rtfData; self.strokes = strokes
         self.pencilKitData = pencilKitData; self.textBoxes = textBoxes; self.equations = equations
         self.images = images
+        self.diagrams = diagrams
     }
 
     private enum CodingKeys: String, CodingKey {
-        case text, rtfData, strokes, pencilKitData, textBoxes, equations, images
+        case text, rtfData, strokes, pencilKitData, textBoxes, equations, images, diagrams
     }
 
     public init(from decoder: Decoder) throws {
@@ -31,10 +33,12 @@ public struct PageClipboardPayload: Codable, Equatable, Sendable {
         textBoxes = try values.decodeIfPresent([PageTextBox].self, forKey: .textBoxes) ?? []
         equations = try values.decodeIfPresent([NoteEquation].self, forKey: .equations) ?? []
         images = try values.decodeIfPresent([PageImage].self, forKey: .images) ?? []
+        diagrams = try values.decodeIfPresent([PageDiagram].self, forKey: .diagrams) ?? []
     }
 
     // A distinct type prevents older apps silently dropping images from a mixed paste.
-    public static let pasteboardType = "io.inotes.page-selection.v3"
+    public static let pasteboardType = "io.inotes.page-selection.v4"
+    public static let imagePasteboardType = "io.inotes.page-selection.v3"
     public static let legacyPasteboardType = "io.inotes.page-selection"
     public static let maximumBytes = 16 * 1_024 * 1_024
 
@@ -57,7 +61,7 @@ public struct PageClipboardPayload: Codable, Equatable, Sendable {
         var node = library.node(id: id)!
         node.pageContent = PageContent(text: text, rtfData: rtfData, strokes: strokes,
                                        pencilKitData: pencilKitData, textBoxes: textBoxes,
-                                       equations: equations, images: images)
+                                       equations: equations, images: images, diagrams: diagrams)
         try library.update(node)
         _ = try LibraryArchive.encode(library)
     }

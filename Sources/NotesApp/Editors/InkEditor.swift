@@ -1,7 +1,7 @@
 import SwiftUI
 import NotesCore
 
-enum InkTool: String, CaseIterable { case text, select, lasso, pen, line, pencil, marker, highlighter, eraser }
+enum InkTool: String, CaseIterable { case text, select, lasso, diagram, pen, line, pencil, marker, highlighter, eraser }
 enum InkPaper: String, CaseIterable { case blank, ruled, dotted, grid }
 
 enum PageSelectionCommand: String, CaseIterable {
@@ -429,7 +429,7 @@ final class InkDocumentView: NSView {
     }
 
     override func mouseDown(with event: NSEvent) {
-        guard isInputEnabled, tool != .select, tool != .lasso else { return }
+        guard isInputEnabled, tool != .select, tool != .lasso, tool != .diagram else { return }
         reportInput(event)
         window?.makeFirstResponder(self)
         beforeGesture = strokes
@@ -583,7 +583,7 @@ enum InkTipCursor {
         switch tool {
         case .text: return .iBeam
         case .select: return .arrow
-        case .lasso, .eraser: return .crosshair
+        case .lasso, .diagram, .eraser: return .crosshair
         default: break
         }
         let style = InkStyle(rawValue: tool.rawValue) ?? .pen

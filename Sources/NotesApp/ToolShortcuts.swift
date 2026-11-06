@@ -23,7 +23,8 @@ extension Notification.Name {
 
 @MainActor
 enum ToolShortcuts {
-    static let all: [ToolShortcut] = [
+    static var all: [ToolShortcut] {
+        var choices: [ToolShortcut] = [
         ToolShortcut(tool: .select, title: "Select", key: "v"),
         ToolShortcut(tool: .lasso, title: "Lasso", key: "l"),
         ToolShortcut(tool: .pen, title: "Pen", key: "p"),
@@ -33,7 +34,12 @@ enum ToolShortcuts {
         ToolShortcut(tool: .eraser, title: "Eraser", key: "e"),
         ToolShortcut(tool: .text, title: "Text", key: "t"),
         ToolShortcut(tool: .line, title: "Straight Line", key: "l", shifted: true)
-    ]
+        ]
+        #if os(macOS)
+        choices.append(ToolShortcut(tool: .diagram, title: "Shapes and Tables", key: "s"))
+        #endif
+        return choices
+    }
 
     static func match(key: String, shifted: Bool) -> InkTool? {
         all.first { $0.key == key.lowercased() && $0.shifted == shifted }?.tool
@@ -131,11 +137,12 @@ enum ToolShortcutDiagnostics {
         try require(eligible(event("P", flags: .shift)) == .pencil, "Shift-P selects Pencil")
         try require(eligible(event("l")) == .lasso && eligible(event("L", flags: .shift)) == .line, "Lasso and straight-line shortcuts remain distinct")
         try require(eligible(event("h")) == .highlighter && eligible(event("v")) == .select, "Highlighter and Select have canvas shortcuts")
+        try require(eligible(event("s")) == .diagram, "S selects the native shapes tool from the page")
         try require(eligible(event("q")) == nil && eligible(event("p", flags: .command)) == nil, "Unknown keys and standard command chords pass through")
         try require(ToolShortcutMonitor.eligibleTool(for: event("p"), in: window, activeTool: .text) == nil,
                     "Text mode protects typing even if a previous canvas responder still has focus")
         window.makeFirstResponder(editor)
-        try require(eligible(event("p")) == nil && eligible(event("h")) == nil, "Typing letters never selects drawing tools")
+        try require(eligible(event("p")) == nil && eligible(event("h")) == nil && eligible(event("s")) == nil, "Typing letters never selects drawing tools")
         editor.insertText("p + h = \\phi", replacementRange: NSRange(location: 0, length: 0))
         try require(editor.string == "p + h = \\phi", "Text and LaTeX-like input remain intact")
         return "Tool shortcut checks passed: \(checks), including canvas focus and native text-input protection"

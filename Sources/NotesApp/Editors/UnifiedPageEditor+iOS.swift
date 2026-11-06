@@ -14,6 +14,7 @@ struct UnifiedPageEditor: UIViewRepresentable {
     @Binding var textBoxes: [PageTextBox]
     @Binding var equations: [NoteEquation]
     @Binding var images: [PageImage]
+    @Binding var diagrams: [PageDiagram]
     var tool: InkTool = .pen
     var colorHex: String = "#314D43"
     var lineWidth: Double = InkNibPreset.defaultWidth(for: .pen)
@@ -22,6 +23,12 @@ struct UnifiedPageEditor: UIViewRepresentable {
     var linePattern: LinePattern = .solid
     var pageTemplate: PageTemplate = .none
     var templateLinePattern: LinePattern = .solid
+    var diagramKind: PageDiagram.Kind = .rectangle
+    var connectorRoute: PageDiagram.ConnectorRoute = .straight
+    var arrowHeads: PageDiagram.ArrowHeads = .end
+    var tableRows = 3
+    var tableColumns = 3
+    var diagramFill = false
     var onTextChange: ((String, Data?) -> Void)? = nil
     var onInkChange: (([InkStroke], Data?) -> Void)? = nil
     var onInputChange: ((String) -> Void)? = nil
@@ -31,17 +38,21 @@ struct UnifiedPageEditor: UIViewRepresentable {
     var onEquationEdit: ((NoteEquation) -> Void)? = nil
 
     init(text: Binding<String>, rtfData: Binding<Data?>, strokes: Binding<[InkStroke]>, pencilKitData: Binding<Data?>,
-         textBoxes: Binding<[PageTextBox]> = .constant([]), equations: Binding<[NoteEquation]> = .constant([]), images: Binding<[PageImage]> = .constant([]),
+         textBoxes: Binding<[PageTextBox]> = .constant([]), equations: Binding<[NoteEquation]> = .constant([]), images: Binding<[PageImage]> = .constant([]), diagrams: Binding<[PageDiagram]> = .constant([]),
          tool: InkTool = .pen, colorHex: String = "#314D43", lineWidth: Double? = nil,
          paper: InkPaper = .dotted, theme: PageTheme = .light,
          linePattern: LinePattern = .solid, pageTemplate: PageTemplate = .none, templateLinePattern: LinePattern = .solid,
+         diagramKind: PageDiagram.Kind = .rectangle, connectorRoute: PageDiagram.ConnectorRoute = .straight,
+         arrowHeads: PageDiagram.ArrowHeads = .end, tableRows: Int = 3, tableColumns: Int = 3, diagramFill: Bool = false,
          onTextChange: ((String, Data?) -> Void)? = nil, onInkChange: (([InkStroke], Data?) -> Void)? = nil,
          onInputChange: ((String) -> Void)? = nil, onPageChange: ((PageContent) -> Void)? = nil,
          onEquationEdit: ((NoteEquation) -> Void)? = nil, onPageValidate: ((PageContent) -> Bool)? = nil, onPageError: ((String) -> Void)? = nil) {
         _text = text; _rtfData = rtfData; _strokes = strokes; _pencilKitData = pencilKitData
-        _textBoxes = textBoxes; _equations = equations; _images = images; self.tool = tool; self.colorHex = colorHex
+        _textBoxes = textBoxes; _equations = equations; _images = images; _diagrams = diagrams; self.tool = tool; self.colorHex = colorHex
         self.lineWidth = lineWidth ?? InkNibPreset.defaultWidth(for: tool); self.paper = paper; self.theme = theme
         self.linePattern = linePattern; self.pageTemplate = pageTemplate; self.templateLinePattern = templateLinePattern
+        self.diagramKind = diagramKind; self.connectorRoute = connectorRoute; self.arrowHeads = arrowHeads
+        self.tableRows = tableRows; self.tableColumns = tableColumns; self.diagramFill = diagramFill
         self.onTextChange = onTextChange; self.onInkChange = onInkChange; self.onInputChange = onInputChange
         self.onPageChange = onPageChange; self.onEquationEdit = onEquationEdit; self.onPageValidate = onPageValidate; self.onPageError = onPageError
     }
@@ -77,7 +88,8 @@ struct UnifiedPageEditor: UIViewRepresentable {
         private var isLoading = false
         private var nativeToolActive = false
         private var rejectedDrawing = false
-        private var showingImageWarning = false
+        private var showingUnsupportedWarning = false
+        private var supportsPageEditing: Bool { parent.images.isEmpty && parent.diagrams.isEmpty }
         private var lastData: Data?
         private var lastStrokes: [InkStroke] = []
         private var expectedDrawingData: Data?
@@ -138,7 +150,7 @@ struct UnifiedPageEditor: UIViewRepresentable {
             selection.page = view.page
             view.page.selectionView.controller = selection
             view.page.prepareForPageSelection = { [weak self, weak view] in
-                guard let self, let view, self.parent.images.isEmpty, !self.nativeToolActive,
+                guard let self, let view, self.supportsPageEditing, !self.nativeToolActive,
                       !self.rejectedDrawing, view.page.isUserInteractionEnabled else { return false }
                 self.persistInk(view.page.canvas)
                 self.picker.setVisible(false, forFirstResponder: view.page.canvas)
@@ -164,9 +176,9 @@ struct UnifiedPageEditor: UIViewRepresentable {
             view.page.layer.addSublayer(linePreview)
             view.page.onPencil = { [weak self, weak view] in
                 guard let self, let view else { return }
-                guard self.parent.images.isEmpty, self.parent.tool != .text else { return }
+                guard self.supportsPageEditing, self.parent.tool != .text else { return }
                 self.parent.onInputChange?("Apple Pencil")
-                guard self.parent.tool != .select && self.parent.tool != .lasso else { return }
+                guard self.parent.tool != .select && self.parent.tool != .lasso && self.parent.tool != .diagram else { return }
                 self.picker.setVisible(true, forFirstResponder: view.page.canvas)
                 view.page.canvas.becomeFirstResponder()
                 view.page.canvas.undoManager?.levelsOfUndo = 50
@@ -181,17 +193,17 @@ struct UnifiedPageEditor: UIViewRepresentable {
         }
 
         func update(_ view: UnifiedPageScrollView, enabled externalEnabled: Bool) {
-            // Image authoring is currently Mac-only. Keep every image byte in
-            // snapshots, but prevent edits against an incomplete iPad preview.
-            let enabled = externalEnabled && parent.images.isEmpty
+            // Image and diagram authoring are currently Mac-only. Keep every
+            // object in snapshots and prevent edits against an incomplete preview.
+            let enabled = externalEnabled && supportsPageEditing
             // A system appearance transition waits until the current Pencil
             // gesture completes, preserving in-flight native ink and pressure.
             let theme = nativeToolActive ? (appliedTheme ?? parent.theme) : parent.theme
             let incoming = PageContent(text: parent.text, rtfData: parent.rtfData, strokes: parent.strokes,
-                                       pencilKitData: parent.pencilKitData, textBoxes: parent.textBoxes, equations: parent.equations, images: parent.images)
+                                       pencilKitData: parent.pencilKitData, textBoxes: parent.textBoxes, equations: parent.equations, images: parent.images, diagrams: parent.diagrams)
             if !selection.hasPreview { selection.load(incoming) }
             let content = selection.displayedContent
-            selection.onEquationEdit = parent.images.isEmpty ? parent.onEquationEdit : nil
+            selection.onEquationEdit = supportsPageEditing ? parent.onEquationEdit : nil
             selection.onValidate = parent.onPageValidate
             selection.onError = parent.onPageError
             richTextCoordinator.parent = RichTextEditor(text: parent.$text, rtfData: parent.$rtfData, theme: theme, onChange: { [weak self] text, rtf in
@@ -250,17 +262,21 @@ struct UnifiedPageEditor: UIViewRepresentable {
             }
             appliedTheme = theme
             configureTool(on: view.page.canvas, theme: theme)
-            view.page.canvas.drawingGestureRecognizer.isEnabled = enabled && !rejectedDrawing && parent.tool != .text && parent.tool != .line && !selecting
+            view.page.canvas.drawingGestureRecognizer.isEnabled = enabled && !rejectedDrawing && parent.tool != .text && parent.tool != .line && parent.tool != .diagram && !selecting
             lineGesture?.isEnabled = enabled && !rejectedDrawing && parent.tool == .line
             view.page.selectionInputAllowed = enabled && !rejectedDrawing
             view.page.refreshSelectionPresentation()
             renderObjects(content, on: view, theme: theme, enabled: enabled)
-            if !content.images.isEmpty {
-                showingImageWarning = true
-                view.setInkError("This sheet contains images. Open it on Mac to view and annotate its images. Page editing is disabled on iPad; your saved content is preserved.")
+            if !content.images.isEmpty || !content.diagrams.isEmpty {
+                showingUnsupportedWarning = true
+                let objects = !content.images.isEmpty && !content.diagrams.isEmpty ? "images and diagrams" : (content.images.isEmpty ? "diagrams" : "images")
+                view.setInkError("This sheet contains \(objects). Open it on Mac to view and edit all page objects. Page editing is disabled on iPad; your saved content is preserved.")
                 view.panGestureRecognizer.minimumNumberOfTouches = 1
-            } else if showingImageWarning {
-                showingImageWarning = false
+            } else if parent.tool == .diagram {
+                showingUnsupportedWarning = true
+                view.setInkError("Shapes, connectors and tables are currently created on Mac. Choose another tool to continue editing on iPad.")
+            } else if showingUnsupportedWarning {
+                showingUnsupportedWarning = false
                 view.setInkError(rejectedDrawing ? "This sheet contains unsupported ink and cannot be edited safely. Its saved drawing has been preserved." : nil)
             }
             view.resizePage()
@@ -272,7 +288,7 @@ struct UnifiedPageEditor: UIViewRepresentable {
         }
 
         private func focus(_ tool: InkTool, in view: UnifiedPageScrollView) {
-            guard view.isUserInteractionEnabled, parent.images.isEmpty else { return }
+            guard view.isUserInteractionEnabled, supportsPageEditing else { return }
             guard view.window != nil else { pendingFocus = tool; return }
             pendingFocus = nil
             let page = view.page
@@ -283,9 +299,13 @@ struct UnifiedPageEditor: UIViewRepresentable {
             page.selectionInputAllowed = !rejectedDrawing
             page.refreshSelectionPresentation()
             view.panGestureRecognizer.minimumNumberOfTouches = tool == .text || page.selectionEnabled ? 2 : 1
-            page.canvas.drawingGestureRecognizer.isEnabled = !rejectedDrawing && tool != .text && tool != .line && !page.selectionEnabled
+            page.canvas.drawingGestureRecognizer.isEnabled = !rejectedDrawing && tool != .text && tool != .line && tool != .diagram && !page.selectionEnabled
             lineGesture?.isEnabled = !rejectedDrawing && tool == .line
-            if tool == .text {
+            if tool == .diagram {
+                page.endEditing(true)
+                picker.setVisible(false, forFirstResponder: page.canvas)
+                page.canvas.resignFirstResponder()
+            } else if tool == .text {
                 picker.setVisible(false, forFirstResponder: page.canvas)
                 page.canvas.resignFirstResponder()
                 let editor = page.activeTextView ?? page.textView
@@ -316,7 +336,7 @@ struct UnifiedPageEditor: UIViewRepresentable {
             configuredDisplayInk = color
             let width = max(0.5, min(30, parent.lineWidth))
             switch tool {
-            case .text, .select, .lasso: break
+            case .text, .select, .lasso, .diagram: break
             case .pen, .line: canvas.tool = PKInkingTool(.pen, color: color, width: width * InkStyle.pen.widthMultiplier)
             case .pencil: canvas.tool = PKInkingTool(.pencil, color: color, width: width * InkStyle.pencil.widthMultiplier)
             case .marker: canvas.tool = PKInkingTool(.marker, color: color, width: width * InkStyle.marker.widthMultiplier)
@@ -340,8 +360,8 @@ struct UnifiedPageEditor: UIViewRepresentable {
         }
 
         private func showToolsIfNeeded() {
-            guard parent.images.isEmpty, let view, view.window != nil, view.isUserInteractionEnabled,
-                  parent.tool != .text && parent.tool != .select && parent.tool != .lasso else { return }
+            guard supportsPageEditing, let view, view.window != nil, view.isUserInteractionEnabled,
+                  parent.tool != .text && parent.tool != .select && parent.tool != .lasso && parent.tool != .diagram else { return }
             picker.setVisible(true, forFirstResponder: view.page.canvas)
             view.page.canvas.becomeFirstResponder()
             view.page.canvas.undoManager?.levelsOfUndo = 50
@@ -459,7 +479,7 @@ struct UnifiedPageEditor: UIViewRepresentable {
         }
 
         private func persistInk(_ canvas: PKCanvasView) {
-            guard parent.images.isEmpty, !isLoading, !rejectedDrawing else { return }
+            guard supportsPageEditing, !isLoading, !rejectedDrawing else { return }
             #if DEBUG
             guard !isRunningDiagnostics else { return }
             #endif
@@ -498,7 +518,7 @@ struct UnifiedPageEditor: UIViewRepresentable {
         }
 
         private func publishText(_ text: String, rtf: Data?) {
-            guard parent.images.isEmpty else { return }
+            guard supportsPageEditing else { return }
             var content = selection.content
             content.text = text; content.rtfData = rtf
             selection.load(content)
@@ -508,14 +528,14 @@ struct UnifiedPageEditor: UIViewRepresentable {
         }
 
         private func publishPage(_ content: PageContent) {
-            guard parent.images.isEmpty, content.images.isEmpty else { return }
+            guard supportsPageEditing, content.images.isEmpty, content.diagrams.isEmpty else { return }
             if let onPageChange = parent.onPageChange { onPageChange(content) }
             else {
                 if let onTextChange = parent.onTextChange { onTextChange(content.text, content.rtfData) }
                 else { parent.text = content.text; parent.rtfData = content.rtfData }
                 if let onInkChange = parent.onInkChange { onInkChange(content.strokes, content.pencilKitData) }
                 else { parent.strokes = content.strokes; parent.pencilKitData = content.pencilKitData }
-                parent.textBoxes = content.textBoxes; parent.equations = content.equations; parent.images = content.images
+                parent.textBoxes = content.textBoxes; parent.equations = content.equations; parent.images = content.images; parent.diagrams = content.diagrams
             }
         }
 
@@ -550,6 +570,7 @@ struct UnifiedPageEditor: UIViewRepresentable {
 
         private func renderObjects(_ content: PageContent, on view: UnifiedPageScrollView, theme: PageTheme, enabled: Bool) {
             let page = view.page
+            page.diagramView.configure(content.diagrams, theme: theme)
             let textIDs = Set(content.textBoxes.map(\.id)), equationIDs = Set(content.equations.map(\.id))
             for id in Array(page.textBoxViews.keys) where !textIDs.contains(id) { page.textBoxViews.removeValue(forKey: id)?.removeFromSuperview() }
             for id in Array(page.equationViews.keys) where !equationIDs.contains(id) { page.equationViews.removeValue(forKey: id)?.removeFromSuperview() }
@@ -558,7 +579,7 @@ struct UnifiedPageEditor: UIViewRepresentable {
                 if page.textBoxViews[box.id] == nil { page.textBoxViews[box.id] = object; page.insertSubview(object, belowSubview: page.canvas) }
                 object.configure(box: box, theme: theme, editable: enabled && parent.tool == .text, paper: parent.paper)
                 object.onChange = { [weak self, weak view] changed in
-                    guard let self, self.parent.images.isEmpty, let view, let index = self.selection.content.textBoxes.firstIndex(where: { $0.id == changed.id }) else { return }
+                    guard let self, self.supportsPageEditing, let view, let index = self.selection.content.textBoxes.firstIndex(where: { $0.id == changed.id }) else { return }
                     var value = self.selection.content
                     guard value.textBoxes[index] != changed else { return }
                     value.textBoxes[index] = changed
@@ -728,7 +749,8 @@ struct UnifiedPageEditor: UIViewRepresentable {
                 checks += try runToolShortcutDiagnostics()
                 checks += try runInputRoutingDiagnostics()
                 checks += try runNativeTypingUndoDiagnostics()
-                result = ["passed": true, "checks": checks, "message": "iPad straight lines, themes, ruled text baselines, canonical ink, mixed page selection and Select All routing from every tool, native metadata, clipboard duplication, and atomic undo/redo passed"]
+                checks += try runDiagramSafetyDiagnostics()
+                result = ["passed": true, "checks": checks, "message": "iPad straight lines, themes, ruled text baselines, canonical ink, mixed page selection and Select All routing from every tool, native metadata, clipboard duplication, atomic undo/redo and read-only diagram previews passed"]
             } catch { result = ["passed": false, "checks": checks, "message": error.localizedDescription] }
             isLoading = true
             canvas.drawing = original
@@ -740,6 +762,91 @@ struct UnifiedPageEditor: UIViewRepresentable {
                 try JSONSerialization.data(withJSONObject: result, options: [.prettyPrinted, .sortedKeys]).write(to: resultURL, options: .atomic)
                 print("iNotes iPad diagnostics: \(result)")
             } catch { print("Could not write iPad diagnostics: \(error)") }
+        }
+
+        private func runDiagramSafetyDiagnostics() throws -> Int {
+            var checks = 0
+            func require(_ value: @autoclosure () -> Bool, _ message: String) throws {
+                guard value() else { throw NSError(domain: "iNotes.iPadDiagramDiagnostics", code: 1, userInfo: [NSLocalizedDescriptionKey: message]) }
+                checks += 1
+            }
+            let shape = PageDiagram(kind: .roundedRectangle, x: 60, y: 80, width: 180, height: 100, text: "Saved नमस्ते")
+            let table = PageDiagram(kind: .table, x: 300, y: 80, width: 240, height: 120, rows: 2, columns: 2,
+                cells: ["A", "B", "日本語", "👋"])
+            let arrow = PageDiagram(kind: .connector, start: InkPoint(x: 240, y: 130), end: InkPoint(x: 300, y: 140),
+                startAttachment: PageDiagramAttachment(targetDiagramID: shape.id, side: .right),
+                endAttachment: PageDiagramAttachment(targetDiagramID: table.id, side: .left), route: .elbow, arrowHeads: .both)
+            let diagrams = [shape, table, arrow]
+            let source = PageContent(text: "Preserved body", strokes: [InkStroke(points: [InkPoint(x: 40, y: 40), InkPoint(x: 80, y: 50)])], diagrams: diagrams)
+            var writes = 0
+            let parent = UnifiedPageEditor(text: .constant(source.text), rtfData: .constant(nil), strokes: .constant(source.strokes),
+                pencilKitData: .constant(nil), diagrams: .constant(diagrams), tool: .text,
+                onPageChange: { _ in writes += 1 })
+            let coordinator = Coordinator(parent)
+            let fixture = UnifiedPageScrollView(frame: CGRect(x: 0, y: 0, width: 640, height: 480))
+            coordinator.attach(fixture)
+            defer { coordinator.detach(fixture) }
+            coordinator.update(fixture, enabled: true)
+            try require(coordinator.selection.content == source && fixture.page.diagramView.diagrams == diagrams,
+                "Read-only iPad pages retain complete canonical diagrams alongside body text and ink")
+            try require(!fixture.page.isUserInteractionEnabled && !fixture.page.textView.isEditable
+                && !fixture.page.canvas.drawingGestureRecognizer.isEnabled && !fixture.page.selectionInputAllowed,
+                "Diagram pages disable native text, ink and mixed page selection input")
+            try require(fixture.subviews.compactMap { $0 as? UILabel }.contains { $0.text?.contains("Open it on Mac") == true && !$0.isHidden },
+                "The actual page displays the Mac-only editing notice")
+            try require(fixture.page.inputHitTest(at: CGPoint(x: 100, y: 100), isPencil: true) == nil,
+                "Pencil input cannot reach an incomplete editable diagram page")
+            var changed = source
+            changed.text = "Rejected edit"
+            coordinator.selection.commit(changed, action: "Unsupported Edit")
+            coordinator.selection.perform(.delete)
+            coordinator.publishText("Rejected text callback", rtf: nil)
+            try require(writes == 0 && coordinator.selection.content == source,
+                "Native and selection publishing paths preserve read-only diagram content")
+            func preview(_ theme: PageTheme, values: [PageDiagram]) -> Data? {
+                let preview = IOSPageDiagramView(frame: CGRect(x: 0, y: 0, width: 640, height: 300))
+                preview.configure(values, theme: theme)
+                return UIGraphicsImageRenderer(size: preview.bounds.size).image { _ in preview.draw(preview.bounds) }.pngData()
+            }
+            let light = preview(.light, values: diagrams), dark = preview(.pitchBlack, values: diagrams), blank = preview(.light, values: [])
+            try require(light != nil && dark != nil && light != blank && light != dark,
+                "The native iPad renderer draws shapes, connectors and table labels using resolved theme colors")
+            coordinator.parent.theme = .pitchBlack
+            coordinator.update(fixture, enabled: true)
+            try require(coordinator.selection.content == source && fixture.page.diagramView.diagrams == diagrams && writes == 0,
+                "Theme projection preserves canonical diagrams without publishing a page edit")
+            let plain = UnifiedPageEditor(text: .constant("Editable"), rtfData: .constant(nil), strokes: .constant([]),
+                pencilKitData: .constant(nil), tool: .diagram, onPageChange: { _ in writes += 1 })
+            coordinator.parent = plain
+            coordinator.update(fixture, enabled: true)
+            try require(!fixture.page.canvas.drawingGestureRecognizer.isEnabled && fixture.page.diagramView.diagrams.isEmpty,
+                "A stored Mac diagram-tool preference never becomes an accidental iPad pen gesture")
+            let board = UIPasteboard.general
+            let savedItems = board.items
+            defer { board.items = savedItems }
+            let payload = PageClipboardPayload(diagrams: diagrams)
+            board.setData(try JSONEncoder().encode(payload), forPasteboardType: PageClipboardPayload.pasteboardType)
+            let beforePaste = coordinator.selection.content
+            var rejectedPaste = false
+            coordinator.selection.onError = { _ in rejectedPaste = true }
+            coordinator.selection.perform(.paste)
+            try require(rejectedPaste && coordinator.selection.content == beforePaste && writes == 0,
+                "A v4 diagram paste is explicitly rejected without dropping objects or editing the destination")
+            rejectedPaste = false
+            let nativeText = fixture.page.textView.text
+            fixture.page.textView.paste(nil)
+            try require(rejectedPaste && fixture.page.textView.text == nativeText && writes == 0,
+                "Native body/text-box Paste also rejects unsupported diagram objects before a plain-text fallback")
+            var invalid = shape
+            invalid.width = .infinity
+            let renderer = IOSPageDiagramView(frame: CGRect(x: 0, y: 0, width: 100, height: 100))
+            renderer.configure([invalid], theme: .light)
+            try require(renderer.diagrams.isEmpty, "The native preview rejects invalid diagram geometry before rendering")
+            renderer.configure(diagrams, theme: .light)
+            renderer.show(pageRect: CGRect(x: 10, y: 99_000, width: 300, height: 400))
+            try require(renderer.frame.size == CGSize(width: 300, height: 400) && renderer.bounds.origin.y == 99_000,
+                "A long read-only page backs only its visible vector viewport")
+            return checks
         }
 
         private func runWorkspaceArtworkDiagnostics() throws -> Int {
@@ -1466,6 +1573,152 @@ private final class PencilLineGestureRecognizer: UIGestureRecognizer {
 }
 
 @MainActor
+final class IOSPageDiagramView: UIView {
+    private(set) var diagrams: [PageDiagram] = []
+    private var theme = PageTheme.light
+
+    override init(frame: CGRect) {
+        super.init(frame: frame)
+        isOpaque = false
+        backgroundColor = .clear
+        isUserInteractionEnabled = false
+        contentMode = .redraw
+        isAccessibilityElement = true
+        accessibilityLabel = "Read-only page diagrams"
+    }
+
+    required init?(coder: NSCoder) { fatalError("init(coder:) is unavailable") }
+
+    func configure(_ values: [PageDiagram], theme: PageTheme) {
+        // Archive validation normally precedes this path. Keep the native draw
+        // boundary bounded too, including direct programmatic model updates.
+        let accepted = (try? PageDiagramLimits.validate(values)) != nil ? values : []
+        guard diagrams != accepted || self.theme != theme else { return }
+        diagrams = accepted
+        self.theme = theme
+        accessibilityValue = "\(accepted.count) objects. Open on Mac to edit."
+        isHidden = accepted.isEmpty
+        setNeedsDisplay()
+    }
+
+    func show(pageRect: CGRect) {
+        guard !pageRect.isNull, !pageRect.isInfinite,
+              [pageRect.minX, pageRect.minY, pageRect.width, pageRect.height].allSatisfy(\.isFinite) else { return }
+        // A long page must not allocate one enormous transparent bitmap. The
+        // preview keeps world coordinates but backs only its visible viewport.
+        guard frame != pageRect || bounds != pageRect else { return }
+        frame = pageRect
+        bounds = pageRect
+        setNeedsDisplay()
+    }
+
+    override func draw(_ rect: CGRect) {
+        guard let context = UIGraphicsGetCurrentContext() else { return }
+        for value in diagrams {
+            let bounds = PageDiagramGeometry.bounds(of: value, in: diagrams)
+            guard bounds.insetBy(dx: -value.lineWidth, dy: -value.lineWidth).intersects(rect) else { continue }
+            let color = UIColor(noteHex: theme.resolvedInkHex(value.colorHex))
+            context.saveGState()
+            color.setStroke()
+            context.setLineWidth(value.lineWidth)
+            context.setLineJoin(.round)
+            context.setLineCap(value.linePattern == .dotted ? .round : .butt)
+            if value.linePattern != .solid {
+                context.setLineDash(phase: 0, lengths: value.linePattern.dashLengths(width: value.lineWidth).map { CGFloat($0) })
+            }
+            let frame = CGRect(x: value.x, y: value.y, width: value.width, height: value.height)
+            let path: UIBezierPath
+            switch value.kind {
+            case .rectangle, .table: path = UIBezierPath(rect: frame)
+            case .roundedRectangle: path = UIBezierPath(roundedRect: frame, cornerRadius: min(18, min(frame.width, frame.height) / 5))
+            case .ellipse: path = UIBezierPath(ovalIn: frame)
+            case .triangle:
+                path = polygon([CGPoint(x: frame.midX, y: frame.minY), CGPoint(x: frame.maxX, y: frame.maxY), CGPoint(x: frame.minX, y: frame.maxY)])
+            case .diamond:
+                path = polygon([CGPoint(x: frame.midX, y: frame.minY), CGPoint(x: frame.maxX, y: frame.midY),
+                    CGPoint(x: frame.midX, y: frame.maxY), CGPoint(x: frame.minX, y: frame.midY)])
+            case .connector:
+                path = UIBezierPath()
+                let points = PageDiagramGeometry.connectorPoints(for: value, in: diagrams)
+                if let first = points.first { path.move(to: CGPoint(x: first.x, y: first.y)) }
+                for point in points.dropFirst() { path.addLine(to: CGPoint(x: point.x, y: point.y)) }
+            }
+            if value.fill && value.kind != .connector {
+                context.setFillColor(color.withAlphaComponent(0.12).cgColor)
+                context.addPath(path.cgPath)
+                context.fillPath()
+            }
+            context.addPath(path.cgPath)
+            context.strokePath()
+            if value.kind == .table {
+                for row in 1..<value.rows {
+                    let y = frame.minY + frame.height * CGFloat(row) / CGFloat(value.rows)
+                    context.move(to: CGPoint(x: frame.minX, y: y)); context.addLine(to: CGPoint(x: frame.maxX, y: y))
+                }
+                for column in 1..<value.columns {
+                    let x = frame.minX + frame.width * CGFloat(column) / CGFloat(value.columns)
+                    context.move(to: CGPoint(x: x, y: frame.minY)); context.addLine(to: CGPoint(x: x, y: frame.maxY))
+                }
+                context.strokePath()
+                for row in 0..<value.rows { for column in 0..<value.columns {
+                    let cell = CGRect(x: frame.minX + frame.width * CGFloat(column) / CGFloat(value.columns),
+                        y: frame.minY + frame.height * CGFloat(row) / CGFloat(value.rows),
+                        width: frame.width / CGFloat(value.columns), height: frame.height / CGFloat(value.rows))
+                    drawText(value.cells[row * value.columns + column], in: cell.insetBy(dx: 5, dy: 3), color: color)
+                } }
+            } else if value.kind == .connector {
+                context.setLineDash(phase: 0, lengths: [])
+                let points = PageDiagramGeometry.connectorPoints(for: value, in: diagrams)
+                if value.arrowHeads == .end || value.arrowHeads == .both {
+                    if let end = points.last, let previous = points.dropLast().last(where: { $0.x != end.x || $0.y != end.y }) {
+                        arrow(at: end, from: previous, width: value.lineWidth, context: context)
+                    }
+                }
+                if value.arrowHeads == .both, let start = points.first,
+                   let next = points.dropFirst().first(where: { $0.x != start.x || $0.y != start.y }) {
+                    arrow(at: start, from: next, width: value.lineWidth, context: context)
+                }
+                drawText(value.text, in: bounds.insetBy(dx: 10, dy: 3), color: color)
+            } else {
+                drawText(value.text, in: frame.insetBy(dx: 10, dy: 5), color: color)
+            }
+            context.restoreGState()
+        }
+    }
+
+    private func polygon(_ points: [CGPoint]) -> UIBezierPath {
+        let path = UIBezierPath()
+        if let first = points.first { path.move(to: first) }
+        for point in points.dropFirst() { path.addLine(to: point) }
+        path.close()
+        return path
+    }
+
+    private func arrow(at point: InkPoint, from previous: InkPoint, width: Double, context: CGContext) {
+        let angle = atan2(point.y - previous.y, point.x - previous.x)
+        let length = max(10, width * 3)
+        context.move(to: CGPoint(x: point.x - cos(angle - .pi / 6) * length, y: point.y - sin(angle - .pi / 6) * length))
+        context.addLine(to: CGPoint(x: point.x, y: point.y))
+        context.addLine(to: CGPoint(x: point.x - cos(angle + .pi / 6) * length, y: point.y - sin(angle + .pi / 6) * length))
+        context.strokePath()
+    }
+
+    private func drawText(_ text: String, in rect: CGRect, color: UIColor) {
+        guard !text.isEmpty, rect.width > 0, rect.height > 0, let context = UIGraphicsGetCurrentContext() else { return }
+        let paragraph = NSMutableParagraphStyle()
+        paragraph.alignment = .center
+        paragraph.lineBreakMode = .byTruncatingTail
+        let attributes: [NSAttributedString.Key: Any] = [.font: UIFont.systemFont(ofSize: 16), .foregroundColor: color, .paragraphStyle: paragraph]
+        let measured = (text as NSString).boundingRect(with: rect.size, options: [.usesLineFragmentOrigin, .usesFontLeading], attributes: attributes, context: nil)
+        let textRect = CGRect(x: rect.minX, y: rect.minY + max(0, (rect.height - measured.height) / 2), width: rect.width, height: rect.height)
+        context.saveGState()
+        context.clip(to: rect)
+        (text as NSString).draw(with: textRect, options: [.usesLineFragmentOrigin, .usesFontLeading], attributes: attributes, context: nil)
+        context.restoreGState()
+    }
+}
+
+@MainActor
 final class UnifiedPageScrollView: UIScrollView {
     let page = UnifiedPencilPage()
     var onAttachment: (() -> Void)?
@@ -1505,7 +1758,8 @@ final class UnifiedPageScrollView: UIScrollView {
         let width: CGFloat = 1600
         let textHeight = page.textView.sizeThatFits(CGSize(width: width - 80, height: .greatestFiniteMagnitude)).height
         let inkBottom = page.canvas.drawing.bounds.maxY
-        let objectBottom = (Array(page.textBoxViews.values).map { $0.frame.maxY } + Array(page.equationViews.values).map { $0.frame.maxY }).max() ?? 0
+        let objectBottom = (Array(page.textBoxViews.values).map { $0.frame.maxY } + Array(page.equationViews.values).map { $0.frame.maxY }
+            + page.diagramView.diagrams.map { PageDiagramGeometry.bounds(of: $0, in: page.diagramView.diagrams).maxY }).max() ?? 0
         let desiredHeight = max(2200, textHeight + 80, inkBottom.isFinite ? inkBottom + 80 : 0, objectBottom + 80)
         let height = min(CGFloat(InkGeometryLimits.maximumPageDimension), desiredHeight.isFinite ? desiredHeight : 2200)
         page.bounds = CGRect(x: 0, y: 0, width: width, height: height)
@@ -1535,7 +1789,9 @@ final class UnifiedPageScrollView: UIScrollView {
     }
 
     func updateVisiblePaper() {
-        page.paper.visiblePageRect = page.convert(bounds, from: self).intersection(page.bounds)
+        let visible = page.convert(bounds, from: self).intersection(page.bounds)
+        page.paper.visiblePageRect = visible
+        page.diagramView.show(pageRect: visible)
     }
 
     func setInkError(_ message: String?) {
@@ -1548,6 +1804,7 @@ final class UnifiedPageScrollView: UIScrollView {
 @MainActor
 final class UnifiedPencilPage: UIView {
     let paper = UnifiedPaperView()
+    let diagramView = IOSPageDiagramView()
     let canvas = IOSPageCanvasView()
     let textView = IOSPageTextView()
     let selectionView = IOSPageSelectionView()
@@ -1593,6 +1850,7 @@ final class UnifiedPencilPage: UIView {
         overrideUserInterfaceStyle = .light
         paper.isUserInteractionEnabled = false
         addSubview(paper)
+        addSubview(diagramView)
         canvas.isOpaque = false
         canvas.backgroundColor = .clear
         canvas.isScrollEnabled = false
@@ -1652,6 +1910,26 @@ final class UnifiedPencilPage: UIView {
 /// Search, titles, and equation-source editors use their normal UIKit behavior.
 @MainActor
 final class IOSPageTextView: UITextView {
+    override func paste(_ sender: Any?) {
+        if let page = enclosingNotePage {
+            guard page.isUserInteractionEnabled && page.selectionInputAllowed else { return }
+            let board = UIPasteboard.general
+            if let data = board.data(forPasteboardType: PageClipboardPayload.pasteboardType)
+                ?? board.data(forPasteboardType: PageClipboardPayload.imagePasteboardType)
+                ?? board.data(forPasteboardType: PageClipboardPayload.legacyPasteboardType) {
+                guard let payload = try? PageClipboardPayload.decodeValidated(data) else {
+                    page.selectionView.controller?.onError?("The copied page content could not be pasted safely. Your sheet has not been changed.")
+                    return
+                }
+                guard payload.images.isEmpty && payload.diagrams.isEmpty else {
+                    page.selectionView.controller?.onError?("Pasting page images or diagrams is currently available on Mac. Your sheet has not been changed.")
+                    return
+                }
+            }
+        }
+        super.paste(sender)
+    }
+
     override func canPerformAction(_ action: Selector, withSender sender: Any?) -> Bool {
         if action == #selector(selectAll(_:)), let page = enclosingNotePage {
             return page.canPerformAction(action, withSender: sender)

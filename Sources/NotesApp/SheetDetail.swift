@@ -115,6 +115,12 @@ struct SheetDetail: View {
     @AppStorage("inkColor") private var inkColor = "#30343B"
     @AppStorage("inkWidth") private var inkWidth = InkNibPreset.defaultWidth(for: .pen)
     @AppStorage("inkTool") private var selectedTool = "pen"
+    @AppStorage("diagramKind") private var diagramKindPreference = "rectangle"
+    @AppStorage("diagramConnectorRoute") private var connectorRoutePreference = "straight"
+    @AppStorage("diagramArrowHeads") private var arrowHeadsPreference = "end"
+    @AppStorage("diagramFill") private var diagramFill = false
+    @AppStorage("diagramTableRows") private var tableRows = 3
+    @AppStorage("diagramTableColumns") private var tableColumns = 3
     @ViewState private var showAttachmentImporter = false
     @ViewState private var showExporter = false
     @ViewState private var exportData = BackupDocument()
@@ -123,8 +129,12 @@ struct SheetDetail: View {
     @ViewState private var equationDraft: NoteEquation?
     @ViewState private var renameRequest: NameRequest?
     @ViewState private var showInkColors = false
+    @ViewState private var showTableOptions = false
     private var sheet: NoteNode? { store.library.node(id: sheetID) }
     private var inkTool: InkTool { InkTool(rawValue: selectedTool) ?? .pen }
+    private var diagramKind: PageDiagram.Kind { PageDiagram.Kind(rawValue: diagramKindPreference) ?? .rectangle }
+    private var connectorRoute: PageDiagram.ConnectorRoute { PageDiagram.ConnectorRoute(rawValue: connectorRoutePreference) ?? .straight }
+    private var arrowHeads: PageDiagram.ArrowHeads { PageDiagram.ArrowHeads(rawValue: arrowHeadsPreference) ?? .end }
     private var paper: InkPaper { InkPaper(rawValue: sheet?.paperStyle.rawValue ?? "dotted") ?? .dotted }
     private var pageTheme: PageTheme {
         (PageColorScheme(rawValue: pageColorScheme) ?? .system)
@@ -204,6 +214,9 @@ struct SheetDetail: View {
                     ScrollView(.horizontal, showsIndicators: false) {
                         HStack(spacing: 12) {
                             drawingTools
+                            #if os(macOS)
+                            diagramTools
+                            #endif
                             selectionActions
                             equationActions
                             Divider().frame(height: 22)
@@ -244,9 +257,13 @@ struct SheetDetail: View {
                                   textBoxes: store.binding(sheet.id, \.textBoxes, fallback: []),
                                   equations: store.binding(sheet.id, \.equations, fallback: []),
                                   images: store.binding(sheet.id, \.images, fallback: []),
+                                  diagrams: store.binding(sheet.id, \.diagrams, fallback: []),
                                   tool: inkTool, colorHex: inkColor, lineWidth: inkWidth, paper: paper, theme: pageTheme,
                                   linePattern: LinePattern(rawValue: linePattern) ?? .solid,
                                   pageTemplate: sheet.pageTemplate, templateLinePattern: sheet.templateLinePattern,
+                                  diagramKind: diagramKind, connectorRoute: connectorRoute, arrowHeads: arrowHeads,
+                                  tableRows: min(20, max(1, tableRows)), tableColumns: min(12, max(1, tableColumns)),
+                                  diagramFill: diagramFill,
                                   onTextChange: { text, data in store.update(sheet.id) { $0.body = text; $0.richTextRTF = data } },
                                   onInkChange: { strokes, data in store.update(sheet.id) { $0.strokes = strokes; $0.pencilKitData = data } },
                                   onInputChange: { inputDevice.report($0) },
@@ -307,7 +324,7 @@ struct SheetDetail: View {
     private func headerMetadata(_ sheet: NoteNode) -> some View {
         let number = store.sheetNumber(sheet.id).map { "Sheet \($0)" } ?? "Sheet"
         let created = "Created " + sheet.createdAt.formatted(date: .abbreviated, time: .shortened)
-        let words = ([sheet.body] + sheet.textBoxes.map(\.text)).joined(separator: " ")
+        let words = ([sheet.body] + sheet.textBoxes.map(\.text) + sheet.diagrams.map { $0.text + " " + $0.cells.joined(separator: " ") }).joined(separator: " ")
             .split(whereSeparator: \.isWhitespace).count
         return ViewThatFits(in: .horizontal) {
             HStack(spacing: 10) {
@@ -429,6 +446,8 @@ struct SheetDetail: View {
         case .line:
             inkWidth = InkNibPreset.defaultWidth(for: tool)
             inkColor = "#30343B"
+        case .diagram:
+            inkWidth = InkNibPreset.defaultWidth(for: .line)
         case .highlighter:
             inkWidth = InkNibPreset.defaultWidth(for: tool)
             inkColor = "#E2B84D"
@@ -436,6 +455,62 @@ struct SheetDetail: View {
         }
         NotificationCenter.default.post(name: .noteToolFocus, object: tool)
     }
+
+    #if os(macOS)
+    private var diagramChoices: [(kind: PageDiagram.Kind, title: String, symbol: String)] {
+        [(.rectangle, "Rectangle", "rectangle"), (.roundedRectangle, "Rounded rectangle", "rectangle"),
+         (.ellipse, "Ellipse", "circle"), (.triangle, "Triangle", "triangle"), (.diamond, "Diamond", "diamond")]
+    }
+
+    private func chooseDiagram(_ kind: PageDiagram.Kind) {
+        diagramKindPreference = kind.rawValue
+        selectTool(.diagram)
+    }
+
+    private var diagramTools: some View {
+        Menu {
+            ForEach(diagramChoices, id: \.kind) { choice in
+                CheckedMenuButton(title: choice.title,
+                                  isSelected: diagramKind == choice.kind) {
+                    chooseDiagram(choice.kind)
+                }
+            }
+            Divider()
+            Menu("Connector") {
+                ForEach([(PageDiagram.ArrowHeads.none, "Line"), (.end, "Arrow"), (.both, "Double arrow")], id: \.0) { value, title in
+                    CheckedMenuButton(title: title, isSelected: diagramKind == .connector && arrowHeads == value) {
+                        arrowHeadsPreference = value.rawValue
+                        chooseDiagram(.connector)
+                    }
+                }
+                Divider()
+                CheckedMenuButton(title: "Straight", isSelected: connectorRoute == .straight) { connectorRoutePreference = "straight" }
+                CheckedMenuButton(title: "Elbow", isSelected: connectorRoute == .elbow) { connectorRoutePreference = "elbow" }
+            }
+            CheckedMenuButton(title: "Table…", isSelected: diagramKind == .table) { showTableOptions = true }
+            Divider()
+            Toggle("Fill shapes", isOn: $diagramFill)
+            Text("Drag to draw. Select to move or resize; double-click to edit text.")
+        } label: {
+            Image(systemName: "square.on.circle").font(.system(size: 15)).frame(width: 30, height: 30)
+                .background(inkTool == .diagram ? workspaceAccent.opacity(0.18) : .clear, in: RoundedRectangle(cornerRadius: 6))
+        }.help("Shapes, arrow connectors and tables")
+            .accessibilityLabel("Shapes and tables")
+            .accessibilityValue(inkTool == .diagram ? diagramKindPreference : "Not selected")
+            .popover(isPresented: $showTableOptions) {
+                VStack(alignment: .leading, spacing: 14) {
+                    Label("Draw a table", systemImage: "tablecells").font(.headline)
+                    Stepper("Rows: \(min(20, max(1, tableRows)))", value: $tableRows, in: 1...20)
+                    Stepper("Columns: \(min(12, max(1, tableColumns)))", value: $tableColumns, in: 1...12)
+                    Text("Drag on the page to size the table. Double-click a cell with Select to edit it.")
+                        .font(.caption).foregroundStyle(.secondary).fixedSize(horizontal: false, vertical: true)
+                    Button("Draw table") { chooseDiagram(.table); showTableOptions = false }
+                        .buttonStyle(.borderedProminent)
+                }.padding(18).frame(width: 300)
+                    .onAppear { tableRows = min(20, max(1, tableRows)); tableColumns = min(12, max(1, tableColumns)) }
+            }
+    }
+    #endif
 
     @ViewBuilder
     private var selectionActions: some View {

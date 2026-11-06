@@ -58,6 +58,22 @@ manual QA applies to the earlier isolated 1.2.0 app; later heading/input and tes
 changes received native fixtures without a new physical IME/stylus or manual QA
 claim. Preserve the failed 1.2.0 and 1.2.1 tags/build reservations.
 
+
+The **1.3.0 candidate** adds native editable rectangles, rounded rectangles,
+ellipses, triangles, diamonds, attached straight/elbow arrow connectors and
+plain-text table cells on Mac. Diagram objects participate in the shared page's
+selection, movement/resizing, snapshots, undo, clipboard and combined exports.
+Diagram-bearing iPad pages show a native read-only preview and a Mac-only editing
+notice. Current development defaults target prospective build **2021**, subject
+to a fresh feed/counter check after publication approval. No 1.3 release or user
+QA result is implied; consult the new validation record for actual checks.
+Local checks passed 133 core tests, 964 editor checks (104 diagram), 2,000
+workspace checks and the remaining native integration on 6 November 2026.
+Earlier full runs stalled after the new fixture; a scoped autorelease-pool
+boundary releases its native objects before the next suite. Preserve the failed
+traces and strict assertions. Production pane policy was unchanged; no internal
+AppKit mechanism, hosted/iPad compile, physical-device or user-QA pass is claimed.
+
 ## Priorities
 
 - Protect saved notes, archive compatibility, undo history, and recoverability.
@@ -71,6 +87,7 @@ claim. Preserve the failed 1.2.0 and 1.2.1 tags/build reservations.
 
 - `Sources/NotesCore`: platform-independent Codable models, archive validation,
   persistence, backup archives, ink limits, selection geometry, and page themes.
+  `PageDiagram.swift` owns portable shapes, connector anchors, tables and bounds.
 - `Sources/NotesApp/NotesStore.swift`: observable library state, mutations,
   autosave, recovery, and independent cloud-folder backup scheduling.
 - `ContentView.swift`, `SheetDetail.swift`, `WorkspaceAppearance.swift`: navigation,
@@ -82,6 +99,8 @@ claim. Preserve the failed 1.2.0 and 1.2.1 tags/build reservations.
 - `Editors/UnifiedPageEditor.swift`: shared Mac page using AppKit text and ink layers.
   `RichTextEditor.swift`, `MacPageObjects.swift`, and `MacPageSelection.swift`
   participate in native text, object, selection, undo, and cursor behavior.
+  `MacPageDiagrams.swift` draws and edits diagrams; keep visible connector-label
+  bounds shared by rendering, selection, lasso and double-click text editing.
 - `Editors/UnifiedPageEditor+iOS.swift`: UIKit/PencilKit page and iPad diagnostics.
 - `Tests/NotesCoreTests`: XCTest methods plus `StandaloneRunner.swift` for CLT-only hosts.
 - `scripts/`: build, DMG verification, signing, and signature regression checks.
@@ -125,9 +144,11 @@ Use availability guards for APIs newer than the deployment target.
   IDs, titles, timestamps, and all page payloads; reject nonfinite dates before
   sorting. Incidental renumbering must not recreate the native editor or rewrite
   content/creation metadata. Content edits alone must not change numbering.
-- Archive format 3 reads formats 1 and 2. Image-free new libraries default to format 2;
-  adding positioned text/equations promotes format 1 to 2, and adding page images
-  promotes to 3 without later downgrading. Add decoder defaults and legacy fixtures.
+- Archive format 4 reads formats 1, 2 and 3. Image/diagram-free new libraries
+  default to format 2; positioned text/equations promote format 1 to 2, images
+  promote to 3, and diagrams promote to 4. Never downgrade after removing newer
+  objects. Older readers must reject format 4 rather than silently lose diagrams.
+  Keep decoder defaults and legacy fixtures.
 - Page images are canonical PNG objects behind text and ink. Preserve them in every
   page snapshot, undo operation, duplication/import, mixed clipboard payload and
   PDF/PNG export. Image-bearing iPad sheets are currently read-only with an explicit
@@ -136,6 +157,18 @@ Use availability guards for APIs newer than the deployment target.
   16 million pixels/image, 64 million pixels/page and 100 images/page. Clipboard
   transfers are bounded at 16 MiB, separately from the 64 MiB archive/page budget.
   Preserve image-free legacy clipboard types and native text paste at the caret.
+- Diagram snapshots must preserve native shapes, label/table text, connector
+  anchors and styles through every edit, undo, duplicate, import and export.
+  Enforce PageDiagramLimits before rendering or committing: 500 objects/page,
+  20 rows/12 columns per table, 512 cells/page, 1,024 UTF-8 bytes/cell, 4,096
+  UTF-8 bytes/label, 1 MiB aggregate diagram text and 100,000 patterned segments.
+  Coordinates, widths and attachment references must validate. Deleting a target
+  detaches surviving arrows at resolved endpoints; copying groups remaps copied
+  object IDs and detaches references to omitted targets. Shapes move only their
+  frames; connectors move their actual endpoints. Keep canonical colors and
+  existing text/ink/image payloads intact. Clipboard v4 must retain bounded reads,
+  accept v3/legacy payloads and advertise older types only without newer objects.
+  iPad rejects diagram edits and diagram clipboard pastes explicitly.
 - Preserve candidate-copy/validate/commit atomicity: rejected edits, imports, moves,
   or oversized duplicates must leave the previous library intact.
 - Enforce the existing 64 MiB archive limit, 50,000-node limit, 128-level hierarchy
@@ -210,6 +243,11 @@ Do not treat callback-level cursor assertions alone as proof of the displayed cu
   undo history. Existing iPad ink-theme reprojection recreates stroke IDs and
   deliberately clears native ink undo history to avoid targeting stale IDs;
   do not claim otherwise.
+- Object-only undo/redo must retain exact body/text-box snapshots, including
+  absent RTF in legacy plain text. A shared UndoManager notification does not
+  prove that native text changed. Compare canonical attributed text before
+  serializing; ignore only native fallback-font provenance in that comparison,
+  preserving actual fonts, paragraph formatting and normal native text undo.
 - Verify resized/collapsed panes using the actual visible editor viewport. A view
   existing in the hierarchy does not prove it is unobscured by another pane.
 - Newer macOS column backing views can extend underneath the sidebar. Preserve
@@ -446,7 +484,8 @@ assertion during an unfinished native exit before publication. Preserve that
 tag and reservation too. Run 18 published v1.2.2/build 2020 from `aa392994`;
 exact-source Native checks,
 signed release checks and independently downloaded public assets passed.
-Defaults match published v1.2.2/build 2020.
+The verified public release remains v1.2.2/build 2020. Current development
+defaults target unpublished v1.3.0 / prospective build 2021.
 Initial v1.2.0 user QA and publication authorization were recorded on
 5 November 2026; they do not establish
 later-source or public-build results. The v1.1.0 local QA identities use separate

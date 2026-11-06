@@ -130,7 +130,7 @@ final class PageImageTests: XCTestCase {
         for version in [1, 2] {
             XCTAssertThrowsError(try LibraryArchive.encode(NoteLibrary(nodes: library.nodes, formatVersion: version)))
         }
-        XCTAssertThrowsError(try LibraryArchive.encode(NoteLibrary(nodes: library.nodes, formatVersion: 4)))
+        XCTAssertThrowsError(try LibraryArchive.encode(NoteLibrary(nodes: library.nodes, formatVersion: NoteLibrary.currentFormatVersion + 1)))
         XCTAssertEqual(try JSONDecoder().decode(PageContent.self, from: JSONEncoder().encode(content)), content)
         let payload = PageClipboardPayload(text: content.text, rtfData: content.rtfData, strokes: content.strokes,
             pencilKitData: content.pencilKitData, textBoxes: content.textBoxes, equations: content.equations, images: content.images)

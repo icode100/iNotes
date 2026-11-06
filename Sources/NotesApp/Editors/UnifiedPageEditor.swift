@@ -12,6 +12,13 @@ struct UnifiedPageEditor: NSViewRepresentable {
     @Binding var textBoxes: [PageTextBox]
     @Binding var equations: [NoteEquation]
     @Binding var images: [PageImage]
+    @Binding var diagrams: [PageDiagram]
+    var diagramKind: PageDiagram.Kind = .rectangle
+    var connectorRoute: PageDiagram.ConnectorRoute = .straight
+    var arrowHeads: PageDiagram.ArrowHeads = .end
+    var tableRows = 3
+    var tableColumns = 3
+    var diagramFill = false
     var tool: InkTool = .pen
     var colorHex = "#314D43"
     var lineWidth: Double = InkNibPreset.defaultWidth(for: .pen)
@@ -30,14 +37,20 @@ struct UnifiedPageEditor: NSViewRepresentable {
 
     init(text: Binding<String>, rtfData: Binding<Data?>, strokes: Binding<[InkStroke]>, pencilKitData: Binding<Data?>,
          textBoxes: Binding<[PageTextBox]> = .constant([]), equations: Binding<[NoteEquation]> = .constant([]), images: Binding<[PageImage]> = .constant([]),
+         diagrams: Binding<[PageDiagram]> = .constant([]),
          tool: InkTool = .pen, colorHex: String = "#314D43", lineWidth: Double? = nil,
          paper: InkPaper = .dotted, theme: PageTheme = .light,
          linePattern: LinePattern = .solid, pageTemplate: PageTemplate = .none, templateLinePattern: LinePattern = .solid,
+         diagramKind: PageDiagram.Kind = .rectangle, connectorRoute: PageDiagram.ConnectorRoute = .straight,
+         arrowHeads: PageDiagram.ArrowHeads = .end, tableRows: Int = 3, tableColumns: Int = 3, diagramFill: Bool = false,
          onTextChange: ((String, Data?) -> Void)? = nil, onInkChange: (([InkStroke], Data?) -> Void)? = nil,
          onInputChange: ((String) -> Void)? = nil, onPageChange: ((PageContent) -> Void)? = nil,
          onEquationEdit: ((NoteEquation) -> Void)? = nil, onPageValidate: ((PageContent) -> Bool)? = nil, onPageError: ((String) -> Void)? = nil) {
         _text = text; _rtfData = rtfData; _strokes = strokes; _pencilKitData = pencilKitData
-        _textBoxes = textBoxes; _equations = equations; _images = images; self.tool = tool; self.colorHex = colorHex
+        _textBoxes = textBoxes; _equations = equations; _images = images; _diagrams = diagrams
+        self.diagramKind = diagramKind; self.connectorRoute = connectorRoute; self.arrowHeads = arrowHeads
+        self.tableRows = tableRows; self.tableColumns = tableColumns; self.diagramFill = diagramFill
+        self.tool = tool; self.colorHex = colorHex
         self.lineWidth = lineWidth ?? InkNibPreset.defaultWidth(for: tool); self.paper = paper; self.theme = theme
         self.linePattern = linePattern; self.pageTemplate = pageTemplate; self.templateLinePattern = templateLinePattern
         self.onTextChange = onTextChange; self.onInkChange = onInkChange; self.onInputChange = onInputChange
@@ -89,7 +102,7 @@ struct UnifiedPageEditor: NSViewRepresentable {
     }
 
     private func configure(_ page: UnifiedMacPageView, coordinator: Coordinator, isEnabled: Bool) {
-        let value = PageContent(text: text, rtfData: rtfData, strokes: strokes, pencilKitData: pencilKitData, textBoxes: textBoxes, equations: equations, images: images)
+        let value = PageContent(text: text, rtfData: rtfData, strokes: strokes, pencilKitData: pencilKitData, textBoxes: textBoxes, equations: equations, images: images, diagrams: diagrams)
         coordinator.selection.load(value)
         page.textView.pageUndoManager = coordinator.selection.history
         coordinator.richText.parent.onChange = { [weak coordinator] text, rtf in coordinator?.nativeTextChanged(text, rtf: rtf) }
@@ -113,15 +126,17 @@ struct UnifiedPageEditor: NSViewRepresentable {
             if let onPageChange { onPageChange(content) }
             else {
                 text = content.text; rtfData = content.rtfData; strokes = content.strokes
-                pencilKitData = content.pencilKitData; textBoxes = content.textBoxes; equations = content.equations; images = content.images
+                pencilKitData = content.pencilKitData; textBoxes = content.textBoxes; equations = content.equations; images = content.images; diagrams = content.diagrams
             }
         }
         page.inkView.isInputEnabled = isEnabled
+        page.diagramOptions = MacDiagramOptions(kind: diagramKind, route: connectorRoute, arrowHeads: arrowHeads,
+                                               rows: tableRows, columns: tableColumns, fill: diagramFill)
         page.activeTool = tool
         page.theme = theme
         page.textView.isEditable = isEnabled && tool == .text
         page.textView.isSelectable = isEnabled && tool == .text
-        page.inkView.showsTipCursor = tool != .text && tool != .select && tool != .lasso
+        page.inkView.showsTipCursor = tool != .text && tool != .select && tool != .lasso && tool != .diagram
         page.inkView.tool = tool == .text ? .pen : tool
         page.inkView.colorHex = colorHex
         page.inkView.lineWidth = max(0.5, min(30, lineWidth))
@@ -175,7 +190,7 @@ struct UnifiedPageEditor: NSViewRepresentable {
         }
 
         func renderObjects(_ content: PageContent, on page: UnifiedMacPageView, enabled: Bool) {
-            page.displayObjects(textBoxes: content.textBoxes, equations: content.equations, images: content.images, editable: enabled,
+            page.displayObjects(textBoxes: content.textBoxes, equations: content.equations, images: content.images, diagrams: content.diagrams, editable: enabled,
                                 onTextBoxChange: { [weak self, weak page] id, text, rtf in
                 guard let self, let page, let index = self.selection.content.textBoxes.firstIndex(where: { $0.id == id }) else { return }
                 var value = self.selection.content
@@ -308,13 +323,13 @@ final class PageZoomScrollView: NSScrollView {
 
 @MainActor
 enum UnifiedPageExport {
-    static func pdf(text: String, rtfData: Data?, strokes: [InkStroke], paper: InkPaper, theme: PageTheme = .light, pageTemplate: PageTemplate = .none, templateLinePattern: LinePattern = .solid, textBoxes: [PageTextBox] = [], equations: [NoteEquation] = [], images: [PageImage] = []) -> Data {
-        let page = makePage(text: text, rtfData: rtfData, strokes: strokes, paper: paper, theme: theme, pageTemplate: pageTemplate, templateLinePattern: templateLinePattern, textBoxes: textBoxes, equations: equations, images: images)
+    static func pdf(text: String, rtfData: Data?, strokes: [InkStroke], paper: InkPaper, theme: PageTheme = .light, pageTemplate: PageTemplate = .none, templateLinePattern: LinePattern = .solid, textBoxes: [PageTextBox] = [], equations: [NoteEquation] = [], images: [PageImage] = [], diagrams: [PageDiagram] = []) -> Data {
+        let page = makePage(text: text, rtfData: rtfData, strokes: strokes, paper: paper, theme: theme, pageTemplate: pageTemplate, templateLinePattern: templateLinePattern, textBoxes: textBoxes, equations: equations, images: images, diagrams: diagrams)
         return page.dataWithPDF(inside: page.bounds)
     }
 
-    static func png(text: String, rtfData: Data?, strokes: [InkStroke], paper: InkPaper, theme: PageTheme = .light, pageTemplate: PageTemplate = .none, templateLinePattern: LinePattern = .solid, textBoxes: [PageTextBox] = [], equations: [NoteEquation] = [], images: [PageImage] = []) -> Data? {
-        let page = makePage(text: text, rtfData: rtfData, strokes: strokes, paper: paper, theme: theme, pageTemplate: pageTemplate, templateLinePattern: templateLinePattern, textBoxes: textBoxes, equations: equations, images: images)
+    static func png(text: String, rtfData: Data?, strokes: [InkStroke], paper: InkPaper, theme: PageTheme = .light, pageTemplate: PageTemplate = .none, templateLinePattern: LinePattern = .solid, textBoxes: [PageTextBox] = [], equations: [NoteEquation] = [], images: [PageImage] = [], diagrams: [PageDiagram] = []) -> Data? {
+        let page = makePage(text: text, rtfData: rtfData, strokes: strokes, paper: paper, theme: theme, pageTemplate: pageTemplate, templateLinePattern: templateLinePattern, textBoxes: textBoxes, equations: equations, images: images, diagrams: diagrams)
         // AppKit caches at the current backing scale (normally 2x Retina).
         // Bound actual raster pixels before allocating a giant object page.
         let scale = NSScreen.main?.backingScaleFactor ?? 2
@@ -325,7 +340,7 @@ enum UnifiedPageExport {
         return bitmap.representation(using: .png, properties: [:])
     }
 
-    private static func makePage(text: String, rtfData: Data?, strokes: [InkStroke], paper: InkPaper, theme: PageTheme, pageTemplate: PageTemplate, templateLinePattern: LinePattern, textBoxes: [PageTextBox], equations: [NoteEquation], images: [PageImage]) -> UnifiedMacPageView {
+    private static func makePage(text: String, rtfData: Data?, strokes: [InkStroke], paper: InkPaper, theme: PageTheme, pageTemplate: PageTemplate, templateLinePattern: LinePattern, textBoxes: [PageTextBox], equations: [NoteEquation], images: [PageImage], diagrams: [PageDiagram]) -> UnifiedMacPageView {
         let page = UnifiedMacPageView(frame: NSRect(origin: .zero, size: InkExport.paperSize))
         page.theme = theme
         let richText = RichTextEditor(text: .constant(text), rtfData: .constant(rtfData), theme: theme)
@@ -339,7 +354,7 @@ enum UnifiedPageExport {
         page.paperView.pageTemplate = pageTemplate
         page.paperView.templateLinePattern = templateLinePattern
         page.inkView.isInputEnabled = false
-        page.displayObjects(textBoxes: textBoxes, equations: equations, images: images, editable: false, onTextBoxChange: { _,_,_ in }, onEquationEdit: nil)
+        page.displayObjects(textBoxes: textBoxes, equations: equations, images: images, diagrams: diagrams, editable: false, onTextBoxChange: { _,_,_ in }, onEquationEdit: nil)
         page.resizePaperToContent()
         return page
     }
@@ -350,6 +365,8 @@ final class UnifiedMacPageView: NSView {
     let paperView = UnifiedMacPaperView(frame: NSRect(origin: .zero, size: InkExport.paperSize))
     let inkView = InkDocumentView(frame: NSRect(origin: .zero, size: InkExport.paperSize))
     let textView = RichTextEditor.makeNativeTextView()
+    let diagramView = MacPageDiagramView(frame: .zero)
+    var diagramOptions = MacDiagramOptions()
     let selectionView = MacPageSelectionView(frame: .zero)
     weak var selectionController: MacPageSelectionController?
     var textBoxViews: [UUID: MacPageTextBoxView] = [:]
@@ -367,6 +384,7 @@ final class UnifiedMacPageView: NSView {
             guard theme != oldValue else { return }
             paperView.theme = theme
             inkView.theme = theme
+            diagramView.theme = theme
             textView.appearance = NSAppearance(named: theme.isDark ? .darkAqua : .aqua)
         }
     }
@@ -377,6 +395,7 @@ final class UnifiedMacPageView: NSView {
         super.init(frame: frameRect)
         setAccessibilityLabel("Shared note page")
         addSubview(paperView)
+        addSubview(diagramView)
         addSubview(textView)
         addSubview(inkView)
         addSubview(selectionView)
@@ -444,7 +463,7 @@ final class UnifiedMacPageView: NSView {
 
     func inputView(at location: NSPoint, event: NSEvent?) -> NSView? {
         guard bounds.contains(location) else { return nil }
-        if activeTool == .select || activeTool == .lasso { return selectionView }
+        if activeTool == .select || activeTool == .lasso || activeTool == .diagram { return selectionView }
         if event?.type == .leftMouseDown {
             selectionController?.clearToolIndependentSelection()
         }
@@ -472,7 +491,7 @@ final class UnifiedMacPageView: NSView {
             editor.isSelectable = editsText
         }
         if tool == .text { window?.makeFirstResponder(textView) }
-        else if tool == .select || tool == .lasso { window?.makeFirstResponder(selectionView) }
+        else if tool == .select || tool == .lasso || tool == .diagram { window?.makeFirstResponder(selectionView) }
         else { window?.makeFirstResponder(inkView) }
         refreshToolCursor()
     }
@@ -483,14 +502,14 @@ final class UnifiedMacPageView: NSView {
         switch activeTool {
         case .text: nil
         case .select: .arrow
-        case .lasso: .crosshair
+        case .lasso, .diagram: .crosshair
         default: inkView.tipCursor()
         }
     }
 
     func refreshToolCursor() {
         inkView.tool = activeTool == .text ? .pen : activeTool
-        inkView.showsTipCursor = activeTool != .text && activeTool != .select && activeTool != .lasso
+        inkView.showsTipCursor = activeTool != .text && activeTool != .select && activeTool != .lasso && activeTool != .diagram
         updateTrackingAreas()
         updateDocumentCursor()
         let cursorViews: [NSView] = [textView, inkView, selectionView] + textBoxViews.values.map(\.editor)
@@ -559,7 +578,8 @@ final class UnifiedMacPageView: NSView {
         // Offscreen export and restored native state must never allocate a
         // document whose size is controlled by an extreme coordinate.
         let imageHeight = imageViews.values.map { $0.frame.maxY + 80 }.max() ?? 0
-        let finiteHeights = [textHeight, inkHeight, objectHeight, imageHeight].filter(\.isFinite)
+        let diagramHeight = diagramView.contentBounds.map { $0.maxY + 80 } ?? 0
+        let finiteHeights = [textHeight, inkHeight, objectHeight, imageHeight, diagramHeight].filter(\.isFinite)
         let height = min(CGFloat(InkGeometryLimits.maximumPageDimension),
                          max(InkExport.paperSize.height, finiteHeights.max() ?? 0))
         if abs(frame.height - height) > 1 { setFrameSize(NSSize(width: InkExport.paperSize.width, height: height)) }
@@ -569,6 +589,7 @@ final class UnifiedMacPageView: NSView {
 
     private func positionLayers() {
         paperView.frame = bounds
+        diagramView.frame = bounds
         inkView.frame = bounds
         selectionView.frame = bounds
         textView.frame = NSRect(x: 40, y: 40, width: bounds.width - 80, height: bounds.height - 80)

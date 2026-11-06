@@ -32,7 +32,12 @@ struct iNotesApp: App {
                 guard let loaded = try repository.load(), loaded.nodes.count == 3 else { throw CocoaError(.fileReadCorruptFile) }
                 let decoded = try LibraryArchive.decode(LibraryArchive.encode(loaded))
                 guard decoded.nodes.count == 3 else { throw CocoaError(.fileReadCorruptFile) }
-                if CommandLine.arguments.contains("--editor-test") {
+                if CommandLine.arguments.contains("--diagram-test") {
+                    print("\(try DiagramDiagnostics.run()) native diagram checks passed")
+                }
+                if CommandLine.arguments.contains("--workspace-test") {
+                    print(try WorkspaceDiagnostics.run())
+                } else if CommandLine.arguments.contains("--editor-test") {
                     print(try EditorDiagnostics.run())
                     print(try EquationDiagnostics.run())
                     print(try ToolShortcutDiagnostics.run())

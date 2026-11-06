@@ -111,17 +111,19 @@ public struct PageContent: Codable, Equatable, Sendable {
     public var textBoxes: [PageTextBox]
     public var equations: [NoteEquation]
     public var images: [PageImage]
+    public var diagrams: [PageDiagram]
 
     public init(text: String = "", rtfData: Data? = nil, strokes: [InkStroke] = [],
                 pencilKitData: Data? = nil, textBoxes: [PageTextBox] = [], equations: [NoteEquation] = [],
-                images: [PageImage] = []) {
+                images: [PageImage] = [], diagrams: [PageDiagram] = []) {
         self.text = text; self.rtfData = rtfData; self.strokes = strokes
         self.pencilKitData = pencilKitData; self.textBoxes = textBoxes; self.equations = equations
         self.images = images
+        self.diagrams = diagrams
     }
 
     private enum CodingKeys: String, CodingKey {
-        case text, rtfData, strokes, pencilKitData, textBoxes, equations, images
+        case text, rtfData, strokes, pencilKitData, textBoxes, equations, images, diagrams
     }
 
     public init(from decoder: Decoder) throws {
@@ -133,23 +135,26 @@ public struct PageContent: Codable, Equatable, Sendable {
         textBoxes = try values.decodeIfPresent([PageTextBox].self, forKey: .textBoxes) ?? []
         equations = try values.decodeIfPresent([NoteEquation].self, forKey: .equations) ?? []
         images = try values.decodeIfPresent([PageImage].self, forKey: .images) ?? []
+        diagrams = try values.decodeIfPresent([PageDiagram].self, forKey: .diagrams) ?? []
     }
 }
 
 extension NoteNode {
     public var plainTextExport: String {
         ([body] + textBoxes.sorted { $0.y == $1.y ? $0.x < $1.x : $0.y < $1.y }.map(\.text)
-         + equations.sorted { $0.y == $1.y ? $0.x < $1.x : $0.y < $1.y }.map { "$$\n\($0.latex)\n$$" })
+         + equations.sorted { $0.y == $1.y ? $0.x < $1.x : $0.y < $1.y }.map { "$$\n\($0.latex)\n$$" }
+         + diagrams.sorted { $0.y == $1.y ? $0.x < $1.x : $0.y < $1.y }.map(\.plainText))
             .filter { !$0.isEmpty }.joined(separator: "\n\n")
     }
 
     public var pageContent: PageContent {
         get { PageContent(text: body, rtfData: richTextRTF, strokes: strokes,
-                          pencilKitData: pencilKitData, textBoxes: textBoxes, equations: equations, images: images) }
+                          pencilKitData: pencilKitData, textBoxes: textBoxes, equations: equations, images: images, diagrams: diagrams) }
         set {
             body = newValue.text; richTextRTF = newValue.rtfData; strokes = newValue.strokes
             pencilKitData = newValue.pencilKitData; textBoxes = newValue.textBoxes; equations = newValue.equations
             images = newValue.images
+            diagrams = newValue.diagrams
         }
     }
 }

@@ -305,7 +305,7 @@ struct ContentView: View {
                         }.font(.caption2).foregroundStyle(.secondary)
                             .accessibilityElement(children: .ignore)
                             .accessibilityLabel((sheet.title.isEmpty ? "" : "Sheet \(store.sheetNumber(sheet.id) ?? 1), ") + "Created \(sheet.createdAt.formatted(date: .abbreviated, time: .omitted))")
-                        Text(sheet.plainTextExport.isEmpty ? (sheet.images.isEmpty ? (sheet.strokes.isEmpty && sheet.pencilKitData == nil ? "Empty sheet" : "Handwritten notes") : "Image notes") : sheet.plainTextExport.replacingOccurrences(of: "\n", with: " "))
+                        Text(sheet.plainTextExport.isEmpty ? (!sheet.diagrams.isEmpty ? "Diagram notes" : (sheet.images.isEmpty ? (sheet.strokes.isEmpty && sheet.pencilKitData == nil ? "Empty sheet" : "Handwritten notes") : "Image notes")) : sheet.plainTextExport.replacingOccurrences(of: "\n", with: " "))
                             .font(.caption).foregroundStyle(.secondary).lineLimit(2)
                         Text(store.breadcrumb(sheet.parentID)).font(.caption2).foregroundStyle(.secondary).lineLimit(1)
                     }

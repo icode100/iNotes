@@ -157,6 +157,10 @@ struct RichTextEditor: NSViewRepresentable {
                         guard let self, let editor = self.editor,
                               let manager = notification.object as? UndoManager,
                               manager === editor.undoManager else { return }
+                        // The page manager also undoes objects and ink. Those
+                        // actions must not serialize unchanged native text and
+                        // materialize RTF for a legacy plain-text snapshot.
+                        guard !self.matchesLastLoadedCanonicalText(editor) else { return }
                         self.persist(editor)
                     }
                 })
@@ -197,6 +201,40 @@ struct RichTextEditor: NSViewRepresentable {
         func textDidChange(_ notification: Notification) {
             guard !isLoading, let editor = notification.object as? NSTextView else { return }
             persist(editor)
+        }
+
+        private func matchesLastLoadedCanonicalText(_ editor: NSTextView) -> Bool {
+            guard let lastText, editor.string == lastText else { return false }
+            let expected: NSAttributedString
+            if let lastRTF,
+               let rich = try? NSAttributedString(data: lastRTF,
+                   options: [.documentType: NSAttributedString.DocumentType.rtf], documentAttributes: nil),
+               rich.string == lastText {
+                expected = rich
+            } else {
+                expected = NSAttributedString(string: lastText, attributes: [
+                    .font: NSFont.systemFont(ofSize: 16),
+                    .foregroundColor: ThemeTextAttributes.color(PageTheme.light.textHex)
+                ])
+            }
+            // Native text storage fixes fallback fonts (including Unicode and
+            // emoji) and paragraph attributes during layout. Apply those same
+            // fixes to the expected value; real font/paragraph differences in
+            // an undo must still differ after this normalization.
+            let expectedStorage = NSTextStorage(attributedString:
+                ThemeTextAttributes.display(expected, theme: parent.theme))
+            expectedStorage.fixAttributes(in: NSRange(location: 0, length: expectedStorage.length))
+            func comparisonValue(_ source: NSAttributedString) -> NSAttributedString {
+                let value = NSMutableAttributedString(attributedString:
+                    ThemeTextAttributes.canonical(source, theme: parent.theme))
+                // Layout records a font-substitution provenance attribute for
+                // some Unicode runs. It is not a user formatting change; retain
+                // the actual NSFont and every other attribute in the comparison.
+                value.removeAttribute(NSAttributedString.Key("NSOriginalFont"),
+                                      range: NSRange(location: 0, length: value.length))
+                return value
+            }
+            return comparisonValue(editor.attributedString()).isEqual(to: comparisonValue(expectedStorage))
         }
 
         private func persist(_ editor: NSTextView) {

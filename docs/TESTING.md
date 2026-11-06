@@ -1,5 +1,102 @@
 # Validation
 
+## 1.3.0 shapes, connectors and tables candidate — 6 November 2026
+
+This candidate is local and unpublished. The previous 1.2.2 results below do not
+establish validation of this new patch. The worktree adds archive-format-4 vector
+objects, bounded tables/cell text, attached connectors, native Mac editing and a
+read-only iPad preview. No dependencies or production notes are used.
+
+The frozen portable model passed `TMPDIR=/private/tmp bash scripts/test.sh`:
+**133 standalone tests, zero failures, 3.93 seconds**, including seven new diagram
+cases and all existing core tests. Evidence is
+`/private/tmp/inotes-v1.3-core-tests.log`.
+
+Local ARM64 release compilation uses Swift **6.4.2**, macOS SDK **27.2** and
+macOS **27.2 (26B123)** through Command Line Tools. Native diagram fixtures cover
+gesture preview/commit, attached-arrow movement, resizing/reconnection, table
+cell Save/rejection, exact mixed-content undo/redo, bounded clipboard remapping,
+save/reopen, canonical theme changes, searchable PDF/PNG, and native body/text-box
+typing/font/paragraph undo. The toolbar's actual Bold action is exercised through
+its app-local active-editor fallback; this is not a physical keyboard/IME result.
+
+An intermediate run found that a diagram-only undo serialized unchanged body
+and text-box text, materializing RTF that was absent in the original snapshot.
+The shared native text observer now checks canonical attributed content before
+serializing. Actual Unicode attribute-run captures identified `NSOriginalFont`
+provenance on fallback glyphs; only that metadata is omitted from comparison,
+while real fonts and paragraph attributes remain significant. Persistence itself
+is unchanged. Exact nil-RTF and already-formatted snapshots, plus real native
+typing/font/paragraph undo/redo, are retained as regressions. Gesture coordinate
+checks allow only 0.000001 unzoomed page point for native event-transform rounding;
+IDs, content snapshots, text and attachment semantics remain exact.
+
+The nested-fixture full runs in `inotes-v1.3-native-tests-9.log` and `-10.log`
+each passed **104 diagram / 964 total editor / 31 equation / 12 ruled-text /
+9 shortcut checks**, but failed the narrow-window sheets-hide completion check.
+Generation 17 remained pending for the full five seconds while frequent passive
+samples retained the old 236.5-point viewport. All 100 heading cycles retained
+correct native allocations. This was a genuine failed fixture transition,
+distinct from the older fixed-0.4-second assumption; the timeout and geometry
+assertions were not relaxed. The failed executable's SHA-256 was
+`37955be84bfcce6d8f654c6df1cfa7592a118378a5c35aa68f8bb8b19f64453c`.
+
+A fresh-process `--smoke-test --workspace-test` invocation passed **2,000 workspace
+checks**, store/updater checks (16 configurations), **62 numbering/title/store
+checks**, the 49,127-node hierarchy case and independent backup integration.
+The same narrow collapse completed in **0.311608 seconds**. Evidence is
+`/private/tmp/inotes-v1.3-workspace-only.log`. This scoped pass does not replace
+the failed full-suite result. The optional `--diagram-test` and `--workspace-test`
+drivers isolate fixtures; the regular `--editor-test` pipeline remains the full
+release check.
+
+Running standalone Diagram → Workspace also failed the first sheets-hide
+transition (generation 2), so moving the fixture outside its parent alone was
+not sufficient. The final change scopes the complete diagram fixture in an
+autorelease pool, letting Swift locals and deferred window closure finish before
+draining Cocoa temporaries. Passive weak-reference logging confirms the fixture
+window, hosting view, native page and selection controller are released after
+that boundary, with no modal sheet and balanced undo grouping. No native layout,
+animation flush, forced drawing, geometry tolerance or pane-policy change was
+introduced. These observations do not establish an internal AppKit mechanism.
+
+The final full `--smoke-test --editor-test` run exited **0** and passed:
+
+- **964 native editor checks**, including **104 diagram checks**.
+- **2,000 workspace / 31 equation / 12 ruled-text / 9 shortcut checks**.
+- Store/updater integration (16 configurations), **62 numbering/title/store
+  checks**, the **49,127-node** hierarchy case and independent backup integration.
+- All **100** passive heading cycles and the strict callback-completion,
+  visible-viewport, rapid-reversal and sheet-switch checks.
+
+Evidence: `/private/tmp/inotes-v1.3-native-tests-11.log` and optimized compilation
+`/private/tmp/inotes-v1.3-build-13.log`. Earlier failed and scoped logs above remain
+distinct evidence; the pass does not erase them. The baseline public 1.2.2 copy
+was prepared and verified in temporary storage but was not run.
+
+The isolated app is `dist/iNotes-QA-1.3.0.app`, identity
+`io.inotes.qa.v130.20261106`, version **1.3.0 / QA build 1**, with a disconnected
+updater and demo/practice sheets at `/private/tmp/inotes-v1.3-qa-rg6yxp_r`.
+Strict deep ad hoc signature and plist/project syntax checks passed. Source and
+package-file manifest SHA-256:
+`cc38571de82a93a844ddd2a4c7777cc7d41ece246a42cb6c999f9133ea1dfde2`.
+Executable **7,312,864 bytes**, SHA-256
+`038b585f11baa8698104ebc0fa1056a074026e2abd508fa677d4b67b87529eb4`.
+The QA template contains **47,338,087 regular-file bytes** across **127 files**;
+these are QA artifact sizes, not a distribution-size or RAM result. Ignored
+`dist/qa-v1.3-source-manifest.json` records individual source hashes. Manual user
+QA and publication approval for this new feature remain pending.
+
+Full Xcode/iPad SDK and installer icon compilation are unavailable on this
+Command Line Tools host. `bash scripts/build-macos.sh` stopped at the explicit
+missing-`actool` preflight (`inotes-v1.3-packaging-preflight.log`); no candidate
+DMG, mounted-installer or Ed25519 artifact result is claimed. iPad source includes
+read-only diagram/paste/viewport fixtures but has not compiled or run here.
+Hosted checks and user QA remain required before publishing. No new physical
+stylus, iPad, actual IME, displayed-cursor capture or cloud-delivery result is
+implied. All new checks use temporary notes and app-local input, without external
+computer control.
+
 ## v1.2.2 / build 2020 published and independently verified — 5 November 2026
 
 Published [v1.2.2](https://github.com/icode100/iNotes/releases/tag/v1.2.2) uses
