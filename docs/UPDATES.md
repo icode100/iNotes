@@ -95,10 +95,10 @@ identity, QA build 1, temporary library, and disconnected updater. Recheck the
 public feed and workflow counter before any later publication.
 
 ```sh
-VERSION=1.2.2 BUILD_NUMBER=2020 bash scripts/build-macos.sh
-VERSION=1.2.2 bash scripts/verify-macos.sh
-VERSION=1.2.2 bash scripts/generate-appcast.sh
-VERSION=1.2.2 bash scripts/test-update-signatures.sh
+VERSION=1.3.0 BUILD_NUMBER=2021 bash scripts/build-macos.sh
+VERSION=1.3.0 bash scripts/verify-macos.sh
+VERSION=1.3.0 bash scripts/generate-appcast.sh
+VERSION=1.3.0 bash scripts/test-update-signatures.sh
 ```
 
 The appcast command prepares `dist/update/appcast.xml`. It uses Sparkle's official
@@ -137,7 +137,8 @@ HTTPS feed; malformed configured channels are rejected before packaging.
 
 After reviewing the next source and configuring the secret, push a new
 `vX.Y.Z` tag only after publication approval and exact-source Native checks. The user
-authorized v1.2 publication on 5 November 2026. Preserve the failed unpublished
+authorized v1.3 publication after passing isolated QA build 2 on 6 November 2026;
+the earlier v1.2 authorization was on 5 November. Preserve the failed unpublished
 `v1.2.0` tag at `ca051953` and `v1.2.1` tag at `adf533e4`; do not move either to
 changed source or reuse builds 2018/2019. Published `v1.2.2` identifies
 `aa392994`; preserve its build 2020 and use a higher number for an updated binary.

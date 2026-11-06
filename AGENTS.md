@@ -65,14 +65,15 @@ plain-text table cells on Mac. Diagram objects participate in the shared page's
 selection, movement/resizing, snapshots, undo, clipboard and combined exports.
 Diagram-bearing iPad pages show a native read-only preview and a Mac-only editing
 notice. Current development defaults target prospective build **2021**, subject
-to a fresh feed/counter check after publication approval. No 1.3 release or user
-QA result is implied; consult the new validation record for actual checks.
+to a fresh feed/counter check before publication. The user passed isolated QA
+build 2 (`0c18958`) and authorized source push/publication on 6 November 2026.
+This is not a hosted or public-build result; consult the validation record.
 Local checks passed 133 core tests, 964 editor checks (104 diagram), 2,000
 workspace checks and the remaining native integration on 6 November 2026.
 Earlier full runs stalled after the new fixture; a scoped autorelease-pool
 boundary releases its native objects before the next suite. Preserve the failed
 traces and strict assertions. Production pane policy was unchanged; no internal
-AppKit mechanism, hosted/iPad compile, physical-device or user-QA pass is claimed.
+AppKit mechanism, hosted/iPad compile or physical-device result is claimed.
 
 The user tried the initial 1.3 QA app and requested placement UX changes on
 6 November 2026. Successful image/diagram insertion now selects the new objects
@@ -85,9 +86,10 @@ of temporary QA notes; initial QA remains intact. Consult the follow-up validati
 record for results specific to these changes. QA build 2 compiled and passed
 119 diagram / 979 editor / 31 equation / 12 ruled-text / 9 shortcut checks, then
 failed the same narrow-window native completion boundary despite released
-fixture objects. Do not claim the autorelease pool fully resolves that issue,
-a full follow-up pass, or release readiness. Preserve the strict five-second
-boundary and failure trace; hosted/iPad and manual UX checks remain pending.
+fixture objects. Do not claim the autorelease pool fully resolves that issue
+or a local full follow-up pass. Preserve the strict five-second boundary and
+failure trace; exact-source hosted/iPad and signed-release checks must pass
+before publishing. User QA2 approved the placement and icon UX.
 
 ## Priorities
 

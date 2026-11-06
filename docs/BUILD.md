@@ -50,8 +50,9 @@ the packaged app and Applications shortcut.
 
 Development defaults now target **1.3.0 / prospective build 2021** for shapes,
 connectors and tables. Local QA uses an isolated identity, temporary notes and
-a disconnected updater. Fresh Native/release/public verification and a new user
-heads-up remain required before publication.
+a disconnected updater. The user passed QA build 2 and authorized publication
+on 6 November 2026. Exact-source hosted Native/release checks and independent
+public verification remain required; local failed traces remain recorded.
 
 The verified public release is **v1.2.2 / build 2020**, released on 5 November 2026
 from source `aa392994ed290e38819a74e0a21f5dad520642a3`.

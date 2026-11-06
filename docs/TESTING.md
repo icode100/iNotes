@@ -44,8 +44,11 @@ source/package manifest SHA-256
 The QA bundle has **47,482,259 regular-file bytes** across **127 files**, not a
 RAM or distribution-size measurement. Ignored `dist/qa-v1.3-ux.json` and
 `dist/qa-v1.3-ux-source-manifest.json` record its inputs. User QA of the new
-interaction/icon palette, hosted validation, iPad compilation and full installer
-packaging remain pending; publication is blocked by unresolved validation.
+interaction/icon palette passed on 6 November 2026, followed by explicit source
+push/publication authorization. The approved QA source is `0c18958474ab46b447a26190f08c891a24b28b11`.
+Hosted validation, iPad compilation and full installer packaging remain pending;
+publication requires exact-source hosted and signed-release checks. This user
+approval does not replace any automated gate or erase the local failure.
 
 ### Initial candidate / QA build 1
 
