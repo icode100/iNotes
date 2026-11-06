@@ -59,21 +59,24 @@ changes received native fixtures without a new physical IME/stylus or manual QA
 claim. Preserve the failed 1.2.0 and 1.2.1 tags/build reservations.
 
 
-The **1.3.0 candidate** adds native editable rectangles, rounded rectangles,
+Published **1.3.0 / build 2021** adds native editable rectangles, rounded rectangles,
 ellipses, triangles, diamonds, attached straight/elbow arrow connectors and
 plain-text table cells on Mac. Diagram objects participate in the shared page's
 selection, movement/resizing, snapshots, undo, clipboard and combined exports.
 Diagram-bearing iPad pages show a native read-only preview and a Mac-only editing
-notice. Current development defaults target prospective build **2021**, subject
-to a fresh feed/counter check before publication. The user passed isolated QA
+notice. Defaults match published **1.3.0/build 2021**. The user passed isolated QA
 build 2 (`0c18958`) and authorized source push/publication on 6 November 2026.
-This is not a hosted or public-build result; consult the validation record.
+Source `4c9ea4fc29af53b6bf08ee4e0e2822b30db96e28` passed exact-source hosted
+Native checks including iPad compilation, signed release run 19 and independent
+public-download verification. Hosted checks recorded 133 core tests, 119 diagram
+checks within 978 editor checks, and 2,000 workspace checks. Consult the validation
+record for separate local/hosted/public evidence and limits.
 Local checks passed 133 core tests, 964 editor checks (104 diagram), 2,000
 workspace checks and the remaining native integration on 6 November 2026.
 Earlier full runs stalled after the new fixture; a scoped autorelease-pool
 boundary releases its native objects before the next suite. Preserve the failed
 traces and strict assertions. Production pane policy was unchanged; no internal
-AppKit mechanism, hosted/iPad compile or physical-device result is claimed.
+AppKit mechanism or physical-device result is established by that local result.
 
 The user tried the initial 1.3 QA app and requested placement UX changes on
 6 November 2026. Successful image/diagram insertion now selects the new objects
@@ -88,8 +91,10 @@ record for results specific to these changes. QA build 2 compiled and passed
 failed the same narrow-window native completion boundary despite released
 fixture objects. Do not claim the autorelease pool fully resolves that issue
 or a local full follow-up pass. Preserve the strict five-second boundary and
-failure trace; exact-source hosted/iPad and signed-release checks must pass
-before publishing. User QA2 approved the placement and icon UX.
+failure trace. The local failure did not reproduce in the passing hosted Native
+or signed-release runs; this does not establish its cause or a general fix.
+User QA2 approved the placement and icon UX and later reported the installed
+public update works; this does not add physical stylus/IME validation.
 
 ## Priorities
 
@@ -501,13 +506,16 @@ assertion during an unfinished native exit before publication. Preserve that
 tag and reservation too. Run 18 published v1.2.2/build 2020 from `aa392994`;
 exact-source Native checks,
 signed release checks and independently downloaded public assets passed.
-The verified public release remains v1.2.2/build 2020. Current development
-defaults target unpublished v1.3.0 / prospective build 2021.
+Run 19 published v1.3.0/build 2021 from `4c9ea4fc`; exact-source Native,
+signed-release and independent public verification passed on 6 November 2026.
+Defaults match published v1.3.0/build 2021. Prior tags and release assets remain
+unchanged, including the failed 1.2.0/1.2.1 reservations.
 Initial v1.2.0 user QA and publication authorization were recorded on
 5 November 2026; they do not establish
 later-source or public-build results. The v1.1.0 local QA identities use separate
-QA builds 1 and 2 (final Pen correction). The next new signed-release run (19)
-must produce 2021; recheck both feed and counter immediately before publication.
+QA builds 1 and 2 (final Pen correction). The 1.3 QA apps use separate identities
+and temporary libraries, QA builds 1 and 2, with no updater. The next new
+signed-release run (20) must produce 2022; recheck feed and counter before publishing.
 A workflow rerun does not
 advance `GITHUB_RUN_NUMBER`. Never reuse its build number for an updated binary.
 The release workflow supports an explicit `workflow_dispatch` for the current

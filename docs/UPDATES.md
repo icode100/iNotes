@@ -43,7 +43,15 @@ does not publish a release.
 
 ## Build and sign a local update
 
-The current release is **v1.2.2 / build 2020**, from source
+The current release is **v1.3.0 / build 2021**, from source
+`4c9ea4fc29af53b6bf08ee4e0e2822b30db96e28`, published on 6 November 2026.
+Exact-source branch/main Native checks, including iPad compilation, signed
+release run 19 and independent public-download verification passed. The public
+installer, checksum and signed latest/versioned feeds match the verified bytes.
+User QA build 2 approval and a later successful public-update report are recorded
+in [validation](TESTING.md), alongside the preserved local fixture failure.
+
+The preceding release was **v1.2.2 / build 2020**, from source
 `aa392994ed290e38819a74e0a21f5dad520642a3`, published on 5 November 2026.
 [Branch Native checks 42041114016](https://github.com/icode100/iNotes/actions/runs/42041114016)
 and [main Native checks 42046399201](https://github.com/icode100/iNotes/actions/runs/42046399201)
@@ -107,16 +115,17 @@ using Apple CryptoKit and the committed public key. It does not upload anything.
 For v1.0.3, the security rebuild 2011 exceeds the initial public build 2010 and
 shared local builds 1010–1012. Check both published and shared `CFBundleVersion`
 values and use a larger number for every update, including same-version rebuilds.
-Development defaults (`1.3.0`, prospective build 2021) target the unpublished
-diagram feature. They remain separate from the release workflow's
+Defaults (`1.3.0`, build 2021) match the published diagram update. They remain
+separate from the release workflow's
 `2002 + GITHUB_RUN_NUMBER`. Run 11 published v1.0.4 build 2012; isolated backup QA
 used build 2013. Run 12 built 2014 but stopped at native diagnostic verification before publication.
 Runs 13, 14 and 15 published 2015, 2016 and 2017. Runs 16 and 17 built 2018 and
-2019 but failed before publication. Run 18 published 2020. The next new release
-run (19) must produce **2021**, subject to a feed/counter recheck. Failed builds
+2019 but failed before publication. Run 18 published 2020 and run 19 published
+2021. The next new release run (20) must produce **2022**, subject to a fresh
+feed/counter check. Failed builds
 2014, 2018 and 2019 remain reserved alongside
 original installers and QA slots.
-The public feed points to the matching `v1.2.2` release's DMG. Never edit a signed appcast
+The public feed points to the matching `v1.3.0` release's DMG. Never edit a signed appcast
 after generation. Re-run the script if its contents change. The last command
 checks valid signatures and rejects changed feeds, unsigned feeds, changed
 archives, and a different public key.
@@ -141,7 +150,8 @@ authorized v1.3 publication after passing isolated QA build 2 on 6 November 2026
 the earlier v1.2 authorization was on 5 November. Preserve the failed unpublished
 `v1.2.0` tag at `ca051953` and `v1.2.1` tag at `adf533e4`; do not move either to
 changed source or reuse builds 2018/2019. Published `v1.2.2` identifies
-`aa392994`; preserve its build 2020 and use a higher number for an updated binary.
+`aa392994`; preserve its build 2020. Published `v1.3.0` identifies `4c9ea4fc` and
+build 2021; preserve that tag/installer too and use a higher number for a new binary.
 `.github/workflows/release.yml` runs unit/integration tests, builds the
 ARM64 DMG, verifies the mounted bundle, signs and independently verifies the
 appcast, then publishes the DMG, SHA-256 checksum, and `appcast.xml` as GitHub

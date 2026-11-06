@@ -1,10 +1,13 @@
 # iNotes
 
-Development candidate **1.3.0** adds Mac shapes, attached arrow connectors and
-editable table cells. It is undergoing validation and is not published; the
-current verified release and download remain listed below.
+**iNotes 1.3.0, build 2021** adds Mac shapes, attached arrow connectors and
+editable table cells. Published and independently verified on 6 November 2026.
+[Download the Mac installer](https://github.com/icode100/iNotes/releases/download/v1.3.0/iNotes-1.3.0-arm64.dmg).
+Exact-source hosted Native checks, iPad compilation, signed release checks and
+independent public-download verification passed. See the
+[release notes](docs/releases/1.3.0.md) and [validation record](docs/TESTING.md).
 
-In the candidate, choose **Shapes and tables** in the toolbar and drag on the
+Choose **Shapes and tables** in the toolbar and drag on the
 page. Each placement returns to **Select**, ready to move or resize the object;
 click blank paper to deselect. Pasted images also enter Select immediately.
 Drag an arrow endpoint to reconnect it, or double-click a label/cell to edit its text.
@@ -22,8 +25,7 @@ immediately; type in the underlined title at the top to name them, or leave it
 empty. Mac pages initially fit the visible page width; Command-Plus/Minus zoom
 manually and View → Fit Page Width restores fitting.
 
-The current Mac release is **1.2.2, build 2020**, published on 5 November 2026.
-[Download the Mac installer](https://github.com/icode100/iNotes/releases/download/v1.2.2/iNotes-1.2.2-arm64.dmg).
+The preceding Mac release was **1.2.2, build 2020**, published on 5 November 2026.
 Exact-source Native checks passed on both branch and main, including iPad
 compilation; signed release run 18 and independent downloaded-public-asset
 verification also passed. See the [release notes](docs/releases/1.2.2.md) and
@@ -57,8 +59,8 @@ A small, native, open-source notebook for Apple silicon Macs, with a shared iPad
 - Resize the sheets pane or hide it independently of the workbook sidebar. Sheet numbers appear with creation dates in the list and page header; sheet titles are optional. Active sheets are numbered 1, 2, 3… in each chapter or topic's page order. Deleting Sheet 2 from three sheets immediately changes the former Sheet 3 to 2, and the next new sheet is 3. Dragging a sheet between others updates their page numbers; removing all sheets restarts at 1. Restored and moved sheets join the destination's page sequence. Renaming, editing, and searching preserve numbers. New sheets open without a naming dialog. Their underlined top title stays blank until you type a name; clearing it restores the blank title. The breadcrumb shows the containing chapter or topic, and the heading can be hidden to make more room for the page.
 - Text and handwriting share one scrollable, zoomable page. Select Text, pen, straight line, pencil, marker, highlighter, or eraser without hiding either text or ink. Native rich text includes headings, formatting, lists, links, spell checking, and undo/redo.
 - **Text** routes every pointer, including a pen tablet or Apple Pencil, to the text caret and text selection. Choose a drawing tool for handwriting. Typing in Text mode keeps ordinary letters as text.
-- **Select** draws a rectangular selection; **Lasso** follows a freehand outline. Select typed text, pen strokes, positioned text boxes, and equations together, then move, copy, cut, paste, duplicate, delete, or undo the selection. Moving or pasting selected typed text creates a positioned rich-text box on the same paper.
-- **⌘A / Select All** from the page editor selects body text, ink, text boxes, equations, and images together with any tool selected. Search, title, and equation-source fields retain their own native Select All behavior.
+- **Select** draws a rectangular selection; **Lasso** follows a freehand outline. Select typed text, pen strokes, positioned text boxes, equations, images and diagrams together, then move, copy, cut, paste, duplicate, delete, or undo the selection. Moving or pasting selected typed text creates a positioned rich-text box on the same paper.
+- **⌘A / Select All** from the page editor selects body text, ink, text boxes, equations, images and diagrams together with any tool selected. Search, title, and equation-source fields retain their own native Select All behavior.
 - On Mac, paste a copied image or image file with **⌘V** into the open sheet, then write or draw over it with Text or the ink tools. Use **Select** to move an image, or drag its lower-right selection handle to resize it proportionally. Images and annotations can be selected and moved together; resizing an image alone leaves annotations independent. Images save with the sheet and appear in combined PDF/PNG exports. PNG, TIFF, JPEG, HEIC, GIF (first frame), and BMP clipboard images are accepted within the 10 MiB, 16-megapixel, and 8192-pixel-per-side limits. Image pasting is currently Mac-only.
 - Editable LaTeX equations with a native live preview, fractions, roots, powers, Greek symbols, sums, integrals, and matrices. Equations share the page with text and handwriting and adapt to light/dark paper. Rendering uses the pinned, open-source SwiftMath 1.7.3 library entirely on the device.
 - Straight-line pen tool for table borders, with near-horizontal/vertical snapping and Shift axis constraints on Mac.
@@ -69,10 +71,10 @@ A small, native, open-source notebook for Apple silicon Macs, with a shared iPad
 - Ruled paper aligns typed baselines with its guides, including wrapped paragraphs, headings, and moved text boxes. The native layout follows whole ruled rows while preserving saved rich-text formatting and colors.
 - Light, dark, and system appearance for the shared page, readable ink colors, and prominent grids, rules, and dots. Switching appearance preserves original note colors. The single-pencil app icon includes native light and dark appearances.
 - Classic plus Coast, Alpine, Arctic, Open Skyscape, Ruby Hills, and Nature workspace scenery, with paired light/dark photographs. A saved Forest preference now shows Nature. The matching page-color choice follows scenery and appearance; explicit vintage, pitch and pastel papers stay fixed. Scenery never changes saved note content.
-- Search across titles, text, positioned text boxes, equation source, and tags; favorite sheets; embedded file attachments.
+- Search across titles, text, positioned text boxes, equation source, diagram labels, table cells and tags; favorite sheets; embedded file attachments.
 - Automatic local saves, a previous-version backup, explicit damaged-library recovery, and external-change checks that prevent overwriting another app instance's changes.
 - Portable `.inotes` import/export. Import creates a separate copy; it never replaces existing notebooks.
-- Mac text/RTF export includes canonical typed text, positioned text, and LaTeX source. Combined-page PDF/PNG export preserves rendered text, ink, text boxes, and equations together. Files export on iPad.
+- Mac text/RTF export includes canonical typed text, positioned text, LaTeX source, diagram labels and table cells. Combined-page PDF/PNG export preserves rendered text, ink, text boxes, equations, images and diagrams together. Files export on iPad.
 - Independent automatic iCloud Drive and Google Drive folder backups, including delayed backups after edits, retries after failed writes, and a final backup on normal Mac quit. Connect both folders to keep Google Drive backups running when the iCloud folder is unavailable. No CloudKit database, cloud SDK, or OAuth secret is needed.
 - ARM64 `.app` and drag-to-Applications `.dmg` packaging, with verification scripts.
 - Native Mac update checks, verified Ed25519 downloads, and installation on quit. Release tags publish a signed feed through GitHub Releases after the signing secret is configured; see [release setup](docs/UPDATES.md).
@@ -95,6 +97,7 @@ in notes, titles, search, or the equation editor remain text.
 | Eraser | E |
 | Text | T |
 | Straight Line | Shift+L |
+| Shapes and tables (Mac) | S |
 
 ## Run on Mac
 
@@ -107,7 +110,7 @@ Requires an Apple silicon Mac and macOS 14+. Building the installer requires ful
 open dist/iNotes.app
 ```
 
-The development installer target is `dist/iNotes-1.3.0-arm64.dmg` (unpublished candidate, prospective build 2021). The verified public release remains 1.2.2/build 2020. Failed, unpublished 1.2.0/build 2018 and 1.2.1/build 2019 stay reserved. Downloaded public builds are ad hoc signed: **they are not Apple notarized**, so macOS may report that Apple could not verify iNotes is free of malware.
+The installer target is `dist/iNotes-1.3.0-arm64.dmg`; defaults match published 1.3.0/build 2021. Failed, unpublished 1.2.0/build 2018 and 1.2.1/build 2019 stay reserved. Downloaded public builds are ad hoc signed: **they are not Apple notarized**, so macOS may report that Apple could not verify iNotes is free of malware.
 
 If you trust the download from the [official releases](https://github.com/icode100/iNotes/releases), follow Apple's [per-app first-open procedure](https://support.apple.com/en-us/102445):
 

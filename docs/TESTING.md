@@ -1,5 +1,105 @@
 # Validation
 
+## v1.3.0 / build 2021 published and independently verified — 6 November 2026
+
+Published [v1.3.0](https://github.com/icode100/iNotes/releases/tag/v1.3.0) uses
+source `4c9ea4fc29af53b6bf08ee4e0e2822b30db96e28` and build **2021**.
+The user approved isolated QA build 2 and publication, then reported the updated
+public application works. That report does not instrument the update method or
+establish physical stylus/IME coverage.
+
+Both exact-source Native runs passed: [branch 47](https://github.com/icode100/iNotes/actions/runs/42252454734)
+and [main 48](https://github.com/icode100/iNotes/actions/runs/42256653087), including
+mounted-DMG verification and iPad simulator compilation. Main used macOS
+**26.6.2 (25G83)**, image **20261026.0455.2**, Swift **6.3.3**, Xcode **26.6** and
+SDK **26.5**. It passed **133 XCTest tests, zero failures, 10.399 seconds (10.433
+wall)** and **978 editor checks including 119 diagram / 2,000 workspace / 31
+equation / 12 ruled-text / 9 shortcut / 62 numbering-title-store checks**, plus
+16 updater configurations, indexed hierarchy and independent backup integration.
+
+[Signed release run 19](https://github.com/icode100/iNotes/actions/runs/42256653390)
+passed its independent build and complete native gates, mounted bundle checks,
+Ed25519 signature probes, asset publication and signing-seed cleanup. It used
+macOS **26.7.2 (25G332)**, image **20261102.0473.1**, Xcode **26.6** and macOS SDK
+**26.5**; its compiler version was not separately printed. It repeated **133
+XCTest tests, zero failures, 12.398 seconds (12.457 wall)** and the same native
+counts. Each run retained all 100 correct heading allocations and six sheet
+switches with zero measured frame/title/tag drift. Main recorded 55 completion
+waits, 23 still pending beyond the original 0.4-second observation, maximum
+**0.996478 seconds**; release recorded 55/15/**0.912715 seconds**. Narrow-hide
+completion was **0.400749 seconds** on main and **0.492150 seconds** on release.
+Maximum sheet-switch sample gaps were **0.976373/1.088821 seconds** respectively;
+samples do not establish continuity through those gaps. Strict assertions,
+first completed-state failures and the five-second limit were preserved. These
+hosted passes do not erase or explain the local CLT failure below.
+
+Independent verification downloaded release **436774445** from the public URLs.
+Actual tag dereferencing matched the source above; API SHA-256 digests/lengths,
+installer checksum and exact latest/versioned feed equality passed on the first
+readback attempt. The public artifacts are:
+
+- DMG **34,888,223 bytes**, SHA-256
+  `4592a301c65c736f754e81ed66633e4eb71a0a1977194dd9b80a564eb12caf7c`.
+- Feed **1,268 bytes**, SHA-256
+  `668335a400eeeca5a354d40e04d1d95ee5dfed753491fd650105332b14c02f2f`.
+- Mounted executable **7,533,888 bytes**, SHA-256
+  `92694509f29c4edd1c3873621a74475828ab2ea428bee628fd034ac1c39e5c4b`.
+  The app contains **42,500,907 regular-file bytes** across **106 files**; file
+  sizes are not RAM measurements.
+
+The existing signature script independently passed all five checks: valid feed/
+archive plus changed feed, unsigned feed, changed archive and wrong-key rejection.
+Read-only mounted verification passed strict ad hoc signatures, ARM64, macOS 14
+target, Applications link, twelve scenery hashes, native icon/math/license
+resources and isolated persistence/backup smoke checks. Additional inspection
+confirmed `io.inotes.app`, **1.3.0/2021**, no QA/environment overrides and the
+unchanged update key/policies. All **12** prior releases' asset identities/sizes/
+digests and **30** prior tag refs remained unchanged, including failed 1.2.0/1.2.1
+tags. No production notes or external UI control were used. Distribution remains
+ad hoc signed, not Apple notarized. No new physical Pencil/stylus, actual IME,
+live cursor capture, older-OS or cloud-delivery result is claimed; iPad diagram
+pages remain read-only.
+
+Ignored evidence: `dist/public-v1.3.0/{verification,download-verification}.json`;
+complete logs/JSONs under `/private/tmp/inotes-v1.3-{native47,main48,release19}-*`;
+public logs `inotes-v1.3-public-{download,signatures,bundle-verification,inspection}.log`
+and preservation record `inotes-v1.3-preservation.json`. Defaults match published
+1.3.0/build 2021. The next fresh signed-release run 20 must use build **2022**
+after a live feed/counter check; preserve all earlier reservations.
+
+## v1.3.0 exact-source hosted Native checks — 6 November 2026
+
+Source `4c9ea4fc29af53b6bf08ee4e0e2822b30db96e28` passed
+[branch Native run 47](https://github.com/icode100/iNotes/actions/runs/42252454734),
+attempt 1. All steps passed, including ARM64 packaging, the unchanged combined
+native harness, mounted-DMG verification and iPad simulator compilation.
+This is the same app/resource input manifest approved in isolated QA build 2;
+the intervening commit records user approval and release documentation only.
+
+The runner used macOS **26.7.2 (25G332)**, image **20261102.0473.1**, Swift
+**6.3.3**, Xcode **26.6**, macOS SDK **26.5** and iPhoneSimulator SDK **26.5**.
+Results: **133 XCTest tests, zero failures, 11.959 seconds (11.994 wall)**;
+**978 editor checks including 119 diagram checks**, **2,000 workspace / 31
+equation / 12 ruled-text / 9 shortcut / 62 numbering-title-store checks**, plus
+16 updater configurations and the hierarchy/backup integration. SDK-dependent
+editor counts differ from the local CLT result.
+
+The narrow sheets hide completed in **0.444661 seconds**, and restoration in
+**0.401570 seconds**, at the strict callback-ready boundary. The local failure
+below did not reproduce in this hosted run and remains preserved; this pass
+does not establish its cause or a general fix. No production pane-policy or
+geometry/timeout relaxation was made. Logs and evidence are under
+`/private/tmp/inotes-v1.3-native47-*`; complete ZIP SHA-256 is
+`988e9fdb0a78e002400233ef210bc30ac6c2071ca329e6e6a2afc8f3f28e013e`.
+
+The user approved QA build 2 and publication on 6 November. The exact source was
+fast-forwarded to main and tagged `v1.3.0`; independent main Native run 48 and
+signed release run 19/build 2021 subsequently passed, followed by independent
+public asset verification (recorded above). These hosted native fixtures and
+simulator compilation do not add a physical stylus/Pencil, actual IME,
+live displayed-cursor, older-OS or cloud
+delivery result.
+
 ## 1.3.0 shapes, connectors and tables candidate — 6 November 2026
 
 ### Placement UX follow-up / QA build 2
@@ -29,8 +129,8 @@ five-second boundary. All 100 heading cycles had correct native heights. Weak
 fixture observations reported window/host/page/controller released after the
 autorelease pool, so object release alone does not establish a complete remedy
 for this recurring failure. Production navigation policy and strict assertions
-are unchanged. Preserve `/private/tmp/inotes-v1.3-ux-native-tests-1.log`; no full
-suite pass or release readiness is claimed for this follow-up. The remaining
+are unchanged. Preserve `/private/tmp/inotes-v1.3-ux-native-tests-1.log`; this
+local invocation does not establish a full pass or release readiness. The remaining
 store/backup steps were not reached in this invocation.
 
 QA build 2 is `dist/iNotes-QA-1.3.0-UX.app`, identity
@@ -46,13 +146,13 @@ RAM or distribution-size measurement. Ignored `dist/qa-v1.3-ux.json` and
 `dist/qa-v1.3-ux-source-manifest.json` record its inputs. User QA of the new
 interaction/icon palette passed on 6 November 2026, followed by explicit source
 push/publication authorization. The approved QA source is `0c18958474ab46b447a26190f08c891a24b28b11`.
-Hosted validation, iPad compilation and full installer packaging remain pending;
-publication requires exact-source hosted and signed-release checks. This user
-approval does not replace any automated gate or erase the local failure.
+At that local checkpoint, hosted validation, iPad compilation and installer
+packaging were pending. They subsequently passed as recorded above. User approval
+does not replace any automated gate or erase the local failure.
 
 ### Initial candidate / QA build 1
 
-This candidate is local and unpublished. The previous 1.2.2 results below do not
+At this initial checkpoint the candidate was local and unpublished. The previous 1.2.2 results below do not
 establish validation of this new patch. The worktree adds archive-format-4 vector
 objects, bounded tables/cell text, attached connectors, native Mac editing and a
 read-only iPad preview. No dependencies or production notes are used.
@@ -135,7 +235,8 @@ Executable **7,312,864 bytes**, SHA-256
 The QA template contains **47,338,087 regular-file bytes** across **127 files**;
 these are QA artifact sizes, not a distribution-size or RAM result. Ignored
 `dist/qa-v1.3-source-manifest.json` records individual source hashes. Manual user
-QA and publication approval for this new feature remain pending.
+QA and publication approval were pending at this initial checkpoint; later
+approvals and final hosted/public verification are recorded above.
 
 Full Xcode/iPad SDK and installer icon compilation are unavailable on this
 Command Line Tools host. `bash scripts/build-macos.sh` stopped at the explicit

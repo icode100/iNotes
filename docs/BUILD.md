@@ -48,13 +48,19 @@ The build script validates the property list, architecture, app signature, and D
 before publishing outputs. The verification script mounts it read-only and checks
 the packaged app and Applications shortcut.
 
-Development defaults now target **1.3.0 / prospective build 2021** for shapes,
-connectors and tables. Local QA uses an isolated identity, temporary notes and
-a disconnected updater. The user passed QA build 2 and authorized publication
-on 6 November 2026. Exact-source hosted Native/release checks and independent
-public verification remain required; local failed traces remain recorded.
+Defaults match published **1.3.0 / build 2021**, source
+`4c9ea4fc29af53b6bf08ee4e0e2822b30db96e28`, released on 6 November 2026.
+[Branch Native run 47](https://github.com/icode100/iNotes/actions/runs/42252454734)
+and [main Native run 48](https://github.com/icode100/iNotes/actions/runs/42256653087)
+passed, including iPad compilation. [Signed release run 19](https://github.com/icode100/iNotes/actions/runs/42256653390)
+and independent public-download checks passed. The installer is **34,888,223
+bytes** and the app has **42,500,907 regular-file bytes** (file sizes, not RAM).
+Public identity is `io.inotes.app`, with the established updater key and no QA
+overrides. Local QA uses separate identities, temporary notes and no updater.
+The user approved QA build 2 and later reported the public update works. Preserve
+the local failed traces separately from hosted/public passes; see [validation](TESTING.md).
 
-The verified public release is **v1.2.2 / build 2020**, released on 5 November 2026
+The preceding verified public release was **v1.2.2 / build 2020**, released on 5 November 2026
 from source `aa392994ed290e38819a74e0a21f5dad520642a3`.
 [Branch Native checks 42041114016](https://github.com/icode100/iNotes/actions/runs/42041114016)
 and [main Native checks 42046399201](https://github.com/icode100/iNotes/actions/runs/42046399201)
@@ -102,8 +108,9 @@ update, recheck the actual public appcast and choose a greater `CFBundleVersion`
 Sparkle compares build numbers, not just the displayed version.
 The release workflow uses `2002 + GITHUB_RUN_NUMBER`: run 12 built 2014 but failed
 before publishing; runs 13/14/15 published 2015/2016/2017. Runs 16 and 17 built
-2018 and 2019 but failed before publication; run 18 published 2020. The next fresh
-run 19 must produce **2021**, subject to a feed/counter recheck. A rerun does not
+2018 and 2019 but failed before publication; run 18 published 2020 and run 19
+published 2021. The next fresh run 20 must produce **2022**, subject to a
+feed/counter recheck. A rerun does not
 increase its build number. The local v1.1.0 QA apps use separate
 identities, QA builds 1 and 2, temporary libraries and
 disconnected updaters. User QA passed the initial candidate; the final Pen-only
