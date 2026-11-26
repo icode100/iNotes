@@ -1299,16 +1299,31 @@ enum WorkspaceDiagnostics {
             let firstHistory = try require(firstPage.textView.undoManager, "first sheet undo")
             let expectedFirstText = firstPage.textView.string
             if mode == "sidebar hidden" {
-                let undoControl = try requireControl("page.history.undo")
-                try check(undoControl.isEnabled, "the actual workspace Undo control enables after native page typing")
-                try pressControl("page.history.undo")
+                func pressHistory(_ identifier: String) throws {
+                    // Native text and history can already have changed while the
+                    // published enablement is still travelling to the docked button.
+                    let ready = observeCallbackCompletion(start: ProcessInfo.processInfo.systemUptime,
+                        snapshot: { diagnosticControls.control(identifier) },
+                        isReady: { control in
+                            control?.isEnabled == true && control?.frame(in: host.view)?.isEmpty == false
+                        }, observe: { _, _, _, _ in })
+                    try check(ready.completed, "\(identifier) must mount and enable within five seconds; "
+                              + "elapsed=\(ready.elapsed) enabled=\(String(describing: ready.snapshot?.isEnabled)) "
+                              + "frame=\(String(describing: ready.snapshot?.frame(in: host.view))) "
+                              + "canUndo=\(firstHistory.canUndo) canRedo=\(firstHistory.canRedo)")
+                    try pressControl(identifier)
+                }
+                try pressHistory("page.history.undo")
                 waitPassively(until: { store.library.node(id: firstSheet)?.body == firstTextBeforeTyping })
                 try check(firstPage.textView.string == firstTextBeforeTyping && firstHistory.canRedo
+                          && store.library.node(id: firstSheet)?.body == firstTextBeforeTyping
                           && store.library.node(id: secondSheet)?.body == "Switch fixture B",
                           "the actual toolbar Undo restores only its bound page's native text")
-                try pressControl("page.history.redo")
+                try pressHistory("page.history.redo")
                 waitPassively(until: { store.library.node(id: firstSheet)?.body == expectedFirstText })
-                try check(firstPage.textView.string == expectedFirstText && firstHistory.canUndo,
+                try check(firstPage.textView.string == expectedFirstText && firstHistory.canUndo
+                          && store.library.node(id: firstSheet)?.body == expectedFirstText
+                          && store.library.node(id: secondSheet)?.body == "Switch fixture B",
                           "the actual toolbar Redo synchronizes the same page and native undo manager")
             }
             let baselineProbes = probes(in: host.view)

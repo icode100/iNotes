@@ -1,5 +1,22 @@
 # Validation
 
+## v1.4.0 hosted toolbar history follow-up
+
+[Native run 50](https://github.com/icode100/iNotes/actions/runs/45775476467)
+tested `07ab9d57213c070273a0a235d77541fc970d46ed`. All 142 core tests and
+the Mac build passed. It completed 1,299 editor checks including 429 diagram
+checks, followed by 31 equation, 9 shortcut and 12 ruled-text checks. In the
+workspace fixture the docked Undo action restored the native text, the second
+page retained its contents, and the native undo manager could redo. The next
+attempt to operate the mounted Redo button failed its combined enablement and
+action guard. That observation did not distinguish a disabled button from
+another unmet action precondition. The job stopped before the iPad build.
+
+The fixture had been waiting for the saved text to change. The toolbar reads
+the undo manager on the next main-queue refresh, and SwiftUI then updates the
+button. The follow-up fixture checks the mounted control before pressing it and
+verifies the result against the page content and native history.
+
 ## v1.4.0 release authorization — 26 November 2026
 
 The user authorized publication after the isolated floating-toolbar QA build 5.
