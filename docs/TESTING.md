@@ -1,5 +1,201 @@
 # Validation
 
+## v1.4.0 release authorization — 26 November 2026
+
+The user authorized publication after the isolated floating-toolbar QA build 5.
+Its local results are recorded below. Production packaging targets build 2022
+under the existing updater identity. QA build 5 has a separate application
+identity and an independent temporary library.
+
+## Floating full-screen toolbar — 26 November 2026
+
+The isolated 1.4.0 QA build 5 adds a movable circular toolbar in Full Page and
+in the Mac window’s native full screen. Docked remains the initial preference.
+The QA build has the bundle ID `io.inotes.qa.notebook.toolbar.20261126`, a
+disconnected updater and its own temporary copy of the routing QA notebook.
+
+The standalone core suite passed 142 tests. An offscreen native workspace
+fixture switched between docked, floating and hover modes, checked the mounted
+Pen, Undo and Redo actions against the same editor, and verified that ordinary
+page input still reaches the ink view inside the open ring. It checked anchor
+persistence, the hover handle, restoration after hiding the toolbar, editor
+identity, caret, history and zoom. Native full-screen notifications were
+delivered to the fixture window and to an unrelated window to check ownership.
+A separate geometry check exercised 60 viewport, anchor and command-count
+combinations, including paginated rings and the compact popover fallback.
+
+Nine additional checks delivered mouse events directly to a separate offscreen
+Mac window hosting the same toolbar source. Clicking the bubble opened all
+15 Mac commands, selecting a tool kept the ring open, and clicking the center
+closed it. Drags from both an open and a closed ring tracked the pointer within
+1.5 points. Each mouse-up saved the new position once, and the next click
+reopened the ring.
+
+The packaged executable completed `--smoke-test --editor-test` with exit
+status 0. It passed 1,301 editor checks (429 diagram), 31 equation, 9 shortcut,
+12 ruled-text, 2,081 workspace and 13 notebook PDF/ZIP checks. Store,
+numbering, hierarchy, backup and archive round-trip checks passed in that run.
+
+The optimized Apple silicon QA bundle passed strict ad hoc signature
+verification. Its 50,380,512 regular-file bytes include an executable with SHA-256
+`9950ae7e49a20e63d1dddd80659fb0228ad6fae5e020f12172fc6bf8cb438b39`.
+The shared sources passed an iPad-target Swift syntax check and the Xcode
+project passed plist validation. Full iPad compilation requires an iPad SDK.
+Physical pointer, Pencil and native macOS Space transitions await manual QA.
+
+## Automatic connector attachment sides — 26 November 2026
+
+The user tested QA build 3 and reported that moving a Quick Add rectangle
+below its rounded parent kept the original right-to-left connection. The
+Mac regression invokes the actual **+** picker, moves the rectangle during
+an app-local mouse gesture, and samples the rendered connector near the
+facing edge before and after mouse-up. It repeats the move to the left,
+compares a manually attached arrow on the same objects, exercises undo/redo
+and verifies detached clipboard coordinates and an archive round-trip.
+Additional checks exercise the Arrow inspector on an earlier fixed arrow and
+verify that text growth, manual repinning and PDF export share the new geometry.
+
+The standalone core runner passed 142 tests in 3.95 seconds. Coverage includes
+all four relative directions, resizing, vertical elbows, free and pinned ends,
+scoped external targets, v4 compatibility and v5 archive/clipboard behavior.
+An intermediate run reached 1,301 editor checks before it was stopped to test
+the final executable, which also preserves the caller’s copied label when using
+a separate geometry snapshot.
+
+The final executable then passed the complete integrated run with 1,301 native
+editor checks (429 diagram), 31 equation, 12 ruled-text, 9 shortcut, 2,028
+workspace and 13 notebook PDF/ZIP checks. Store, hierarchy, backup and updater
+configuration checks passed in the same run. The process exited with status 0.
+
+The isolated 1.4.0 QA build 4 uses `io.inotes.qa.notebook.routing.20261126`
+and a disposable copy of the previous QA notebook. Its ad hoc ARM64 signature
+passed strict verification. The bundle contains 49,768,510 regular-file bytes,
+with executable SHA-256
+`e1dbcc56e8bf13737cd41b4c9fc8debb3243fb7fd141c0efc32c4cee2117c726`.
+The shared Swift sources passed an iPad-target syntax check and the Xcode project
+passed `plutil -lint`. This Command Line Tools host lacks the iPad SDK.
+
+## Drawing tools and selected handwriting — 26 November 2026
+
+Local 1.4.0 QA build 3 uses `io.inotes.qa.notebook.drawing.20261126`, an
+independent temporary library and a disconnected updater. Its disposable
+**Drawing practice → Canvas tools → Ink, tables and arrows** page includes a
+pen stroke, a three-row table and a shape for the hover shortcut.
+
+The final standalone core run passed 140 tests in 3.93 seconds, including archive
+and clipboard compatibility, typed connector targets that share the same UUID,
+table proportions, and format promotion. The separate workspace run passed
+2,028 checks, including saved per-tool settings, new-page defaults, restoring
+factory settings and preserving the native editor while applying preferences.
+
+An intermediate Mac test found a two-point difference between an attached
+arrow’s saved endpoint and its displayed endpoint after typing into a text
+box. The in-progress text measured 80 points high, while the saved RTF laid
+out at 82 points. The corrected edit measures the saved text using the same
+native text-box layout as page rendering. The layering fixture now checks
+the order of all content layers and checks the hover button separately for
+visibility and hit testing on blank paper.
+
+Native typing undo restored the original text. Its saved RTF measured 27
+points high where the initial legacy plain-text box measured 26. The fixture
+reopens the restored text independently and compares its exact frame, saved
+attachment, on-screen port and exported connector against that snapshot.
+
+The optimized ARM64 QA app passed 1,245 native editor checks, including 373
+diagram checks, plus 31 equation, 12 ruled-text and 9 shortcut checks. The
+editor fixture selected old handwriting through the lasso, applied a custom
+RGB color and checked the stored native ink, original opacity, stroke identity,
+mask, path, transform, untouched page content and single-step undo/redo. It
+also exercised same-color, invalid-color and read-only requests, and Select All
+from Pen. The diagram fixtures exercised live internal table-divider drags,
+the hover menu’s real actions, mixed-object anchors and clipboard remapping,
+arrow styling, undo, save/reopen and rendering. Native mouse gestures were
+delivered to the app’s isolated fixtures.
+
+The same `--smoke-test --editor-test` run completed all 2,028 workspace checks,
+13 PDF/ZIP checks, 62 numbering/store checks, the 49,127-node hierarchy fixture,
+and the autosave, backup and updater configuration checks. It exited with status 0.
+
+The ad hoc QA signature passed strict verification. The bundle has 49,674,548
+regular-file bytes and executable SHA-256
+`ec5c18102b2504f94cb829cb0ca31213059bdc8975073356d34871f806576d36`.
+The source and test directories used for the build matched the working tree.
+The shared iPad sources passed a syntax check and the Xcode project passed
+`plutil -lint`. This Command Line Tools host lacks the iPad SDK. The added iPad
+PencilKit fixture, physical stylus input and manual interaction with this QA
+build still require separate verification.
+
+## Page terminology follow-up — 26 November 2026
+
+The user tried the first notebook QA build, reported smooth operation and
+requested “Page” throughout the app. The revised Mac badge, page metadata,
+sidebar, menus, title-field accessibility help and export labels use the new
+wording. Untitled pages use their number in page lists and PDF bookmarks.
+
+The standalone core runner passed all 135 tests in 3.97 seconds. A legacy
+archive fixture checks that a blank title displays as “Page 1” while a
+user-entered title of “Sheet 1” survives decoding and keeps its own number.
+The encoded node kind remains `sheet`.
+
+The locally signed ARM64 app is labeled 1.4.0 QA build 2, with bundle ID
+`io.inotes.qa.notebook.pages.20261126` and an independent copy of the previous
+QA notebook. Its executable SHA-256 is
+`dfc972e4ac4f34d44e59401181c288dd105dbacefe3da19a9916837853106dc9`.
+Its integrated Mac run passed 1,067 editor checks (207 diagram), 31 equation,
+12 ruled-text, 9 shortcut, 2,022 workspace and 13 PDF/ZIP checks, alongside
+the store, hierarchy and backup fixtures. The PDF test reopened a nested
+bookmark named “Page 1” and retained a different page’s literal title “Sheet 1”.
+Shared iPad sources passed a syntax check. Full iPad compilation requires Xcode.
+
+## Notebook navigation, PDF exports and diagram editing — 26 November 2026
+
+Local development QA used macOS 27.2.1 (26B131), Swift 6.4.2 and the macOS
+27.2 Command Line Tools SDK. The isolated ARM64 app uses bundle identity
+`io.inotes.qa.notebook.20261126`, temporary notes and a disconnected updater.
+The local candidate is labeled 1.4.0, QA build 1. Its temporary sample
+workbook contains two connected boxes, two chapter pages and a nested topic.
+
+- All 135 core test methods passed in the standalone runner (3.89 seconds).
+  This includes page order, nested PDF bookmarks, filename collisions and
+  excluding trashed content. Restricted runs could not write backup fixture
+  directories; the successful run used normal access to disposable folders.
+- The optimized app passed 1,067 native editor checks, including 207 diagram
+  checks. These exercised mixed-selection fill, read-only rejection, undo/redo,
+  and saving and reopening the edited page. The 68 connector checks included
+  actual app-local mouse gestures for picking up boxes, snapping to an edge,
+  moving and resizing attached targets, preserving free ends, and changing
+  appearance mid-drag. The fixture checked the live native drawing model
+  before mouse-up as well as the committed page.
+- The same app passed 31 native equation, 12 ruled-text and 9 shortcut
+  checks. The iPad-target Swift parser and project plist checks passed.
+- All 2,022 workspace checks passed with `--smoke-test --editor-test`,
+  including 100 heading hide/show cycles, passive sidebar and narrow-window
+  transitions, add-page on an empty chapter with nested pages, carousel
+  switching/reordering and per-page toolbar undo/redo. The inactive offscreen
+  host did not expose its SwiftUI buttons through accessibility enumeration.
+  Fixture-only probes recorded the mounted button bounds, states and production
+  actions. An intermediate probe registry lost the successor Undo control
+  when the outgoing sheet detached. Per-view registrations retained the new
+  control through that transition. OS-level accessibility click delivery and
+  physical input remain unverified.
+- The integrated run also passed 62 sheet-numbering and store checks, the
+  49,127-node hierarchy regression, autosave, failed-save restart protection,
+  backup integration and 16 signed-updater configuration checks.
+- The export fixture reopened the multi-page PDF with PDFKit, checked ordered
+  text and nested bookmark destinations, rendered its ink and pasted image,
+  and verified a diagram below the first screen on the same tall PDF page.
+  It extracted the ZIP and opened each topic/chapter PDF independently.
+  Canceling mid-export preserved an existing ZIP byte-for-byte. All 12 checks
+  passed in the integrated run.
+- The Mac build used the pinned dependencies, release optimization and existing
+  QA icon resources. It was built from the working tree based on `0c9c663`.
+  The verified ad hoc signed QA bundle contained 48,899,097 regular-file
+  bytes. Its ARM64 executable SHA-256 was
+  `a4dbc3085415e7e6af3152f04466847a89c241886d3037ea154101dcd0a23a09`.
+  Full Xcode, `actool` and the iPad simulator SDK are
+  unavailable on this host. Manual save-dialog interaction, physical stylus
+  input and release distribution require separate verification.
+
 ## v1.3.0 / build 2021 published and independently verified — 6 November 2026
 
 Published [v1.3.0](https://github.com/icode100/iNotes/releases/tag/v1.3.0) uses

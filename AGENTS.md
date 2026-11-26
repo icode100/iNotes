@@ -64,7 +64,7 @@ ellipses, triangles, diamonds, attached straight/elbow arrow connectors and
 plain-text table cells on Mac. Diagram objects participate in the shared page's
 selection, movement/resizing, snapshots, undo, clipboard and combined exports.
 Diagram-bearing iPad pages show a native read-only preview and a Mac-only editing
-notice. Defaults match published **1.3.0/build 2021**. The user passed isolated QA
+notice. Its production build was **1.3.0/build 2021**. The user passed isolated QA
 build 2 (`0c18958`) and authorized source push/publication on 6 November 2026.
 Source `4c9ea4fc29af53b6bf08ee4e0e2822b30db96e28` passed exact-source hosted
 Native checks including iPad compilation, signed release run 19 and independent
@@ -96,8 +96,66 @@ or signed-release runs; this does not establish its cause or a general fix.
 User QA2 approved the placement and icon UX and later reported the installed
 public update works; this does not add physical stylus/IME validation.
 
+On **26 November 2026** the user authorized v1.4.0 publication after the
+isolated floating-toolbar QA build 5. Production metadata targets **1.4.0 /
+build 2022**. QA used a separate identity, disposable notes and no updater.
+Its local suite passed 142 core tests, 1,301 editor checks, 2,081 workspace
+checks and 13 PDF/ZIP checks. Consult `docs/TESTING.md` for release-specific
+hosted and downloaded-asset evidence.
+
 ## Priorities
 
+- Use **Page** and **Pages** throughout the product, including the numbered
+  badge, blank-title fallback, menus, accessibility labels and exports. Older
+  archives identify these nodes with `sheet` and use `sheetNumber` for numbering.
+  Preserve those wire values and all titles and text entered by the user.
+- Version 1.4 replaces the middle sheets column with
+  bottom page navigation and an adjacent add-page control. Preserve the stable
+  sidebar owner and sheet-keyed editor, native heading heights, visible viewport,
+  page order, and sheet-local undo/redo when changing the carousel.
+- Full Page (and macOS window full screen) can use a docked toolbar, a movable
+  floating bubble, or the hover-reveal bubble. Docked is the initial choice.
+  Keep the visibility toggle independent of the preferred layout. Store the
+  normalized bubble position in preferences. Opening, moving or changing the
+  palette must preserve the native editor, undo manager, caret and zoom. Route
+  input between radial controls to the underlying page. Keep the collapsed
+  hover handle accessible to touch and keyboard users. Native full-screen
+  notifications are scoped to the owning window.
+- Mac topic/chapter PDFs render each active sheet once through the native page
+  renderer. Direct pages come first in saved order, followed by nested topics
+  with navigable PDF bookmarks. A workbook or topic ZIP mirrors the hierarchy
+  and assigns each folder’s direct sheets to its own PDF. Keep safe distinct
+  archive paths, ask for a destination, and preserve existing files on cancel
+  or failure. See the dated validation record in `docs/TESTING.md`.
+- Mac selected-shape fill changes only the selected shapes and tables in one
+  validated, undoable edit. Keep the creation default independent. Resolve an
+  attached arrow against the same live page snapshot as its moving or resizing
+  target, including during SwiftUI refreshes. Preserve free ends until a user
+  explicitly attaches them. Keep existing archives and their attachment IDs.
+- In version 1.4, the Mac hover **+** is available in every page tool on
+  shapes, tables, arrows, images, positioned text boxes and equations. Only the
+  visible button owns pointer hits. Keep normal text and ink cursor routing and
+  hide the action during gestures or on read-only pages. Insert the chosen shape
+  or table and its attached, single-headed arrow in one validated undo step.
+  Hovering an arrow and using **+** branches from its attached destination or
+  connects its free end in place. Return to Select only after a successful insertion.
+  New **+** endpoints choose facing ports as either target moves or resizes.
+  Dragging an endpoint pins that end to the chosen edge. Earlier attachments
+  store only a fixed side, and the Arrow inspector can explicitly switch them to
+  Automatic. Use the same route for live previews, hit testing, export, clipboard
+  and target deletion. Undo restores both the geometry and the attachment policy.
+- Mac table dividers resize two adjacent rows or columns inside the original
+  table bounds. Keep cell order and contents intact. Use the same fractional
+  row and column edges for drawing, previews, exports, hit tests and cell editing.
+  Commit the completed drag as one undoable change. The **Arrow** inspector
+  edits a single selected connector's route, heads, head style, line pattern,
+  width and canonical color. Apply the draft once and retain both attachments.
+- **Recolor ink** edits selected handwriting on editable Mac and iPad pages in
+  one undo step. Preserve unrelated members of mixed selections, the drawing
+  tool's current color, portable stroke IDs and geometry, and native PencilKit
+  ink type, opacity, transforms and eraser masks. Update matching portable
+  fragments for selected native strokes with split masks. Preserve the original
+  PencilKit bytes for a no-op recolor.
 - Protect saved notes, archive compatibility, undo history, and recoverability.
 - Preserve the v0.2.2 cursor fix; an ink tool must never retain the text I-beam.
 - Keep typed text, handwriting, text boxes, and equations on the same page.
@@ -123,6 +181,8 @@ public update works; this does not add physical stylus/IME validation.
   participate in native text, object, selection, undo, and cursor behavior.
   `MacPageDiagrams.swift` draws and edits diagrams; keep visible connector-label
   bounds shared by rendering, selection, lasso and double-click text editing.
+  `MacDiagramQuickAdd.swift` owns the hover control and connected placement.
+  `MacConnectorAppearance.swift` owns selected-arrow appearance editing.
 - `Editors/UnifiedPageEditor+iOS.swift`: UIKit/PencilKit page and iPad diagnostics.
 - `Tests/NotesCoreTests`: XCTest methods plus `StandaloneRunner.swift` for CLT-only hosts.
 - `scripts/`: build, DMG verification, signing, and signature regression checks.
@@ -166,11 +226,14 @@ Use availability guards for APIs newer than the deployment target.
   IDs, titles, timestamps, and all page payloads; reject nonfinite dates before
   sorting. Incidental renumbering must not recreate the native editor or rewrite
   content/creation metadata. Content edits alone must not change numbering.
-- Archive format 4 reads formats 1, 2 and 3. Image/diagram-free new libraries
-  default to format 2; positioned text/equations promote format 1 to 2, images
-  promote to 3, and diagrams promote to 4. Never downgrade after removing newer
-  objects. Older readers must reject format 4 rather than silently lose diagrams.
-  Keep decoder defaults and legacy fixtures.
+- The 1.4 reader accepts archive formats 1 through 5. New libraries
+  start at 2. Positioned text/equations require at least 2, images require 3,
+  and basic diagrams require 4. Promote to 5 for custom table row/column
+  fractions, explicit head style, automatic attachment sides, or an endpoint anchored to an image, positioned
+  text box or equation. Absent fractions mean equal cells. Absent head style
+  means filled arrowheads. Absent attachment target kind means a diagram.
+  Keep these v4 defaults and legacy fixtures. Preserve the highest stored format
+  through undo, removal and import so older readers reject unsupported content.
 - Page images are canonical PNG objects behind text and ink. Preserve them in every
   page snapshot, undo operation, duplication/import, mixed clipboard payload and
   PDF/PNG export. Image-bearing iPad sheets are currently read-only with an explicit
@@ -184,13 +247,18 @@ Use availability guards for APIs newer than the deployment target.
   Enforce PageDiagramLimits before rendering or committing: 500 objects/page,
   20 rows/12 columns per table, 512 cells/page, 1,024 UTF-8 bytes/cell, 4,096
   UTF-8 bytes/label, 1 MiB aggregate diagram text and 100,000 patterned segments.
-  Coordinates, widths and attachment references must validate. Deleting a target
-  detaches surviving arrows at resolved endpoints; copying groups remaps copied
-  object IDs and detaches references to omitted targets. Shapes move only their
-  frames; connectors move their actual endpoints. Keep canonical colors and
-  existing text/ink/image payloads intact. Clipboard v4 must retain bounded reads,
-  accept v3/legacy payloads and advertise older types only without newer objects.
-  iPad rejects diagram edits and diagram clipboard pastes explicitly.
+  Validate coordinates, widths, table fractions and each attachment's target
+  type and UUID. IDs can coincide across object types. Use the laid-out page
+  geometry for external anchor positions, including text-box height. Deleting a
+  target detaches surviving arrows at resolved endpoints. Copying groups remaps
+  references to included targets and detaches omitted targets at their visible
+  coordinates. Shapes move by frame, and free connectors move by their endpoints.
+  Keep canonical colors and existing text/ink/image payloads intact.
+- Clipboard reads accept v5, v4, v3 and the original unversioned type under the
+  16 MiB limit. Advertise only v5 for selections requiring format 5 and only v4
+  for other diagram selections. Image selections without diagrams advertise v4
+  and v3. Selections without either also advertise the unversioned type. Keep
+  iPad's explicit rejection of diagram editing and diagram clipboard pastes.
 - Preserve candidate-copy/validate/commit atomicity: rejected edits, imports, moves,
   or oversized duplicates must leave the previous library intact.
 - Enforce the existing 64 MiB archive limit, 50,000-node limit, 128-level hierarchy
@@ -241,7 +309,14 @@ Do not treat callback-level cursor assertions alone as proof of the displayed cu
   the added 1×–2× pressure boost, completed-stroke width floor, portable native-width
   metadata, or pressure-sized cursor. Earlier tablet/PencilKit handling already
   consumed pressure; restoring it is not a guarantee of pressure-free native ink.
-- Every writing-tool selection defaults to Fine. The latest requested nominal
+- Writing-tool selection uses its saved width and optional canonical ink color
+  from `NotebookDefaults`. With factory preferences each tool starts at Fine.
+  Without a color override, Highlighter starts gold, Straight Line starts dark
+  grey, and other drawing tools retain the current ink color. Defaults live in
+  device preferences across workbooks. Creating a page applies the saved paper,
+  compatible template and template line in the same store mutation. Saving
+  defaults must preserve existing pages, editor identity and undo history.
+  The latest requested nominal
   presets are Extra Fine/Fine/Medium/Broad/Extra Broad: Pen uses
   0.3/0.45/0.7/1/1.5 mm; Pencil and Straight Line use 0.3/0.45/0.7/1/1.3 mm;
   Brush (Marker) uses 0.5/0.7/1/1.5/2 mm. Highlighter retains its
@@ -343,8 +418,8 @@ Do not treat callback-level cursor assertions alone as proof of the displayed cu
 - **Sheet changes reopened panes and shifted the workspace.** A SwiftUI `Group`
   forwarded the navigation-probe background into `SheetDetail.id(sheet.id)`.
   Changing sheets therefore dismantled the probe and restored initially open
-  native panes. Keep the probe on the stable outer `ZStack`; preserve a separate
-  sheet-ID boundary for the editor. Removing that ID without resetting its
+  native panes. Keep the probe on the stable detail container that owns the
+  carousel, above the sheet-ID boundary for the editor. Removing that ID without resetting its
   coordinator/undo manager can apply one sheet's undo history to another sheet.
   Clearing selection must not override independently hidden pane preferences.
 - **Correct final geometry did not prove smooth motion.** Calling
@@ -353,8 +428,8 @@ Do not treat callback-level cursor assertions alone as proof of the displayed cu
   Let AppKit own pane animation; restore a saved width only after completion and
   only if it differs. Skip intermediate width capture, avoid repeated policy
   assignments, guard interrupted completions, and respect Reduce Motion.
-  On macOS 26+, disable underlay layout for both middle and detail items together,
-  preserving/restoring their native policies. Detail-only opt-out was insufficient.
+  On macOS 26+, preserve and restore the detail item's native underlay policy.
+  In the historical three-column layout the middle item also needed this policy.
   While native columns animate, a target navigation frame can precede the moving
   detail frame; do not mistake that for overlap and add SwiftUI padding, which
   cancels the rendered movement. Use one owner for column geometry.
@@ -508,7 +583,7 @@ exact-source Native checks,
 signed release checks and independently downloaded public assets passed.
 Run 19 published v1.3.0/build 2021 from `4c9ea4fc`; exact-source Native,
 signed-release and independent public verification passed on 6 November 2026.
-Defaults match published v1.3.0/build 2021. Prior tags and release assets remain
+Defaults target v1.4.0/build 2022. Prior tags and release assets remain
 unchanged, including the failed 1.2.0/1.2.1 reservations.
 Initial v1.2.0 user QA and publication authorization were recorded on
 5 November 2026; they do not establish

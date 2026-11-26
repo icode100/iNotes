@@ -38,9 +38,9 @@ bash scripts/verify-macos.sh
 The build creates:
 
 - `dist/iNotes.app`: native ARM64 app bundle.
-- `dist/iNotes-1.3.0-arm64.dmg`: compressed disk image containing the app, an
+- `dist/iNotes-1.4.0-arm64.dmg`: compressed disk image containing the app, an
   Applications shortcut, and installation instructions.
-- `dist/iNotes-1.3.0-arm64.dmg.sha256`: SHA-256 checksum.
+- `dist/iNotes-1.4.0-arm64.dmg.sha256`: SHA-256 checksum.
 
 Open the disk image and drag iNotes to Applications. The DMG does not install
 background services, kernel extensions, browser runtimes, or privileged helpers.
@@ -48,7 +48,12 @@ The build script validates the property list, architecture, app signature, and D
 before publishing outputs. The verification script mounts it read-only and checks
 the packaged app and Applications shortcut.
 
-Defaults match published **1.3.0 / build 2021**, source
+The v1.4.0 candidate uses production defaults **1.4.0 / build 2022**. The user
+authorized publication after the isolated floating-toolbar QA build 5 on
+26 November 2026. The local QA executable, its separate identity and its test
+results are recorded in [validation](TESTING.md).
+
+The previous published **1.3.0 / build 2021** came from source
 `4c9ea4fc29af53b6bf08ee4e0e2822b30db96e28`, released on 6 November 2026.
 [Branch Native run 47](https://github.com/icode100/iNotes/actions/runs/42252454734)
 and [main Native run 48](https://github.com/icode100/iNotes/actions/runs/42256653087)
@@ -229,12 +234,17 @@ range creates a positioned rich-text box. Rectangular Select and freehand Lasso
 can operate on typed text, handwriting, text boxes, and equations in one atomic
 page transaction and undo snapshot.
 
-The 1.3 candidate also reads format 3 (page images) and introduces format 4 for
+Version 1.3 also reads format 3 (page images) and introduced format 4 for
 editable diagrams. It promotes a library only when newer objects are present
 and never downgrades after removal. Diagram snapshots, attachment references
 and table cells survive archives, copies and mixed page undo. Mac PDF/PNG export
 renders them with other page content; iPad displays them read-only. Older apps
 reject format 4 rather than saving a copy without its diagrams.
+
+Version 1.4 reads formats 1 through 5. Customized table row/column sizing,
+explicit arrowhead styling, automatic attachment sides and arrows attached to
+images, positioned text or equations promote a library to format 5. Removing
+those objects preserves the stored format. Older readers refuse format 5.
 
 Ruled-page alignment uses native text-layout delegates and per-view geometry.
 Body lines and wrapped Unicode follow 28pt ruled rows; larger fonts use whole

@@ -58,7 +58,7 @@ struct RichTextEditor: NSViewRepresentable {
         editor.textColor = .textColor
         editor.backgroundColor = .textBackgroundColor
         editor.usesAdaptiveColorMappingForDarkAppearance = false
-        editor.setAccessibilityLabel("Sheet text")
+        editor.setAccessibilityLabel("Page text")
         editor.setAccessibilityHelp("Rich text editor. Use the Format menu to style selected text.")
         return editor
     }
@@ -391,7 +391,7 @@ struct RichTextEditor: UIViewRepresentable {
         editor.adjustsFontForContentSizeCategory = true
         editor.textContainerInset = UIEdgeInsets(top: 24, left: 24, bottom: 32, right: 24)
         editor.backgroundColor = .systemBackground
-        editor.accessibilityLabel = "Sheet text"
+        editor.accessibilityLabel = "Page text"
         context.coordinator.load(text: text, rtf: rtfData, into: editor)
         return editor
     }

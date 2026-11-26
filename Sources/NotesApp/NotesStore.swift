@@ -4,7 +4,7 @@ import NotesCore
 import AppKit
 #endif
 
-enum LibraryFilter: String, CaseIterable { case all = "All sheets", favorites = "Favorites", trash = "Trash" }
+enum LibraryFilter: String, CaseIterable { case all = "All pages", favorites = "Favorites", trash = "Trash" }
 
 @MainActor
 final class NotesStore: ObservableObject {
@@ -12,6 +12,7 @@ final class NotesStore: ObservableObject {
     @Published var folderID: UUID?
     @Published var sheetID: UUID?
     @Published var filter: LibraryFilter = .all
+    @Published private(set) var notebookDefaults: NotebookDefaults
     @Published var search = ""
     @Published var errorMessage: String?
     @Published var saveStatus = "Opening library…"
@@ -40,6 +41,7 @@ final class NotesStore: ObservableObject {
 
     init(directory: URL? = nil, preferences: UserDefaults = .standard) {
         self.preferences = preferences
+        self.notebookDefaults = NotebookDefaults.load(from: preferences)
         let base: URL
         if let directory {
             base = directory
@@ -90,7 +92,7 @@ final class NotesStore: ObservableObject {
     func sheetNumber(_ id: UUID) -> Int? { library.node(id: id)?.sheetNumber }
     func sheetHeading(_ id: UUID) -> String {
         guard let sheet = library.node(id: id), sheet.kind == .sheet,
-              let parentID = sheet.parentID, let parent = library.node(id: parentID) else { return "Sheets" }
+              let parentID = sheet.parentID, let parent = library.node(id: parentID) else { return "Pages" }
         return parent.title
     }
     var folders: [NoteNode] { library.nodes.filter { $0.kind != .sheet && !$0.isTrashed } }
@@ -141,20 +143,42 @@ final class NotesStore: ObservableObject {
         return false
     }
 
-    func chooseFolder(_ id: UUID?) {
+    func chooseFolder(_ id: UUID?, directPagesOnly: Bool = false) {
         folderID = id
         filter = .all
         search = ""
-        sheetID = visibleSheets.first?.id
+        if let id, directPagesOnly {
+            // A topic with only descendant pages is still empty itself. Keep
+            // its first-page action in that topic; Browse pages retains the
+            // existing subtree query for discovering nested pages.
+            sheetID = library.children(of: id).first { $0.kind == .sheet }?.id
+        } else { sheetID = visibleSheets.first?.id }
     }
 
     func create(_ kind: NoteKind, title: String = "", parent: UUID?) {
         var createdID: UUID?
-        if mutate({ createdID = try $0.create(kind: kind, title: title, parentID: parent) }), let id = createdID {
+        let defaults = notebookDefaults
+        if mutate({ library in
+            let id = try library.create(kind: kind, title: title, parentID: parent)
+            if kind == .sheet, var node = library.node(id: id),
+               node.paperStyle != defaults.paper || node.pageTemplate != defaults.template || node.templateLinePattern != defaults.guideStyle {
+                node.paperStyle = defaults.paper
+                node.pageTemplate = defaults.template
+                node.templateLinePattern = defaults.guideStyle
+                try library.update(node)
+            }
+            createdID = id
+        }), let id = createdID {
             filter = .all; search = ""
             if kind == .sheet { folderID = parent; sheetID = id }
             else { folderID = id; sheetID = nil }
         }
+    }
+
+    func saveNotebookDefaults(_ value: NotebookDefaults) {
+        guard value.isValid, let data = try? JSONEncoder().encode(value) else { return }
+        preferences.set(data, forKey: NotebookDefaults.preferenceKey)
+        notebookDefaults = value
     }
 
     /// Validate page transactions before the editor records undo or changes its view.
@@ -217,6 +241,31 @@ final class NotesStore: ObservableObject {
             chooseFolder(parent)
             if library.node(id: id)?.kind == .sheet { sheetID = id }
         }
+    }
+
+    /// Page navigation is scoped to immediate siblings even when a search or
+    /// parent-folder browser shows sheets from several topics. Resolve positions
+    /// in that parent rather than interpreting a mixed visible-list offset.
+    @discardableResult
+    func reorderSheet(_ id: UUID, before siblingID: UUID?) -> Bool {
+        guard canSave, let moving = library.node(id: id), moving.kind == .sheet,
+              !moving.isTrashed, let parent = moving.parentID else { return false }
+        let pages = library.children(of: parent).filter { $0.kind == .sheet }
+        guard pages.contains(where: { $0.id == id }) else { return false }
+        if siblingID == id { return true }
+        var ordered = pages.filter { $0.id != id }.map(\.id)
+        if let siblingID {
+            guard let index = ordered.firstIndex(of: siblingID) else { return false }
+            ordered.insert(id, at: index)
+        } else { ordered.append(id) }
+        if ordered == pages.map(\.id) { return true }
+        let siblings = library.children(of: parent, includingTrash: true).filter { $0.id != id }
+        let position: Int
+        if let siblingID {
+            guard let index = siblings.firstIndex(where: { $0.id == siblingID }) else { return false }
+            position = index
+        } else { position = siblings.count }
+        return mutate { try $0.move(id: id, to: parent, at: position) }
     }
 
     /// Native list offsets refer to the displayed sheets, while core move positions
@@ -488,7 +537,7 @@ final class NotesStore: ObservableObject {
         let id = try library.create(kind: .sheet, title: "A little space for big ideas", parentID: chapter)
         if var page = library.nodes.first(where: { $0.id == id }) {
             page.strokes = [InkStroke(points: [InkPoint(x: 385, y: 58, pressure: 0.5), InkPoint(x: 397, y: 72, pressure: 0.8), InkPoint(x: 426, y: 39, pressure: 0.6)], colorHex: "#3869B2", width: 3)]
-            page.body = "Welcome to iNotes\n\nA quiet, native home for your notes.\n\n• Organize workbooks into chapters, nested topics, and sheets.\n• Type rich text and write over or alongside it with your pen.\n• Use pen, pencil, marker, highlighter, and Text on the same page.\n• Choose dotted, grid, ruled, or blank paper; your choice saves with the sheet.\n• Find anything with search, or keep a sheet in Favorites.\n• Your changes save automatically on this device.\n\nGoogle Drive\nChoose a folder in Google Drive for desktop from the cloud menu. iNotes saves versioned backups there. Import a backup on another device to bring notes across.\n\nKeyboard\n⌘N — New sheet\n⌘S — Save now\n⌘B / ⌘I — Bold / Italic\n⌘F — Search\n\nMake yourself at home."
+            page.body = "Welcome to iNotes\n\nA quiet, native home for your notes.\n\n• Organize workbooks into chapters, nested topics, and pages.\n• Type rich text and write over or alongside it with your pen.\n• Use pen, pencil, marker, highlighter, and Text on the same page.\n• Choose dotted, grid, ruled, or blank paper; your choice saves with the page.\n• Find anything with search, or keep a page in Favorites.\n• Your changes save automatically on this device.\n\nGoogle Drive\nChoose a folder in Google Drive for desktop from the cloud menu. iNotes saves versioned backups there. Import a backup on another device to bring notes across.\n\nKeyboard\n⌘N — New page\n⌘S — Save now\n⌘B / ⌘I — Bold / Italic\n⌘F — Search\n\nMake yourself at home."
             try library.update(page)
         }
     }

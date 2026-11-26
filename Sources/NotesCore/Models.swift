@@ -3,7 +3,7 @@ import Foundation
 public enum NoteKind: String, Codable, CaseIterable, Sendable {
     case workbook, chapter, topic, sheet
 
-    public var displayName: String { rawValue.capitalized }
+    public var displayName: String { self == .sheet ? "Page" : rawValue.capitalized }
     public var canContainChildren: Bool { self != .sheet }
 }
 
@@ -148,9 +148,11 @@ public struct NoteNode: Identifiable, Codable, Equatable, Sendable {
         self.pageTemplate = pageTemplate; self.templateLinePattern = templateLinePattern
     }
 
+    public var numberedPageTitle: String? { sheetNumber.map { "Page \($0)" } }
+
     public var displayTitle: String {
         if !title.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty { return title }
-        return sheetNumber.map { "Sheet \($0)" } ?? "Untitled sheet"
+        return numberedPageTitle ?? "Untitled page"
     }
 
     private enum CodingKeys: String, CodingKey {
@@ -201,8 +203,8 @@ public enum LibraryError: Error, LocalizedError, Equatable {
     public var errorDescription: String? {
         switch self {
         case .nodeNotFound: "The note no longer exists."
-        case .invalidTitle: "Use up to 256 characters for a sheet title. Workbooks, chapters, and topics need a name."
-        case .invalidParent: "Workbooks belong at the top level, chapters in workbooks, and topics or sheets in chapters or topics."
+        case .invalidTitle: "Use up to 256 characters for a page title. Workbooks, chapters, and topics need a name."
+        case .invalidParent: "Workbooks belong at the top level, chapters in workbooks, and topics or pages in chapters or topics."
         case .cycle: "A topic cannot be moved inside itself or one of its descendants."
         case .duplicateID: "The library contains duplicate identifiers."
         case .unsupportedVersion(let version): "This library uses format version \(version), which this app cannot open."

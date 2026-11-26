@@ -13,6 +13,8 @@ private final class DiagramDiagnosticState: ObservableObject {
     @Published var readOnly = false
     var rejectChanges = false
     var placementCount = 0
+    let toolbarHistory = PageToolbarHistory()
+    let diagramSelectionStyle = MacDiagramSelectionStyle()
 }
 
 private struct DiagramDiagnosticEditor: View {
@@ -35,7 +37,8 @@ private struct DiagramDiagnosticEditor: View {
             onInkChange: { strokes, native in store.update(sheetID) { $0.strokes = strokes; $0.pencilKitData = native } },
             onPageChange: { value in store.update(sheetID) { $0.pageContent = value } },
             onPageValidate: { !state.rejectChanges && store.validatePageChange(sheetID, content: $0) },
-            onObjectPlacement: { state.placementCount += 1; state.tool = .select })
+            onObjectPlacement: { state.placementCount += 1; state.tool = .select }, toolbarHistory: state.toolbarHistory)
+            .observingDiagramSelection(state.diagramSelectionStyle)
             .disabled(state.readOnly)
     }
 }
@@ -215,7 +218,9 @@ enum DiagramDiagnostics {
             && page.activeTool == .select && controller.history.undoActionName == creationUndoAction,
             "The next blank click deselects without creating another shape or an undo action")
         let beforeCreationUndo = historyContext()
-        controller.history.undo()
+        try check(state.toolbarHistory.canUndo && !state.toolbarHistory.canRedo,
+                  "Toolbar enables Undo for the first placed shape")
+        state.toolbarHistory.undo()
         let immediateUndoContent = try saved()
         let immediateCreationUndo = "\(historyContext()) store=[\(payloadContext(immediateUndoContent, comparedTo: initial))] controller=[\(payloadContext(controller.content, comparedTo: initial))]"
         passive()
@@ -226,7 +231,8 @@ enum DiagramDiagnostics {
             "One native creation undo restores every exact page payload (\(creationUndoContext))")
         try check(!controller.history.canUndo && controller.history.canRedo,
             "One native creation gesture has exactly one reversible page transaction (\(creationUndoContext))")
-        controller.history.redo(); passive()
+        try check(!state.toolbarHistory.canUndo && state.toolbarHistory.canRedo, "Toolbar offers Redo after undoing the first shape")
+        state.toolbarHistory.redo(); passive()
         try check(try saved() == inserted && mountedPage(in: host).map(ObjectIdentifier.init) == pageID,
             "Redo restores the same object ID without replacing the native page")
         state.tool = .diagram; passive()
@@ -609,7 +615,112 @@ enum DiagramDiagnostics {
             && state.placementCount == placementsBeforeImage + 1 && controller.history.undoActionName == imageRejectionUndo,
             "Rejected image Paste preserves the chosen tool, existing selection, exact content and undo action")
         state.rejectChanges = false
+        checks += try existingShapeFillChecks(page: page, controller: controller, state: state,
+                                             store: store, sheetID: sheetID, passive: { passive() })
+        let tableResizeChecks = try TableResizeDiagnostics.run(page: page, controller: controller, store: store,
+            sheetID: sheetID, event: event, passive: { passive() })
+        checks += tableResizeChecks
+        let mixedAnchorChecks = try MixedAnchorDiagnostics.run(page: page, controller: controller, store: store,
+            sheetID: sheetID, event: event, tool: { state.tool = $0 }, passive: { passive() })
+        checks += mixedAnchorChecks
+        checks += try ConnectorDiagnostics.run()
+        checks += try QuickAddDiagnostics.run()
         print("Diagram native checks passed: \(checks) (offscreen creation, attached arrows, native resize/reconnect, table Save/undo, mixed clipboard and persistence; no physical input claim)")
+        return checks
+    }
+
+    private static func existingShapeFillChecks(page: UnifiedMacPageView, controller: MacPageSelectionController,
+                                              state: DiagramDiagnosticState, store: NotesStore, sheetID: UUID,
+                                              passive: () -> Void) throws -> Int {
+        var checks = 0
+        func check(_ value: @autoclosure () throws -> Bool, _ message: String) throws {
+            guard try value() else { throw Failure(description: "Existing-shape fill failed: " + message) }
+            checks += 1
+        }
+        func saved() throws -> PageContent {
+            guard let page = store.library.node(id: sheetID)?.pageContent else { throw Failure(description: "Fill fixture page disappeared") }
+            return page
+        }
+        func sameSelection(_ left: MacPageSelection, _ right: MacPageSelection) -> Bool {
+            left.diagrams == right.diagrams && left.images == right.images && left.strokes == right.strokes
+                && left.nativeStrokes == right.nativeStrokes && left.textBoxes == right.textBoxes
+                && left.equations == right.equations && left.textRanges == right.textRanges
+        }
+        state.tool = .select; passive()
+        let pageID = ObjectIdentifier(page), historyID = ObjectIdentifier(controller.history)
+        let creationFill = page.diagramOptions.fill
+        let rectangle = PageDiagram(kind: .rectangle, x: 80, y: 1100, width: 160, height: 100, fill: false, text: "Unfilled")
+        let ellipse = PageDiagram(kind: .ellipse, x: 300, y: 1100, width: 160, height: 100, fill: true, text: "Filled")
+        let table = PageDiagram(kind: .table, x: 500, y: 1100, width: 180, height: 100, rows: 2, columns: 2,
+                                cells: ["A", "B", "नमस्ते", "👋"])
+        let connector = PageDiagram(kind: .connector, fill: false, text: "Leave connector unchanged",
+                                    start: InkPoint(x: 240, y: 1150), end: InkPoint(x: 300, y: 1150))
+        var base = try saved()
+        base.diagrams += [rectangle, ellipse, table, connector]
+        try check(controller.commit(base, action: "Prepare Fill Fixture"), "Existing shapes/tables load onto the actual mixed page")
+        passive(); controller.history.removeAllActions()
+        let eligible = Set([rectangle.id, ellipse.id, table.id])
+        var selected = MacPageSelection(strokes: Set(base.strokes.prefix(1).map(\.id)),
+            textBoxes: Set(base.textBoxes.prefix(1).map(\.id)), equations: Set(base.equations.prefix(1).map(\.id)),
+            images: Set(base.images.prefix(1).map(\.id)), diagrams: eligible.union([connector.id]))
+        if !base.text.isEmpty { selected.textRanges = [NSRange(location: 0, length: 1)] }
+        controller.selection = selected; passive()
+        let style = state.diagramSelectionStyle
+        try check(style.selectedCount == 3 && style.canEdit && style.fill == nil && style.accessibilityValue == "Mixed",
+                  "Selection-aware toolbar reports mixed fill and ignores selected ink/text/images/connector")
+        var filled = base
+        for index in filled.diagrams.indices where eligible.contains(filled.diagrams[index].id) { filled.diagrams[index].fill = true }
+        try check(style.setFill(true), "The same selected-fill action used by the toolbar fills existing shapes")
+        passive()
+        try check(try saved() == filled && controller.content == filled && page.diagramView.diagrams == filled.diagrams
+            && sameSelection(controller.selection, selected) && page.activeTool == .select,
+            "One fill transaction persists/renders only eligible fill flags while preserving all other payloads, tool and selection")
+        try check(controller.history.canUndo && !controller.history.canRedo && controller.history.undoActionName == "Fill Shapes"
+            && style.fill == true && style.accessibilityValue == "Filled",
+            "Selected fill has checked-state feedback and one named undo action")
+        controller.history.undo(); passive()
+        try check(try saved() == base && !controller.history.canUndo && controller.history.canRedo
+            && style.fill == nil && sameSelection(controller.selection, selected),
+            "A single native undo restores exact mixed fill and legacy text/RTF bytes")
+        controller.history.redo(); passive()
+        try check(try saved() == filled && style.fill == true, "Native redo restores the exact filled snapshot")
+        var cleared = filled
+        for index in cleared.diagrams.indices where eligible.contains(cleared.diagrams[index].id) { cleared.diagrams[index].fill = false }
+        try check(style.setFill(false), "No fill removes fill from every eligible selected shape/table")
+        passive()
+        try check(try saved() == cleared && style.fill == false && style.accessibilityValue == "No fill",
+                  "Turning fill off persists the exact expected snapshot")
+        controller.history.undo(); passive()
+        try check(try saved() == filled, "Removing fill is one independently reversible native transaction")
+        controller.history.redo(); passive()
+        let historyName = controller.history.undoActionName
+        let canUndo = controller.history.canUndo, canRedo = controller.history.canRedo
+        try check(!style.setFill(false) && (try saved()) == cleared && controller.history.undoActionName == historyName,
+                  "Choosing the current fill value creates no extra undo transaction")
+        state.readOnly = true; passive()
+        try check(!style.canEdit && !style.setFill(true) && (try saved()) == cleared
+            && sameSelection(controller.selection, selected) && controller.history.canUndo == canUndo
+            && controller.history.canRedo == canRedo && controller.history.undoActionName == historyName,
+            "Read-only fill rejects without altering content, selection or undo history")
+        state.readOnly = false; passive(); state.rejectChanges = true
+        try check(!style.setFill(true) && (try saved()) == cleared && sameSelection(controller.selection, selected)
+            && controller.history.canUndo == canUndo && controller.history.canRedo == canRedo
+            && controller.history.undoActionName == historyName,
+            "Store-rejected fill is atomic and leaves the previous undo action retryable")
+        state.rejectChanges = false
+        controller.selection = MacPageSelection(diagrams: [connector.id]); passive()
+        try check(style.selectedCount == 0 && !style.canEdit && !style.setFill(true) && (try saved()) == cleared,
+                  "A connector-only selection never receives an invisible fill flag")
+        controller.selection = MacPageSelection(); passive()
+        try check(!style.canEdit && !style.setFill(true) && (try saved()) == cleared,
+                  "An empty selection cannot change creation defaults or page content")
+        try check(page.diagramOptions.fill == creationFill && page.activeTool == .select && state.tool == .select
+            && ObjectIdentifier(page) == pageID && ObjectIdentifier(controller.history) == historyID,
+            "Editing existing fill preserves creation style, chosen tool, page instance and undo manager")
+        try check(store.flush(), "Changed fill saves to the disposable library")
+        let reopened = try LibraryArchive.decode(LibraryArchive.read(from: store.libraryURL))
+        try check(reopened.node(id: sheetID)?.pageContent == cleared && reopened.formatVersion == 4,
+                  "Save/reopen retains existing-shape fill without a schema change or unrelated payload loss")
         return checks
     }
 

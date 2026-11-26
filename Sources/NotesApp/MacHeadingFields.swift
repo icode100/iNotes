@@ -101,7 +101,7 @@ final class MacHeadingNativeTextField: NSTextField {
         allowsEditingTextAttributes = false
         setAccessibilityLabel(role == .title ? "Page title" : "Tags")
         setAccessibilityHelp(role == .title
-            ? "Optional. Leave blank to identify the sheet by its number."
+            ? "Optional. Leave blank to identify the page by its number."
             : "Separate tags with commas.")
     }
 

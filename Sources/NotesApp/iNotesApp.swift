@@ -49,6 +49,19 @@ struct iNotesApp: App {
                 print(try StoreDiagnostics.runHierarchyChecks())
                 print(try BackupDiagnostics.run())
                 print("iNotes self-check passed: hierarchy, atomic save, reload, archive round-trip; \(ProcessInfo.processInfo.operatingSystemVersionString)")
+                if CommandLine.arguments.contains("--editor-test") || CommandLine.arguments.contains("--export-test") {
+                    Task { @MainActor in
+                        do {
+                            print(try await NotebookExportDiagnostics.run())
+                            exit(0)
+                        } catch {
+                            fputs("Notebook export checks failed: \(error)\n", stderr)
+                            exit(1)
+                        }
+                    }
+                    RunLoop.main.run()
+                    throw CocoaError(.userCancelled)
+                }
                 exit(0)
             } catch { fputs("iNotes self-check failed: \(error)\n", stderr); exit(1) }
         }
@@ -82,8 +95,13 @@ struct iNotesApp: App {
         .defaultSize(width: 1220, height: 800)
         .windowStyle(.titleBar)
         .windowToolbarStyle(.unified)
-        .commands { NotesCommands(store: store, updater: updater) }
         #endif
+        .commands {
+            #if os(macOS)
+            NotesCommands(store: store, updater: updater)
+            #endif
+            FloatingPageCommands()
+        }
         .onChange(of: phase) { _, value in
             if value == .background { _ = store.prepareForQuit() }
             else if value != .active { _ = store.flush() }

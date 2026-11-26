@@ -11,7 +11,11 @@ import UIKit
 @MainActor
 final class EditorPresentation: ObservableObject {
     @Published var fullPage = false
+    @Published var nativeFullScreen = false
+    var isFullScreenWorkspace: Bool { fullPage || nativeFullScreen }
     @Published var toolsVisible = true
+    // Retain the window-local setting and shortcut while its UI moves from a
+    // native sheet column to the bottom page carousel.
     @Published var sheetsVisible = true
     @Published var headingVisible = true
 
@@ -26,14 +30,115 @@ final class EditorPresentation: ObservableObject {
     }
 }
 
+enum FullScreenToolbarMode: String, CaseIterable {
+    case docked, floating, hover
+
+    var title: String {
+        switch self {
+        case .docked: return "Docked"
+        case .floating: return "Floating · always visible"
+        case .hover: return "Floating · show on hover"
+        }
+    }
+}
+
+struct FullScreenToolbarModeMenu: View {
+    @AppStorage("fullScreenToolbarMode") private var mode = FullScreenToolbarMode.docked
+    var onSelection: () -> Void = {}
+
+    var body: some View {
+        Menu {
+            ForEach(FullScreenToolbarMode.allCases, id: \.self) { choice in
+                CheckedMenuButton(title: choice.title, isSelected: mode == choice) {
+                    mode = choice
+                    onSelection()
+                }
+            }
+        } label: { Label("Full-screen toolbar", systemImage: "circle.grid.3x3.circle") }
+        .help("Choose a toolbar for Full Page or full screen")
+        .accessibilityValue(mode.title)
+    }
+}
+
+private struct FloatingPresentationKey: FocusedValueKey {
+    typealias Value = EditorPresentation
+}
+
+extension FocusedValues {
+    var floatingPagePresentation: EditorPresentation? {
+        get { self[FloatingPresentationKey.self] }
+        set { self[FloatingPresentationKey.self] = newValue }
+    }
+}
+
+/// Keep the existing workspace shortcuts available while their docked buttons
+/// are unmounted, including when the floating wheel is closed.
+struct FloatingPageCommands: Commands {
+    @FocusedValue(\.floatingPagePresentation) private var presentation
+    var body: some Commands {
+        CommandGroup(after: .toolbar) {
+            if let presentation {
+                Button("Toggle Page Navigation", action: presentation.toggleSheets)
+                    .keyboardShortcut("2", modifiers: [.command, .shift])
+                Button("Toggle Page Heading", action: presentation.toggleHeading)
+                    .keyboardShortcut("h", modifiers: [.command, .shift])
+                Button("Toggle Full Page") { presentation.fullPage.toggle() }
+                    .keyboardShortcut("f", modifiers: [.command, .shift])
+                Button("Hide Drawing Toolbar") { presentation.toolsVisible = false }
+                    .keyboardShortcut("t", modifiers: [.command, .shift])
+            }
+        }
+    }
+}
+
 #if os(macOS)
-/// NavigationSplitView's detail-only visibility retains its content column on
-/// macOS. Collapse the existing native navigation items without replacing the
+/// Observe only the notebook's own window. Moving a window into a native
+/// fullscreen Space is independent of the app's Full Page setting.
+struct FullScreenWindowObserver: NSViewRepresentable {
+    let presentation: EditorPresentation
+
+    func makeNSView(context: Context) -> Observer {
+        let view = Observer()
+        view.presentation = presentation
+        view.setAccessibilityElement(false)
+        return view
+    }
+    func updateNSView(_ view: Observer, context: Context) {}
+
+    final class Observer: NSView {
+        weak var presentation: EditorPresentation?
+        override func hitTest(_ point: NSPoint) -> NSView? { nil }
+
+        override func viewDidMoveToWindow() {
+            super.viewDidMoveToWindow()
+            let center = NotificationCenter.default
+            center.removeObserver(self, name: NSWindow.didEnterFullScreenNotification, object: nil)
+            center.removeObserver(self, name: NSWindow.didExitFullScreenNotification, object: nil)
+            guard let window else { return }
+            center.addObserver(self, selector: #selector(fullScreenChanged(_:)), name: NSWindow.didEnterFullScreenNotification, object: window)
+            center.addObserver(self, selector: #selector(fullScreenChanged(_:)), name: NSWindow.didExitFullScreenNotification, object: window)
+            DispatchQueue.main.async { [weak self, weak window] in
+                guard let self, let window, self.window === window else { return }
+                setFullScreen(window.styleMask.contains(.fullScreen))
+            }
+        }
+
+        @objc private func fullScreenChanged(_ note: Notification) {
+            guard let source = note.object as? NSWindow, source === window else { return }
+            setFullScreen(note.name == NSWindow.didEnterFullScreenNotification)
+        }
+
+        private func setFullScreen(_ value: Bool) {
+            if presentation?.nativeFullScreen != value { presentation?.nativeFullScreen = value }
+        }
+    }
+}
+
+/// Full page collapses the existing notebook sidebar without replacing the
 /// detail controller, reparenting the editor, or taking over the split delegate.
 struct WorkspaceNavigationChrome: NSViewRepresentable {
     var fullPage: Bool
     var sheetsVisible: Bool
-    var onSheetsVisibilityChange: (Bool) -> Void
     var onLeadingInsetChange: (CGFloat) -> Void
 
     func makeNSView(context: Context) -> WorkspaceNavigationProbe {
@@ -41,7 +146,6 @@ struct WorkspaceNavigationChrome: NSViewRepresentable {
         view.setAccessibilityElement(false)
         view.fullPage = fullPage
         view.sheetsVisible = sheetsVisible
-        view.onSheetsVisibilityChange = onSheetsVisibilityChange
         view.onLeadingInsetChange = onLeadingInsetChange
         return view
     }
@@ -49,7 +153,6 @@ struct WorkspaceNavigationChrome: NSViewRepresentable {
     func updateNSView(_ view: WorkspaceNavigationProbe, context: Context) {
         view.fullPage = fullPage
         view.sheetsVisible = sheetsVisible
-        view.onSheetsVisibilityChange = onSheetsVisibilityChange
         view.onLeadingInsetChange = onLeadingInsetChange
         view.scheduleSynchronization()
     }
@@ -63,17 +166,13 @@ struct WorkspaceNavigationChrome: NSViewRepresentable {
 final class WorkspaceNavigationProbe: NSView {
     var fullPage = false
     var sheetsVisible = true
-    var onSheetsVisibilityChange: ((Bool) -> Void)?
     var onLeadingInsetChange: ((CGFloat) -> Void)?
     private var leadingInset: CGFloat?
-    private var expandedSheetsWidth: CGFloat?
-    private var restoreExpandedSheetsWidth = false
     private var applying = false
     private var transitionInProgress = false
     private var transitionGeneration = 0
     private var wasFullPage = false
     private var previousCollapsed: [Bool] = []
-    private var collapseObservation: NSKeyValueObservation?
     private var sidebarObservations: [NSKeyValueObservation] = []
     private var splitResizeObserver: NSObjectProtocol?
     private var geometryScheduled = false
@@ -91,8 +190,6 @@ final class WorkspaceNavigationProbe: NSView {
     private var diagnosticLastTransitionTargets: [String] = []
     private var diagnosticLastCompletion = "none"
     private var diagnosticCompletedGeneration: Int?
-    private var diagnosticVisibilityPublicationSequence = 0
-    private var diagnosticPendingVisibilityPublications: Set<Int> = []
 
     /// The native fixture enables capture explicitly. Production navigation does
     /// not allocate trace messages, track publication IDs, or emit logs.
@@ -139,7 +236,6 @@ final class WorkspaceNavigationProbe: NSView {
         let savedControllerID: ObjectIdentifier?
         let generation: Int
         let completedGeneration: Int?
-        let pendingVisibilityPublicationIDs: [Int]
         let fullPage: Bool
         let sheetsVisible: Bool
         let wasFullPage: Bool
@@ -147,7 +243,6 @@ final class WorkspaceNavigationProbe: NSView {
         let scheduled: Bool
         let geometryScheduled: Bool
         let transitionInProgress: Bool
-        let restoreExpandedSheetsWidth: Bool
         let dismantled: Bool
         let attached: Bool
         let owner: RestorationDiagnosticSnapshot?
@@ -161,11 +256,10 @@ final class WorkspaceNavigationProbe: NSView {
                   fullPage == expectedFullPage, wasFullPage == expectedFullPage,
                   sheetsVisible == expectedSheetsVisible,
                   !applying, !scheduled, !geometryScheduled, !transitionInProgress,
-                  pendingVisibilityPublicationIDs.isEmpty,
                   let owner, owner.controllerID == controllerID, owner.ownsController,
                   owner.pending == 0, !owner.detached, !owner.restoring,
                   !owner.hasAfterRestoration, waitingOwner == nil else { return false }
-            return expectedFullPage || !expectedSheetsVisible || !restoreExpandedSheetsWidth
+            return true
         }
     }
 
@@ -182,11 +276,9 @@ final class WorkspaceNavigationProbe: NSView {
             savedControllerID: savedController.map(ObjectIdentifier.init),
             generation: transitionGeneration,
             completedGeneration: diagnosticCompletedGeneration,
-            pendingVisibilityPublicationIDs: diagnosticPendingVisibilityPublications.sorted(),
             fullPage: fullPage, sheetsVisible: sheetsVisible, wasFullPage: wasFullPage,
             applying: applying, scheduled: scheduled, geometryScheduled: geometryScheduled,
             transitionInProgress: transitionInProgress,
-            restoreExpandedSheetsWidth: restoreExpandedSheetsWidth,
             dismantled: dismantled, attached: window != nil && superview != nil,
             owner: restoration?.diagnosticsSnapshot(),
             waitingOwner: currentOwner !== restoration ? currentOwner?.diagnosticsSnapshot() : nil)
@@ -197,7 +289,7 @@ final class WorkspaceNavigationProbe: NSView {
     func diagnosticsState() -> String {
         "fullPage=\(fullPage) sheetsVisible=\(sheetsVisible) wasFullPage=\(wasFullPage) previousCollapsed=\(previousCollapsed)"
             + " applying=\(applying) transitionInProgress=\(transitionInProgress) transitionGeneration=\(transitionGeneration) scheduled=\(scheduled) geometryScheduled=\(geometryScheduled) dismantled=\(dismantled)"
-            + " leadingInset=\(String(describing: leadingInset)) expandedSheetsWidth=\(String(describing: expandedSheetsWidth)) restoreExpandedSheetsWidth=\(restoreExpandedSheetsWidth)"
+            + " leadingInset=\(String(describing: leadingInset))"
             + " savedCollapsed=\(savedItems.map(\.collapsed)) savedController=\(savedController.map { String(describing: ObjectIdentifier($0)) } ?? "nil") restoration={\(restoration?.diagnosticsState() ?? "nil")}"
             + " lastTransitionEntry={\(diagnosticLastTransitionEntry)} lastTransitionTargets=\(diagnosticLastTransitionTargets) lastCompletion={\(diagnosticLastCompletion)}"
     }
@@ -430,7 +522,7 @@ final class WorkspaceNavigationProbe: NSView {
         guard window != nil else { restoreNavigation(); return }
         guard let controller = enclosingNavigationController() else { return }
         let navigationItems = Array(controller.splitViewItems.dropLast())
-        guard navigationItems.count >= 2 else { return }
+        guard !navigationItems.isEmpty else { return }
         if let previous = Self.restorationOwners.object(forKey: controller), previous !== restoration,
            previous.waitForRestoration({ [weak self] in self?.scheduleSynchronization() }) {
             Self.recordDiagnosticEvent("probe=\(ObjectIdentifier(self)) waiting for controller=\(ObjectIdentifier(controller)) owner={\(previous.diagnosticsState())}")
@@ -450,41 +542,9 @@ final class WorkspaceNavigationProbe: NSView {
             ) { [weak self] _ in
                 MainActor.assumeIsolated { self?.scheduleGeometryRefresh() }
             }
-            sidebarObservations = navigationItems.dropLast().map { item in
+            sidebarObservations = navigationItems.map { item in
                 item.observe(\.isCollapsed, options: [.new]) { [weak self] _, _ in
                     MainActor.assumeIsolated { self?.scheduleGeometryRefresh() }
-                }
-            }
-            // Observe native divider collapses as well as toolbar toggles. The
-            // model must follow a drag, otherwise the next SwiftUI update would
-            // reopen the pane. AppKit split-item changes occur on the main thread.
-            collapseObservation = navigationItems.last?.observe(\.isCollapsed, options: [.new]) { [weak self] item, _ in
-                MainActor.assumeIsolated {
-                    guard let self, !self.applying, !self.transitionInProgress,
-                          !self.fullPage, !self.dismantled else { return }
-                    let visible = !item.isCollapsed
-                    self.sheetsVisible = visible
-                    if visible { self.restoreExpandedSheetsWidth = true }
-                    let diagnosticPublicationID: Int?
-                    if Self.diagnosticCaptureDepth > 0 {
-                        self.diagnosticVisibilityPublicationSequence += 1
-                        diagnosticPublicationID = self.diagnosticVisibilityPublicationSequence
-                        self.diagnosticPendingVisibilityPublications.insert(self.diagnosticVisibilityPublicationSequence)
-                        Self.recordDiagnosticEvent("visibility publication queued probe=\(ObjectIdentifier(self)) id=\(self.diagnosticVisibilityPublicationSequence) visible=\(visible)")
-                    } else {
-                        diagnosticPublicationID = nil
-                    }
-                    DispatchQueue.main.async { [weak self] in
-                        defer {
-                            if let diagnosticPublicationID, let self {
-                                self.diagnosticPendingVisibilityPublications.remove(diagnosticPublicationID)
-                                Self.recordDiagnosticEvent("visibility publication finished probe=\(ObjectIdentifier(self)) id=\(diagnosticPublicationID)")
-                            }
-                        }
-                        guard let self, !self.dismantled, !self.fullPage,
-                              self.sheetsVisible == visible else { return }
-                        self.onSheetsVisibilityChange?(visible)
-                    }
                 }
             }
         }
@@ -492,27 +552,15 @@ final class WorkspaceNavigationProbe: NSView {
         defer { applying = false }
         // Let the native split view own column geometry and its animation.
         // Underlay frames require delayed SwiftUI padding updates which can
-        // visibly lag behind a sidebar transition when the middle pane is shut.
+        // visibly lag behind a sidebar transition.
         if #available(macOS 26.0, *) {
             for item in controller.splitViewItems.dropFirst() where item.automaticallyAdjustsSafeAreaInsets {
                 item.automaticallyAdjustsSafeAreaInsets = false
             }
         }
-        guard let sheets = navigationItems.last else { return }
-        if !sheets.canCollapse { sheets.canCollapse = true }
-        if sheets.canCollapseFromWindowResize { sheets.canCollapseFromWindowResize = false }
-        if sheets.minimumThickness != 120 { sheets.minimumThickness = 120 }
-        if sheets.maximumThickness != 480 { sheets.maximumThickness = 480 }
-        if sheets.collapseBehavior != .preferResizingSiblingsWithFixedSplitView {
-            sheets.collapseBehavior = .preferResizingSiblingsWithFixedSplitView
-        }
-        // Hosting bounds can include the sidebar underlay on newer macOS.
-        // Remember the visible list width, not that larger backing-view width.
-        if !sheets.isCollapsed && !wasFullPage && !restoreExpandedSheetsWidth && !transitionInProgress {
-            let rect = sheets.viewController.view.convert(sheets.viewController.view.bounds, to: controller.splitView)
-            expandedSheetsWidth = max(120, min(480, rect.maxX - sheetsLeadingEdge(in: controller)))
-        }
-        let changesPresentation = wasFullPage != fullPage || (!fullPage && sheets.isCollapsed == sheetsVisible)
+        // Page navigation is SwiftUI chrome below the editor; its visibility
+        // must never collapse the sidebar or schedule a native pane animation.
+        let changesPresentation = wasFullPage != fullPage
         let wasTransitioning = transitionInProgress
         if changesPresentation {
             transitionGeneration += 1
@@ -541,7 +589,7 @@ final class WorkspaceNavigationProbe: NSView {
                     guard let self, !self.dismantled, self.transitionGeneration == generation else { return }
                     self.transitionInProgress = false
                     // Retain this snapshot only through an interrupted exit.
-                    // A later sheets animation must not reuse an older session.
+                    // A later full-page session must not reuse an older state.
                     if !self.fullPage { self.previousCollapsed = [] }
                     self.scheduleSynchronization()
                 }
@@ -577,44 +625,17 @@ final class WorkspaceNavigationProbe: NSView {
             }
         } else {
             if wasFullPage {
-                // Restore the independently hidden sidebar, while the sheets
-                // pane follows its own state (including a restore button).
-                for (index, state) in savedItems.dropLast().enumerated() {
+                // Restore the independently hidden notebook sidebar.
+                for (index, state) in savedItems.enumerated() {
                     state.restorePolicy()
                     if previousCollapsed.indices.contains(index) {
                         collapse(state.item, previousCollapsed[index])
                     }
                 }
             }
-            if sheets.isCollapsed == sheetsVisible {
-                collapse(sheets, !sheetsVisible)
-                if sheetsVisible { restoreExpandedSheetsWidth = true }
-            }
-            // Do not force the destination layout while AppKit is expanding
-            // the item: that jumps to its final frame and cancels smooth motion.
-            // Check any remaining width correction only after native completion.
-            if sheetsVisible && restoreExpandedSheetsWidth && !transitionInProgress, let expandedSheetsWidth {
-                controller.splitView.layoutSubtreeIfNeeded()
-                let targetEdge = sheetsLeadingEdge(in: controller) + expandedSheetsWidth
-                let currentEdge = sheets.viewController.view.convert(sheets.viewController.view.bounds,
-                                                                      to: controller.splitView).maxX
-                // Native expansion normally retains the width. Reassigning an
-                // unchanged divider target can restart its in-flight animation.
-                if abs(currentEdge - targetEdge) > 1 {
-                    controller.splitView.setPosition(targetEdge, ofDividerAt: controller.splitViewItems.count - 2)
-                }
-                restoreExpandedSheetsWidth = false
-            }
         }
         wasFullPage = fullPage
         updateLeadingInset(in: controller)
-    }
-
-    private func sheetsLeadingEdge(in controller: NSSplitViewController) -> CGFloat {
-        let split = controller.splitView
-        return controller.splitViewItems.dropLast(2).filter { !$0.isCollapsed }
-            .map { $0.viewController.view.convert($0.viewController.view.bounds, to: split).maxX + split.dividerThickness }
-            .max() ?? split.bounds.minX
     }
 
     private func updateLeadingInset(in controller: NSSplitViewController) {
@@ -626,9 +647,8 @@ final class WorkspaceNavigationProbe: NSView {
             .filter { !$0.isCollapsed }
             .map { $0.viewController.view.convert($0.viewController.view.bounds, to: split).maxX }
             .max() ?? detailRect.minX
-        // Newer macOS can extend a column underneath the sidebar. When the
-        // middle column is collapsed its successor receives no leading safe
-        // area. Supply only the measured overlap; never move/recreate the editor.
+        // Supply only a measured sidebar overlap on older layouts; never move
+        // or recreate the page editor to compensate for navigation geometry.
         var nativeColumns = false
         if #available(macOS 26.0, *) {
             nativeColumns = controller.splitViewItems.dropFirst().allSatisfy { !$0.automaticallyAdjustsSafeAreaInsets }
@@ -662,15 +682,12 @@ final class WorkspaceNavigationProbe: NSView {
         Self.recordDiagnosticEvent("restoreNavigation probe=\(ObjectIdentifier(self)) generation=\(transitionGeneration) wasFullPage=\(wasFullPage) previousCollapsed=\(previousCollapsed) savedController=\(savedController.map { String(describing: ObjectIdentifier($0)) } ?? "nil")")
         transitionGeneration += 1
         transitionInProgress = false
-        collapseObservation = nil
         sidebarObservations = []
         if let splitResizeObserver { NotificationCenter.default.removeObserver(splitResizeObserver) }
         splitResizeObserver = nil
         leadingInset = nil
         wasFullPage = false
         previousCollapsed = []
-        expandedSheetsWidth = nil
-        restoreExpandedSheetsWidth = false
         guard !savedItems.isEmpty else { return }
         savedItems = []
         savedController = nil
@@ -860,6 +877,7 @@ struct CheckedMenuButton: View {
 }
 
 struct AppearanceMenu: View {
+    @Environment(\.openNotebookDefaults) private var openNotebookDefaults
     @AppStorage("appearance") private var appearance = "system"
     @AppStorage("pageColorScheme") private var pageColorScheme = "system"
     @AppStorage("workspaceTheme") private var workspaceTheme = "classic"
@@ -870,7 +888,7 @@ struct AppearanceMenu: View {
                 CheckedMenuButton(title: "Light", isSelected: appearance == "light") { appearance = "light" }
                 CheckedMenuButton(title: "Dark", isSelected: appearance == "dark") { appearance = "dark" }
             }
-            Menu("Page colors · all sheets") {
+            Menu("Page colors · all pages") {
                 ForEach(PageColorScheme.allCases, id: \.self) { scheme in
                     CheckedMenuButton(title: scheme.displayName,
                                       isSelected: (PageColorScheme(rawValue: pageColorScheme) ?? .system) == scheme) {
@@ -883,7 +901,10 @@ struct AppearanceMenu: View {
                     CheckedMenuButton(title: theme.title, isSelected: WorkspaceTheme(preferenceValue: workspaceTheme) == theme) { workspaceTheme = theme.rawValue }
                 }
             }
+            Divider()
+            FullScreenToolbarModeMenu()
+            Button("Notebook defaults…", action: openNotebookDefaults)
         } label: { Label("Appearance", systemImage: "paintpalette") }
-        .help("Application scenery and page colors for all sheets")
+        .help("Application scenery and page colors for all pages")
     }
 }

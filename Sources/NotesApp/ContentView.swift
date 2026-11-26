@@ -39,6 +39,9 @@ struct ContentView: View {
     @EnvironmentObject private var store: NotesStore
     @StateObject private var presentation: EditorPresentation
     @Environment(\.colorScheme) private var colorScheme
+    #if os(macOS)
+    @Environment(\.workspaceDiagnosticControls) private var diagnosticControls
+    #endif
     @AppStorage("workspaceTheme") private var workspaceTheme = "classic"
     @ViewState private var nameRequest: NameRequest?
     @ViewState private var showImporter = false
@@ -47,12 +50,13 @@ struct ContentView: View {
     @ViewState private var showExporter = false
     @ViewState private var exportDocument = BackupDocument()
     @ViewState private var showSettings = false
+    @ViewState private var showNotebookDefaults = false
     @ViewState private var showRecovery = false
     @ViewState private var showEmptyTrash = false
     @ViewState private var columnVisibility: NavigationSplitViewVisibility = .all
     @ViewState private var previousColumns: NavigationSplitViewVisibility = .all
-    @ViewState private var previousSheetsColumns: NavigationSplitViewVisibility = .all
     @ViewState private var navigationLeadingInset: CGFloat = 0
+    @ViewState private var showPageBrowser = false
     @FocusState private var searchFocused: Bool
 
     @MainActor
@@ -63,50 +67,55 @@ struct ContentView: View {
     var body: some View {
         NavigationSplitView(columnVisibility: $columnVisibility) {
             sidebar.navigationSplitViewColumnWidth(min: 190, ideal: 220, max: 310)
-        } content: {
-            sheetList.navigationSplitViewColumnWidth(min: 120, ideal: 260, max: 480)
         } detail: {
             // A real, stable container owns navigation chrome. Group forwards
             // its modifiers into the sheet-keyed child and would dismantle the
             // native split observer every time selection changes.
-            ZStack {
-                if let sheet = store.selectedSheet {
-                    SheetDetail(sheetID: sheet.id).id(sheet.id)
-                } else {
-                    ContentUnavailableView {
-                        Label("Room for a new idea", systemImage: "square.and.pencil")
-                    } description: {
-                        Text("Choose a sheet, or make a new one in a chapter or topic.")
-                    } actions: {
-                        Button("New sheet", action: newSheet).buttonStyle(.borderedProminent)
+            VStack(spacing: 0) {
+                ZStack {
+                    if let sheet = store.selectedSheet {
+                        SheetDetail(sheetID: sheet.id).id(sheet.id)
+                    } else {
+                        ContentUnavailableView {
+                            Label(emptyPageTitle, systemImage: store.filter == .trash ? "trash" : "square.and.pencil")
+                        } description: {
+                            Text(emptyPageDescription)
+                        }
                     }
+                }
+                .frame(maxWidth: .infinity, maxHeight: .infinity)
+                if !presentation.fullPage && (presentation.sheetsVisible || store.selectedSheet == nil) {
+                    pageCarousel
                 }
             }
             #if os(macOS)
             .padding(.leading, navigationLeadingInset)
             .background {
                 WorkspaceNavigationChrome(fullPage: presentation.fullPage, sheetsVisible: presentation.sheetsVisible,
-                    onSheetsVisibilityChange: { presentation.sheetsVisible = $0 },
                     onLeadingInsetChange: { navigationLeadingInset = $0 })
+            }
+            .background {
+                FullScreenWindowObserver(presentation: presentation)
+                    .frame(width: 0, height: 0).allowsHitTesting(false)
             }
             #endif
         }
         .environmentObject(presentation)
+        #if os(macOS)
+        .modifier(NotebookExportPresenter())
+        #endif
         .tint(WorkspaceTheme(preferenceValue: workspaceTheme).accent(isDark: colorScheme == .dark))
         #if !os(macOS)
         .onChange(of: presentation.fullPage) { _, fullPage in
             if fullPage { previousColumns = columnVisibility; columnVisibility = .detailOnly }
-            else { columnVisibility = presentation.sheetsVisible ? previousColumns : .detailOnly }
-        }
-        .onChange(of: presentation.sheetsVisible) { _, visible in
-            guard !presentation.fullPage else { return }
-            if visible { columnVisibility = previousSheetsColumns == .detailOnly ? .all : previousSheetsColumns }
-            else { previousSheetsColumns = columnVisibility; columnVisibility = .detailOnly }
+            else { columnVisibility = previousColumns }
         }
         #endif
         .onChange(of: store.selectedSheet?.id) { _, selectedID in
             if selectedID == nil { presentation.fullPage = false }
         }
+        .onChange(of: store.search) { _, _ in reconcilePageSelection() }
+        .onChange(of: store.visibleSheets.map(\.id)) { _, _ in reconcilePageSelection() }
         #if os(macOS)
         .toolbar(presentation.fullPage ? .hidden : .visible, for: .windowToolbar)
         #else
@@ -115,18 +124,18 @@ struct ContentView: View {
         .toolbar {
             ToolbarItemGroup(placement: .primaryAction) {
                 Button { presentation.toggleSheets() } label: {
-                    Label(presentation.sheetsVisible ? "Hide sheets pane" : "Show sheets pane", systemImage: "rectangle.split.3x1")
-                }.help(presentation.sheetsVisible ? "Hide sheets pane" : "Show sheets pane")
+                    Label(presentation.sheetsVisible ? "Hide page navigation" : "Show page navigation", systemImage: "ellipsis.rectangle")
+                }.help(presentation.sheetsVisible ? "Hide page navigation" : "Show page navigation")
                 AppearanceMenu()
                 Menu {
-                    Button("New sheet", systemImage: "doc.badge.plus", action: newSheet)
+                    Button("New workbook", systemImage: "books.vertical") { nameRequest = NameRequest(kind: .workbook) }
                     if let folder = store.folders.first(where: { $0.id == store.folderID }) {
                         Button(folder.kind == .workbook ? "New chapter" : "New topic", systemImage: "folder.badge.plus") {
                             nameRequest = NameRequest(kind: folder.kind == .workbook ? .chapter : .topic, parent: folder.id)
                         }
                     }
-                } label: { Label("Create", systemImage: "plus") }
-                .help("Create a sheet or notebook folder")
+                } label: { Label("Create folder", systemImage: "folder.badge.plus") }
+                .help("Create a workbook, chapter or topic")
                 Menu {
                     ForEach([BackupDestination.iCloudDrive, .googleDrive]) { destination in
                         Menu {
@@ -159,6 +168,8 @@ struct ContentView: View {
             }
         }
         .sheet(isPresented: $showSettings) { StorageInfoView() }
+        .sheet(isPresented: $showNotebookDefaults) { NotebookDefaultsView(store: store) }
+        .environment(\.openNotebookDefaults, { showNotebookDefaults = true })
         .sheet(item: $backupCleanupDestination) { destination in
             BackupCleanupView(destination: destination)
         }
@@ -167,7 +178,7 @@ struct ContentView: View {
         } message: { Text("The damaged library will be preserved in a separate file before the previous version is restored.") }
         .confirmationDialog("Permanently empty Trash?", isPresented: $showEmptyTrash, titleVisibility: .visible) {
             Button("Empty Trash", role: .destructive) { store.emptyTrash() }
-        } message: { Text("Deleted folders, sheets, and their attachments will be removed from this library. Keep an exported backup if you might need them.") }
+        } message: { Text("Deleted folders, pages, and their attachments will be removed from this library. Keep an exported backup if you might need them.") }
         .alert("iNotes needs your attention", isPresented: Binding(get: { store.errorMessage != nil }, set: { if !$0 { store.errorMessage = nil } })) {
             Button("OK") { store.errorMessage = nil }
         } message: { Text(store.errorMessage ?? "") }
@@ -193,7 +204,8 @@ struct ContentView: View {
         .onReceive(NotificationCenter.default.publisher(for: .newWorkbook)) { _ in nameRequest = NameRequest(kind: .workbook) }
         .onReceive(NotificationCenter.default.publisher(for: .focusSearch)) { _ in
             presentation.fullPage = false
-            presentation.sheetsVisible = true
+            columnVisibility = .all
+            showPageBrowser = false
             searchFocused = true
         }
     }
@@ -204,6 +216,7 @@ struct ContentView: View {
 
     private var sidebar: some View {
         VStack(spacing: 0) {
+            searchField(focused: true)
             List {
                 Section {
                     ForEach(LibraryFilter.allCases, id: \.self) { filter in
@@ -217,6 +230,31 @@ struct ContentView: View {
                                 if store.folderID == nil && store.filter == filter { Circle().fill(Color.accentColor).frame(width: 6, height: 6) }
                             }.contentShape(Rectangle())
                         }.buttonStyle(.plain).padding(.vertical, 4)
+                    }
+                }
+                if !store.search.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty || store.filter != .all {
+                    Section {
+                        ForEach(store.visibleSheets) { sheet in
+                            Button {
+                                store.sheetID = sheet.id
+                                showPageBrowser = false
+                            } label: {
+                                VStack(alignment: .leading, spacing: 3) {
+                                    HStack {
+                                        Text(sheet.displayTitle).lineLimit(2)
+                                        Spacer(minLength: 4)
+                                        if store.sheetID == sheet.id { Image(systemName: "checkmark").font(.caption.weight(.semibold)) }
+                                    }
+                                    Text(store.breadcrumb(sheet.parentID)).font(.caption2).foregroundStyle(sidebarSecondary).lineLimit(2)
+                                }.contentShape(Rectangle())
+                            }.buttonStyle(.plain).contextMenu { pageActions(sheet) }
+                        }
+                        if store.visibleSheets.isEmpty {
+                            Text(store.filter == .trash ? "Trash is empty" : "No matching pages")
+                                .font(.caption).foregroundStyle(sidebarSecondary)
+                        }
+                    } header: {
+                        Text(store.search.isEmpty ? store.filter.rawValue : "SEARCH RESULTS").foregroundStyle(sidebarSecondary)
                     }
                 }
                 Section {
@@ -272,19 +310,226 @@ struct ContentView: View {
     }
 
     private func folderRow(_ node: NoteNode) -> some View {
-        FolderTreeRow(node: node, choose: { store.chooseFolder($0) }, request: { nameRequest = $0 })
+        FolderTreeRow(node: node, choose: { store.chooseFolder($0, directPagesOnly: true) }, request: { nameRequest = $0 })
+    }
+
+    private func searchField(focused: Bool) -> some View {
+        HStack {
+            Image(systemName: "magnifyingglass").foregroundStyle(.secondary)
+            if focused {
+                TextField("Search all notes", text: $store.search).textFieldStyle(.plain).focused($searchFocused)
+                    .accessibilityLabel("Search all notes")
+            } else {
+                TextField("Search all notes", text: $store.search).textFieldStyle(.plain)
+                    .accessibilityLabel("Search all notes")
+            }
+            if !store.search.isEmpty {
+                Button { store.search = "" } label: { Image(systemName: "xmark.circle.fill") }
+                    .buttonStyle(.plain).foregroundStyle(.secondary).accessibilityLabel("Clear search")
+            }
+        }.padding(12).background(.quaternary.opacity(0.35))
+    }
+
+    private var pageCarousel: some View {
+        let sheets = carouselSheets
+        let addPage = { newSheet() }
+        let canAddPage = pageCreationParent != nil
+        return GeometryReader { geometry in
+            HStack(spacing: 4) {
+                Button { showPageBrowser.toggle() } label: {
+                    Image(systemName: "square.grid.2x2").frame(width: 36, height: 44)
+                }.buttonStyle(.plain)
+                    .help("Browse and organize pages")
+                    .accessibilityLabel("Browse and organize pages")
+                    .accessibilityIdentifier("page-browser-button")
+                    .popover(isPresented: $showPageBrowser) {
+                        sheetList.frame(minWidth: 300, idealWidth: 360, maxWidth: 440,
+                                        minHeight: 320, idealHeight: 480, maxHeight: 600)
+                            .presentationCompactAdaptation(.sheet)
+                    }
+                Spacer(minLength: 0)
+                ScrollViewReader { proxy in
+                    ScrollView(.horizontal) {
+                        LazyHStack(spacing: 2) {
+                            ForEach(sheets) { sheet in
+                                pageDot(sheet)
+                            }
+                        }.padding(.horizontal, 2)
+                    }.scrollIndicators(.hidden)
+                        .accessibilityLabel("Notebook pages")
+                        .onAppear { if let selected = store.sheetID { proxy.scrollTo(selected, anchor: .center) } }
+                        .onChange(of: store.sheetID) { _, selected in
+                            if let selected { proxy.scrollTo(selected, anchor: .center) }
+                        }
+                        .onChange(of: sheets.map(\.id)) { _, _ in
+                            if let selected = store.sheetID { proxy.scrollTo(selected, anchor: .center) }
+                        }
+                }
+                .frame(width: sheets.isEmpty ? 0 : min(CGFloat(sheets.count) * 46 + 4, max(0, geometry.size.width - 128)))
+                if sheets.isEmpty {
+                    Text(store.filter == .trash ? "Trash is empty" : !store.search.isEmpty ? "No matching pages" : store.filter == .favorites ? "No favorite pages" : "No pages here")
+                        .font(.caption).foregroundStyle(.secondary).lineLimit(1)
+                }
+                Button(action: addPage) {
+                    Image(systemName: "plus").font(.system(size: 13, weight: .semibold)).frame(width: 36, height: 44)
+                }.buttonStyle(.plain).disabled(!canAddPage)
+                    .help("Add page (⌘N)").accessibilityLabel("Add page")
+                    .accessibilityIdentifier("page-carousel-add")
+                    .background {
+                        #if os(macOS)
+                        if let diagnosticControls {
+                            WorkspaceDiagnosticControlProbe(controls: diagnosticControls,
+                                identifier: "page-carousel-add", enabled: canAddPage, value: "", action: addPage)
+                        }
+                        #endif
+                    }
+                Spacer(minLength: 0)
+                Color.clear.frame(width: 36).allowsHitTesting(false).accessibilityHidden(true)
+            }
+        }
+        .frame(height: 44)
+        .padding(.horizontal, 8).padding(.vertical, 3)
+        .background(.bar)
+        .overlay(alignment: .top) { Divider() }
+        .accessibilityElement(children: .contain)
+        .accessibilityIdentifier("page-carousel")
+        .background {
+            #if os(macOS)
+            if let diagnosticControls {
+                WorkspaceDiagnosticControlProbe(controls: diagnosticControls,
+                    identifier: "page-carousel", enabled: true, value: "")
+            }
+            #endif
+        }
+    }
+
+    private func pageDot(_ sheet: NoteNode) -> some View {
+        let selected = store.sheetID == sheet.id
+        let pageNumber = sheet.numberedPageTitle ?? "Page"
+        let choosePage = { store.sheetID = sheet.id; showPageBrowser = false }
+        let label: String = sheet.title.isEmpty ? pageNumber : pageNumber + ", " + sheet.displayTitle
+        return Button(action: choosePage) {
+            Text("\(sheet.sheetNumber ?? 1)")
+                .font(.system(size: 12, weight: selected ? .bold : .medium, design: .rounded))
+                .monospacedDigit().minimumScaleFactor(0.65).lineLimit(1)
+                .frame(width: 32, height: 32)
+                .foregroundStyle(Color.primary)
+                .background {
+                    Circle().fill(selected ? Color.accentColor.opacity(0.22) : Color.primary.opacity(0.07))
+                        .overlay { Circle().stroke(selected ? Color.accentColor : .clear, lineWidth: 2) }
+                }
+                .frame(width: 44, height: 44).contentShape(Rectangle())
+        }.buttonStyle(.plain)
+            .id(sheet.id)
+            .help(sheet.displayTitle + " · " + store.breadcrumb(sheet.parentID))
+            .accessibilityLabel(label)
+            .accessibilityValue(selected ? "Current page" : "Not selected")
+            .accessibilityAddTraits(selected ? [.isSelected] : [])
+            .accessibilityIdentifier("page-carousel-\(sheet.id.uuidString)")
+            .contextMenu { pageActions(sheet) }
+            .background {
+                #if os(macOS)
+                if let diagnosticControls {
+                    WorkspaceDiagnosticControlProbe(controls: diagnosticControls,
+                        identifier: "page-carousel-\(sheet.id.uuidString)", enabled: true,
+                        value: selected ? "Current page" : "Not selected", action: choosePage)
+                }
+                #endif
+            }
+    }
+
+    /// Numbered dots belong to one immediate chapter/topic. The browser and
+    /// sidebar results provide navigation across parents without repeated 1s.
+    private var carouselSheets: [NoteNode] {
+        let pages = store.visibleSheets
+        guard let parent = store.selectedSheet?.parentID ?? store.folderID else { return [] }
+        return pages.filter { $0.parentID == parent }
+    }
+
+    private func reconcilePageSelection() {
+        let pages = store.visibleSheets
+        if let selected = store.sheetID, pages.contains(where: { $0.id == selected }) { return }
+        if store.filter == .all, store.search.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty,
+           let parent = store.folderID {
+            store.sheetID = pages.first { $0.parentID == parent }?.id
+        } else { store.sheetID = pages.first?.id }
+    }
+
+    private var pageCreationParent: UUID? {
+        guard store.filter != .trash else { return nil }
+        let folders = store.folders
+        if let sheet = store.selectedSheet, !sheet.isTrashed,
+           let parent = folders.first(where: { $0.id == sheet.parentID && ($0.kind == .chapter || $0.kind == .topic) }) {
+            return parent.id
+        }
+        guard store.filter == .all, store.search.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty,
+              let parent = folders.first(where: { $0.id == store.folderID && ($0.kind == .chapter || $0.kind == .topic) }) else { return nil }
+        return parent.id
+    }
+
+    private var emptyPageTitle: String {
+        if !store.search.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty { return "No matching pages" }
+        if store.filter == .trash { return "Trash is empty" }
+        if store.filter == .favorites { return "No favorite pages" }
+        return pageCreationParent == nil ? "Choose a chapter or topic" : "Room for a new idea"
+    }
+
+    private var emptyPageDescription: String {
+        if !store.search.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty { return "Try another search or clear it to return to your pages." }
+        if store.filter == .trash { return "Deleted pages appear here until you restore them or empty Trash." }
+        if store.filter == .favorites { return "Mark a page as a favorite to find it here." }
+        if pageCreationParent != nil { return "Use the + below to add this chapter or topic's first page. Browse pages also shows its nested topics." }
+        return "Choose a chapter or topic in the sidebar to add a page, or browse this notebook's existing pages below."
+    }
+
+    @ViewBuilder private func pageActions(_ sheet: NoteNode) -> some View {
+        if sheet.isTrashed { Button("Restore page") { store.restore(sheet.id) } }
+        else {
+            Button(sheet.isFavorite ? "Remove from favorites" : "Add to favorites") { store.update(sheet.id) { $0.isFavorite.toggle() } }
+            Button("Rename…") {
+                showPageBrowser = false
+                nameRequest = NameRequest(kind: .sheet, renameID: sheet.id, title: sheet.title)
+            }
+            Button("Duplicate") { store.duplicate(sheet.id) }
+            MoveMenu(node: sheet)
+            Button("Move earlier") { movePage(sheet, later: false) }.disabled(!canMovePage(sheet, later: false))
+            Button("Move later") { movePage(sheet, later: true) }.disabled(!canMovePage(sheet, later: true))
+            Divider()
+            Button("Move to Trash", role: .destructive) { store.trash(sheet.id) }
+        }
+    }
+
+    private func canMovePage(_ sheet: NoteNode, later: Bool) -> Bool {
+        guard store.filter == .all, store.search.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty,
+              let parent = sheet.parentID else { return false }
+        let pages = store.library.children(of: parent).filter { $0.kind == .sheet }
+        guard let index = pages.firstIndex(where: { $0.id == sheet.id }) else { return false }
+        let adjacent = index + (later ? 1 : -1)
+        return pages.indices.contains(adjacent)
+    }
+
+    private func movePage(_ sheet: NoteNode, later: Bool) {
+        guard canMovePage(sheet, later: later), let parent = sheet.parentID else { return }
+        let pages = store.library.children(of: parent).filter { $0.kind == .sheet }
+        guard let index = pages.firstIndex(where: { $0.id == sheet.id }) else { return }
+        let target = later ? (pages.indices.contains(index + 2) ? pages[index + 2].id : nil) : pages[index - 1].id
+        _ = store.reorderSheet(sheet.id, before: target)
     }
 
     private var sheetList: some View {
         VStack(spacing: 0) {
             HStack {
-                Image(systemName: "magnifyingglass").foregroundStyle(.secondary)
-                TextField("Search all notes", text: $store.search).textFieldStyle(.plain).focused($searchFocused)
-                    .accessibilityLabel("Search all notes")
-                if !store.search.isEmpty { Button { store.search = "" } label: { Image(systemName: "xmark.circle.fill") }.buttonStyle(.plain).foregroundStyle(.secondary) }
-            }.padding(12).background(.quaternary.opacity(0.35))
-            List(selection: $store.sheetID) {
+                Text("Browse pages").font(.headline)
+                Spacer()
+                Button("Done") { showPageBrowser = false }
+            }.padding(.horizontal, 12).padding(.top, 12)
+            searchField(focused: false)
+            List(selection: Binding(get: { store.sheetID }, set: { selected in
+                store.sheetID = selected
+                showPageBrowser = false
+            })) {
                 ForEach(store.visibleSheets) { sheet in
+                    let pageNumber = sheet.numberedPageTitle ?? "Page"
                     VStack(alignment: .leading, spacing: 7) {
                         HStack(spacing: 6) {
                             Text(sheet.displayTitle).font(.headline).lineLimit(2)
@@ -293,19 +538,19 @@ struct ContentView: View {
                         ViewThatFits(in: .horizontal) {
                             HStack(spacing: 4) {
                                 if !sheet.title.isEmpty {
-                                    Text("Sheet \(store.sheetNumber(sheet.id) ?? 1)")
+                                    Text(pageNumber)
                                     Text("·")
                                 }
                                 Text(sheet.createdAt, format: .dateTime.day().month(.abbreviated).year())
                             }
                             VStack(alignment: .leading, spacing: 2) {
-                                if !sheet.title.isEmpty { Text("Sheet \(store.sheetNumber(sheet.id) ?? 1)") }
+                                if !sheet.title.isEmpty { Text(pageNumber) }
                                 Text(sheet.createdAt, format: .dateTime.day().month(.abbreviated).year())
                             }
                         }.font(.caption2).foregroundStyle(.secondary)
                             .accessibilityElement(children: .ignore)
-                            .accessibilityLabel((sheet.title.isEmpty ? "" : "Sheet \(store.sheetNumber(sheet.id) ?? 1), ") + "Created \(sheet.createdAt.formatted(date: .abbreviated, time: .omitted))")
-                        Text(sheet.plainTextExport.isEmpty ? (!sheet.diagrams.isEmpty ? "Diagram notes" : (sheet.images.isEmpty ? (sheet.strokes.isEmpty && sheet.pencilKitData == nil ? "Empty sheet" : "Handwritten notes") : "Image notes")) : sheet.plainTextExport.replacingOccurrences(of: "\n", with: " "))
+                            .accessibilityLabel((sheet.title.isEmpty ? "" : pageNumber + ", ") + "Created \(sheet.createdAt.formatted(date: .abbreviated, time: .omitted))")
+                        Text(sheet.plainTextExport.isEmpty ? (!sheet.diagrams.isEmpty ? "Diagram notes" : (sheet.images.isEmpty ? (sheet.strokes.isEmpty && sheet.pencilKitData == nil ? "Empty page" : "Handwritten notes") : "Image notes")) : sheet.plainTextExport.replacingOccurrences(of: "\n", with: " "))
                             .font(.caption).foregroundStyle(.secondary).lineLimit(2)
                         Text(store.breadcrumb(sheet.parentID)).font(.caption2).foregroundStyle(.secondary).lineLimit(1)
                     }
@@ -321,30 +566,20 @@ struct ContentView: View {
                     .contentShape(Rectangle())
                     .tag(sheet.id)
                     .moveDisabled(!store.canReorderSheets)
-                    .contextMenu {
-                        if sheet.isTrashed { Button("Restore sheet") { store.restore(sheet.id) } }
-                        else {
-                            Button(sheet.isFavorite ? "Remove from favorites" : "Add to favorites") { store.update(sheet.id) { $0.isFavorite.toggle() } }
-                            Button("Rename…") { nameRequest = NameRequest(kind: .sheet, renameID: sheet.id, title: sheet.title) }
-                            Button("Duplicate") { store.duplicate(sheet.id) }
-                            MoveMenu(node: sheet)
-                            Divider()
-                            Button("Move to Trash", role: .destructive) { store.trash(sheet.id) }
-                        }
-                    }
+                    .contextMenu { pageActions(sheet) }
                 }
                 .onMove { offsets, destination in
                     _ = store.reorderSheets(fromOffsets: offsets, toOffset: destination)
                 }
             }.listStyle(.inset).scrollContentBackground(workspaceTheme == "classic" ? .visible : .hidden)
             if store.visibleSheets.isEmpty {
-                Text(store.filter == .trash ? "Trash is empty" : store.search.isEmpty ? "No sheets here yet" : "No matching notes")
+                Text(store.filter == .trash ? "Trash is empty" : store.search.isEmpty ? "No pages here yet" : "No matching notes")
                     .font(.callout).foregroundStyle(.secondary).padding()
             }
             HStack {
-                Text("\(store.visibleSheets.count) sheets").font(.caption).foregroundStyle(.secondary)
+                let count = store.visibleSheets.count
+                Text(count == 1 ? "1 page" : "\(count) pages").font(.caption).foregroundStyle(.secondary)
                 Spacer()
-                if store.filter != .trash { Button(action: newSheet) { Label("New sheet", systemImage: "square.and.pencil") }.labelStyle(.iconOnly).buttonStyle(.plain).help("New sheet (⌘N)") }
             }.padding(12)
         }
         .background { WorkspaceScenery() }
@@ -352,13 +587,9 @@ struct ContentView: View {
     }
 
     private func newSheet() {
-        let current = store.folders.first { $0.id == store.folderID }
-        let target = (current?.kind == .chapter || current?.kind == .topic) ? current?.id
-            : store.folders.first(where: { $0.kind == .chapter && (current == nil || $0.parentID == current?.id) })?.id
-        if let target { store.create(.sheet, parent: target) }
-        else if let workbook = current?.kind == .workbook ? current : store.folders.first(where: { $0.kind == .workbook }) {
-            nameRequest = NameRequest(kind: .chapter, parent: workbook.id)
-        } else { nameRequest = NameRequest(kind: .workbook) }
+        guard let target = pageCreationParent else { return }
+        showPageBrowser = false
+        store.create(.sheet, parent: target)
     }
 
     private func exportLibrary() {
@@ -401,16 +632,19 @@ struct FolderTreeRow: View {
                         Image(systemName: node.kind.symbol).frame(width: 18)
                         VStack(alignment: .leading, spacing: 2) {
                             Text(node.title).lineLimit(1).fontWeight(store.folderID == node.id ? .semibold : .regular)
-                            Text(node.kind.rawValue.capitalized).font(.caption2).foregroundStyle(sidebarSecondary)
+                            Text(node.kind.displayName).font(.caption2).foregroundStyle(sidebarSecondary)
                         }
                         Spacer(minLength: 0)
                     }.foregroundStyle(store.folderID == node.id ? Color.accentColor : Color.primary)
                         .frame(maxWidth: .infinity, alignment: .leading).contentShape(Rectangle())
                 }.buttonStyle(.plain).padding(.vertical, 4)
-                    .accessibilityLabel("\(node.kind.rawValue.capitalized): \(node.title)")
+                    .accessibilityLabel("\(node.kind.displayName): \(node.title)")
                     .contextMenu {
                         Button(node.kind == .workbook ? "New chapter…" : "New topic…") { request(NameRequest(kind: childKind, parent: node.id)) }
-                        if node.kind != .workbook { Button("New sheet") { store.create(.sheet, parent: node.id) } }
+                        #if os(macOS)
+                        Divider()
+                        NotebookExportButtons(folder: node)
+                        #endif
                         Divider()
                         Button("Rename…") { request(NameRequest(kind: node.kind, renameID: node.id, title: node.title)) }
                         MoveMenu(node: node)
@@ -422,8 +656,8 @@ struct FolderTreeRow: View {
                     request(NameRequest(kind: childKind, parent: node.id))
                 } label: { Image(systemName: "plus.circle").frame(width: 26, height: 30) }
                     .buttonStyle(.plain).foregroundStyle(sidebarSecondary)
-                    .help("Add \(childKind.rawValue) to \(node.title)")
-                    .accessibilityLabel("Add \(childKind.rawValue) to \(node.title)")
+                    .help("Add \(childKind.displayName.lowercased()) to \(node.title)")
+                    .accessibilityLabel("Add \(childKind.displayName.lowercased()) to \(node.title)")
             }
         }
         .onChange(of: store.folderID) { _, selected in reveal(selected) }
@@ -486,7 +720,7 @@ struct SheetTitleField: View {
                 .font(.system(size: 28, weight: .semibold, design: .serif))
                 .disabled(isReadOnly)
                 .accessibilityLabel("Page title")
-                .accessibilityHint("Optional. Leave blank to identify the sheet by its number.")
+                .accessibilityHint("Optional. Leave blank to identify the page by its number.")
             #endif
             Rectangle().fill(.secondary.opacity(0.4)).frame(height: 1)
         }
@@ -511,12 +745,12 @@ struct NameDialog: View {
     @FocusState private var focused: Bool
     var body: some View {
         VStack(alignment: .leading, spacing: 20) {
-            Label(request.renameID == nil ? "New \(request.kind.rawValue)" : "Rename \(request.kind.rawValue)", systemImage: request.kind.symbol)
+            Label(request.renameID == nil ? "New \(request.kind.displayName.lowercased())" : "Rename \(request.kind.displayName.lowercased())", systemImage: request.kind.symbol)
                 .font(.title2.weight(.semibold))
             TextField(request.kind == .sheet ? "Title (optional)" : "Name", text: $request.title).textFieldStyle(.roundedBorder).focused($focused)
                 .onSubmit { submit() }
             if request.kind == .sheet {
-                Text("Leave the title blank to identify this sheet by its number.")
+                Text("Leave the title blank to identify this page by its number.")
                     .font(.caption).foregroundStyle(.secondary)
             }
             HStack {

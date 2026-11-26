@@ -98,7 +98,7 @@ final class NoteLibraryTests: XCTestCase {
         try library.update(note)
         let blank = try library.create(kind: .sheet, parentID: topic)
         XCTAssertEqual(library.node(id: blank)?.title, "")
-        XCTAssertEqual(library.node(id: blank)?.displayTitle, "Sheet 2")
+        XCTAssertEqual(library.node(id: blank)?.displayTitle, "Page 2")
         let reopened = try LibraryArchive.decode(LibraryArchive.encode(library))
         XCTAssertEqual(reopened.node(id: sheet)?.title, "")
         XCTAssertEqual(reopened.node(id: sheet)?.body, note.body)
@@ -134,7 +134,7 @@ final class NoteLibraryTests: XCTestCase {
         try library.trash(id: second)
         let third = try library.create(kind: .sheet, parentID: topic)
         XCTAssertEqual(library.node(id: third)?.sheetNumber, 2)
-        XCTAssertEqual(library.node(id: third)?.displayTitle, "Sheet 2")
+        XCTAssertEqual(library.node(id: third)?.displayTitle, "Page 2")
         XCTAssertEqual(library.node(id: first)?.sheetNumber, 1)
         XCTAssertEqual(library.node(id: otherScope)?.sheetNumber, 1)
         try library.restore(id: second)
@@ -166,7 +166,7 @@ final class NoteLibraryTests: XCTestCase {
         try library.move(id: newSheet, to: topic, at: 1)
         XCTAssertEqual(library.children(of: topic).map(\.id), [first, newSheet, third])
         XCTAssertEqual(library.children(of: topic).compactMap(\.sheetNumber), [1, 2, 3])
-        XCTAssertEqual(library.node(id: newSheet)?.displayTitle, "Sheet 2")
+        XCTAssertEqual(library.node(id: newSheet)?.displayTitle, "Page 2")
         XCTAssertEqual(library.node(id: third)?.title, "Third page")
         XCTAssertEqual(library.node(id: third)?.updatedAt, originalThird.updatedAt)
         XCTAssertEqual(library.node(id: third)?.createdAt, originalThird.createdAt)
@@ -188,7 +188,7 @@ final class NoteLibraryTests: XCTestCase {
             library = try LibraryArchive.decode(LibraryArchive.encode(library))
             let replacement = try library.create(kind: .sheet, parentID: topic)
             XCTAssertEqual(library.node(id: replacement)?.sheetNumber, 1)
-            XCTAssertEqual(library.node(id: replacement)?.displayTitle, "Sheet 1")
+            XCTAssertEqual(library.node(id: replacement)?.displayTitle, "Page 1")
             XCTAssertEqual(library.node(id: otherScope)?.sheetNumber, 1)
             XCTAssertEqual(library.children(of: topic).map(\.id), [replacement])
             if removal == "trash" {
@@ -479,15 +479,17 @@ final class NoteLibraryTests: XCTestCase {
         let chapter = NoteNode(parentID: workbook.id, kind: .chapter, title: "Old chapter")
         let firstID = UUID(uuidString: "00000000-0000-0000-0000-000000000001")!
         let secondID = UUID(uuidString: "00000000-0000-0000-0000-000000000002")!
-        let first = NoteNode(id: firstID, parentID: chapter.id, kind: .sheet, title: "First", body: "Keep my text",
+        let first = NoteNode(id: firstID, parentID: chapter.id, kind: .sheet, title: "Sheet 1", body: "Keep my text",
                              strokes: [InkStroke(points: [InkPoint(x: 3, y: 5)])],
                              createdAt: Date(timeIntervalSince1970: 100), updatedAt: Date(timeIntervalSince1970: 900), order: 99)
         let second = NoteNode(id: secondID, parentID: chapter.id, kind: .sheet, title: "Second", isTrashed: true,
                               createdAt: first.createdAt, updatedAt: Date(timeIntervalSince1970: 200), order: 0)
-        let third = NoteNode(parentID: chapter.id, kind: .sheet, title: "Third", createdAt: Date(timeIntervalSince1970: 300), order: 1)
+        let third = NoteNode(parentID: chapter.id, kind: .sheet, title: "", createdAt: Date(timeIntervalSince1970: 300), order: 1)
+        XCTAssertEqual(third.displayTitle, "Untitled page")
         let old = NoteLibrary(nodes: [third, second, chapter, first, workbook], modifiedAt: Date(timeIntervalSince1970: 1000))
         var archive = try XCTUnwrap(JSONSerialization.jsonObject(with: LibraryArchive.encode(old)) as? [String: Any])
         var archivedNodes = try XCTUnwrap(archive["nodes"] as? [[String: Any]])
+        XCTAssertEqual(archivedNodes.filter { $0["kind"] as? String == "sheet" }.count, 3)
         for index in archivedNodes.indices {
             archivedNodes[index].removeValue(forKey: "sheetNumber")
             archivedNodes[index].removeValue(forKey: "lastSheetNumber")
@@ -498,6 +500,11 @@ final class NoteLibraryTests: XCTestCase {
         XCTAssertEqual(migrated.node(id: first.id)?.sheetNumber, 2)
         XCTAssertEqual(migrated.node(id: second.id)?.sheetNumber, 3)
         XCTAssertEqual(migrated.node(id: third.id)?.sheetNumber, 1)
+        XCTAssertEqual(migrated.node(id: third.id)?.kind.displayName, "Page")
+        XCTAssertEqual(migrated.node(id: third.id)?.title, "")
+        XCTAssertEqual(migrated.node(id: third.id)?.displayTitle, "Page 1")
+        XCTAssertEqual(migrated.node(id: first.id)?.displayTitle, "Sheet 1")
+        XCTAssertEqual(migrated.node(id: first.id)?.numberedPageTitle, "Page 2")
         XCTAssertEqual(migrated.node(id: first.id)?.body, first.body)
         XCTAssertEqual(migrated.node(id: first.id)?.strokes, first.strokes)
         XCTAssertEqual(migrated.node(id: first.id)?.createdAt, first.createdAt)

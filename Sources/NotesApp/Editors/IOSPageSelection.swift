@@ -14,10 +14,26 @@ struct IOSPageSelection {
 }
 
 @MainActor
-final class IOSPageSelectionController: NSObject {
+final class IOSPageSelectionController: NSObject, SelectedInkEditing {
     weak var page: UnifiedPencilPage?
-    var content = PageContent()
-    var selection = IOSPageSelection()
+    var content = PageContent() { didSet { inkSelectionStyle?.scheduleRefresh() } }
+    var selection = IOSPageSelection() { didSet { inkSelectionStyle?.scheduleRefresh() } }
+    weak var inkSelectionStyle: PageInkSelectionStyle?
+    var canRecolorSelectedInk: Bool {
+        guard let page, page.isUserInteractionEnabled, page.selectionInputAllowed, !hasPreview,
+              page.selectionEnabled || selectionIsTemporary, content.images.isEmpty, content.diagrams.isEmpty else { return false }
+        return !selection.strokes.isEmpty || !selection.nativeStrokes.isEmpty
+    }
+
+    @discardableResult func recolorSelectedInk(_ hex: String) -> Bool {
+        guard canRecolorSelectedInk else { return false }
+        do {
+            let value = try PortableInkConverter.recoloring(content, strokes: selection.strokes, nativeStrokes: selection.nativeStrokes, hex: hex)
+            guard value != content else { return false }
+            commit(value, action: "Recolor Ink")
+            return content == value
+        } catch { onError?(error.localizedDescription); return false }
+    }
     var onRender: ((PageContent) -> Void)?
     var onCommit: ((PageContent) -> Void)?
     var onEquationEdit: ((NoteEquation) -> Void)?
@@ -95,7 +111,9 @@ final class IOSPageSelectionController: NSObject {
         if let stroke = content.strokes.reversed().first(where: { PageSelectionGeometry.hits(stroke: $0, at: point) }) {
             value.strokes.insert(stroke.id)
             if let drawing = nativeDrawing(content) {
-                for (index, native) in drawing.strokes.enumerated() where PortableInkConverter.strokes(from: PKDrawing(strokes: [native])).contains(where: { PageSelectionGeometry.hits(stroke: $0, at: point) }) {
+                if let index = drawing.strokes.indices.reversed().first(where: { index in
+                    PortableInkConverter.strokes(from: PKDrawing(strokes: [drawing.strokes[index]])).contains { PageSelectionGeometry.hits(stroke: $0, at: point) }
+                }) {
                     value.nativeStrokes.insert(index)
                 }
             }
@@ -230,12 +248,10 @@ final class IOSPageSelectionController: NSObject {
         }
         if command == .paste {
             let board = UIPasteboard.general
-            if let data = board.data(forPasteboardType: PageClipboardPayload.pasteboardType)
-                ?? board.data(forPasteboardType: PageClipboardPayload.imagePasteboardType)
-                ?? board.data(forPasteboardType: PageClipboardPayload.legacyPasteboardType) {
+            if let data = PageClipboardPayload.readablePasteboardTypes.lazy.compactMap({ board.data(forPasteboardType: $0) }).first {
                 guard let payload = try? PageClipboardPayload.decodeValidated(data) else { return }
                 guard payload.images.isEmpty, payload.diagrams.isEmpty else {
-                    onError?("Pasting page images or diagrams is currently available on Mac. Your sheet has not been changed.")
+                    onError?("Pasting page images or diagrams is currently available on Mac. Your page content is preserved.")
                     return
                 }
             }
@@ -266,9 +282,7 @@ final class IOSPageSelectionController: NSObject {
         case .duplicate: if let payload = clipboardPayload() { paste(payload, offset: 20, action: "Duplicate Selection") }
         case .paste:
             let board = UIPasteboard.general
-            if let data = board.data(forPasteboardType: PageClipboardPayload.pasteboardType)
-                ?? board.data(forPasteboardType: PageClipboardPayload.imagePasteboardType)
-                ?? board.data(forPasteboardType: PageClipboardPayload.legacyPasteboardType) {
+            if let data = PageClipboardPayload.readablePasteboardTypes.lazy.compactMap({ board.data(forPasteboardType: $0) }).first {
                 guard let value = try? PageClipboardPayload.decodeValidated(data) else { return }
                 paste(value, offset: 20, action: "Paste Selection")
             } else if let text = board.string, text.utf8.count <= PageClipboardPayload.maximumBytes {
@@ -284,9 +298,8 @@ final class IOSPageSelectionController: NSObject {
     @discardableResult private func copySelection() -> Bool {
         guard let payload = clipboardPayload(), let data = try? JSONEncoder().encode(payload), data.count <= PageClipboardPayload.maximumBytes else { return false }
         let board = UIPasteboard.general
-        var item: [String: Any] = [PageClipboardPayload.pasteboardType: data, "public.utf8-plain-text": payload.text]
-        if payload.diagrams.isEmpty { item[PageClipboardPayload.imagePasteboardType] = data }
-        if payload.images.isEmpty && payload.diagrams.isEmpty { item[PageClipboardPayload.legacyPasteboardType] = data }
+        var item: [String: Any] = ["public.utf8-plain-text": payload.text]
+        for type in payload.writablePasteboardTypes { item[type] = data }
         if let rtfData = payload.rtfData { item["public.rtf"] = rtfData }
         board.setItems([item])
         return true

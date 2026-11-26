@@ -41,23 +41,45 @@ final class MacPageTextBoxView: NSView {
         }
         lastBox = box; lastTheme = theme
         editor.isEditable = editable; editor.isSelectable = editable
+        sizeToText(width: box.width, paper: paper)
+    }
+
+    private func sizeToText(width: CGFloat, paper: InkPaper) {
         if let container = editor.textContainer { editor.layoutManager?.ensureLayout(for: container) }
         let used = editor.textContainer.flatMap { editor.layoutManager?.usedRect(for: $0).maxY } ?? 0
         let extra = editor.layoutManager?.extraLineFragmentRect.maxY ?? 0
-        let natural = editor.attributedString().boundingRect(with: CGSize(width: box.width, height: .greatestFiniteMagnitude), options: [.usesLineFragmentOrigin, .usesFontLeading]).height
+        let natural = editor.attributedString().boundingRect(with: CGSize(width: width, height: .greatestFiniteMagnitude), options: [.usesLineFragmentOrigin, .usesFontLeading]).height
         let fallback = paper == .ruled && used == 0 ? ceil(natural / RuledTextLayout.spacing) * RuledTextLayout.spacing + RuledTextLayout.spacing : natural
         let measured = max(used, extra, fallback)
-        setFrameSize(CGSize(width: box.width, height: max(24, ceil(measured) + 8)))
+        setFrameSize(CGSize(width: width, height: max(24, ceil(measured) + 8)))
         editor.frame = bounds
-        editor.textContainer?.containerSize = CGSize(width: box.width, height: .greatestFiniteMagnitude)
+        editor.textContainer?.containerSize = CGSize(width: width, height: .greatestFiniteMagnitude)
     }
+
+    func reloadAfterRejectedEdit() { lastBox = nil }
 }
 
 extension UnifiedMacPageView {
+    func externalAnchorFrames(in content: PageContent, measuringTextBoxes ids: Set<UUID> = []) -> [PageObjectAnchorKind: [UUID: CGRect]] {
+        var frames = PageDiagramGeometry.externalAnchorFrames(images: content.images, textBoxes: content.textBoxes,
+            equations: content.equations, textBoxHeight: { textBoxViews[$0]?.frame.height })
+        if !ids.isEmpty {
+            let linkedBoxes = Set(content.diagrams.flatMap { [$0.startAttachment, $0.endAttachment] }.compactMap { attachment in
+                attachment?.targetKind == .textBox ? attachment?.targetDiagramID : nil
+            })
+            for box in content.textBoxes where ids.contains(box.id) && linkedBoxes.contains(box.id) {
+                // A native edit and pasted boxes need their saved RTF laid out
+                // before SwiftUI has mounted or refreshed their visible views.
+                textBoxMeasurement.configure(box, theme: theme, paper: paperView.paper, editable: false, onChange: { _, _ in })
+                frames[.textBox, default: [:]][box.id] = textBoxMeasurement.frame
+            }
+        }
+        return frames
+    }
+
     func displayObjects(textBoxes: [PageTextBox], equations: [NoteEquation], images: [PageImage] = [], diagrams: [PageDiagram] = [], editable: Bool,
                         onTextBoxChange: @escaping (UUID, String, Data?) -> Void,
                         onEquationEdit: ((NoteEquation) -> Void)?) {
-        diagramView.diagrams = diagrams
         let imageIDs = Set(images.map(\.id))
         for id in Array(imageViews.keys) where !imageIDs.contains(id) { imageViews.removeValue(forKey: id)?.removeFromSuperview() }
         // Stable views, ordered behind every native text and ink layer.
@@ -91,6 +113,13 @@ extension UnifiedMacPageView {
             view.frame = CGRect(x: equation.x, y: equation.y, width: equation.width, height: equation.height)
             view.configure(equation: equation, theme: theme, onRequestEdit: { if editable { onEquationEdit?(equation) } })
         }
+        if diagrams.contains(where: \.hasExternalAttachment) {
+            // Layout text first: its bottom/side ports depend on actual rich text,
+            // wrapping and ruled baselines. PDF/PNG export uses this same path.
+            let frames = PageDiagramGeometry.externalAnchorFrames(images: images, textBoxes: textBoxes, equations: equations,
+                textBoxHeight: { textBoxViews[$0]?.frame.height })
+            diagramView.diagrams = PageDiagramGeometry.routedConnectors(in: diagrams, frames: frames)
+        } else { diagramView.diagrams = PageDiagramGeometry.routedConnectors(in: diagrams) }
     }
 }
 
@@ -177,7 +206,7 @@ enum MacPageImageCodec {
             defer { if access { url.stopAccessingSecurityScopedResource() } }
             return try normalize(BoundedFileReader.read(from: url, maximumBytes: PageImageLimits.maximumBytes))
         }
-        throw Failure(message: "Copy an image or an image file, then paste it onto the sheet.")
+        throw Failure(message: "Copy an image or an image file, then paste it onto the page.")
     }
 }
 
@@ -205,14 +234,14 @@ final class MacPageImageView: NSView {
 extension UnifiedMacPageView {
     func canPastePage() -> Bool {
         let board = NSPasteboard.general
-        let types = [PageClipboardPayload.pasteboardType, PageClipboardPayload.imagePasteboardType, PageClipboardPayload.legacyPasteboardType].map { NSPasteboard.PasteboardType($0) }
+        let types = PageClipboardPayload.readablePasteboardTypes.map { NSPasteboard.PasteboardType($0) }
         return inkView.isInputEnabled && (board.availableType(from: types) != nil || MacPageImageCodec.canRead(board))
     }
 
     /// Only page payloads/images leave NSTextView's normal rich-text paste path.
     func handlePagePaste() -> Bool {
         let board = NSPasteboard.general
-        let types = [PageClipboardPayload.pasteboardType, PageClipboardPayload.imagePasteboardType, PageClipboardPayload.legacyPasteboardType].map { NSPasteboard.PasteboardType($0) }
+        let types = PageClipboardPayload.readablePasteboardTypes.map { NSPasteboard.PasteboardType($0) }
         guard let controller = selectionController, inkView.isInputEnabled,
               board.availableType(from: types) != nil || MacPageImageCodec.canRead(board) else { return false }
         if let type = board.availableType(from: types), let data = board.data(forType: type),
@@ -228,7 +257,7 @@ extension UnifiedMacPageView {
 extension MacPageSelectionController {
     @discardableResult
     func pasteImage(from board: NSPasteboard) -> Bool {
-        let payloadTypes = [PageClipboardPayload.pasteboardType, PageClipboardPayload.imagePasteboardType, PageClipboardPayload.legacyPasteboardType].map { NSPasteboard.PasteboardType($0) }
+        let payloadTypes = PageClipboardPayload.readablePasteboardTypes.map { NSPasteboard.PasteboardType($0) }
         guard board.availableType(from: payloadTypes) == nil, MacPageImageCodec.canRead(board) else { return false }
         guard let page, page.inkView.isInputEnabled else { return true }
         do {

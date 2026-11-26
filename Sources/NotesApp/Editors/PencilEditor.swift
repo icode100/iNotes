@@ -1,4 +1,5 @@
 import Foundation
+import Combine
 import PencilKit
 import NotesCore
 #if os(macOS)
@@ -9,10 +10,103 @@ import UIKit
 private typealias InkPlatformColor = UIColor
 #endif
 
+@MainActor
+protocol SelectedInkEditing: AnyObject {
+    var canRecolorSelectedInk: Bool { get }
+    @discardableResult func recolorSelectedInk(_ hex: String) -> Bool
+}
+
+@MainActor
+final class PageInkSelectionStyle: ObservableObject {
+    private weak var target: (any SelectedInkEditing)?
+    @Published private(set) var canEdit = false
+    private var refreshPending = false
+
+    func bind(_ target: any SelectedInkEditing) {
+        self.target = target
+        scheduleRefresh()
+    }
+
+    func scheduleRefresh() {
+        guard !refreshPending else { return }
+        refreshPending = true
+        DispatchQueue.main.async { [weak self] in
+            guard let self else { return }
+            refreshPending = false
+            let enabled = target?.canRecolorSelectedInk == true
+            if canEdit != enabled { canEdit = enabled }
+        }
+    }
+
+    @discardableResult func apply(_ hex: String) -> Bool { target?.recolorSelectedInk(hex) ?? false }
+}
+
+extension UnifiedPageEditor {
+    func observingInkSelection(_ style: PageInkSelectionStyle) -> Self {
+        var editor = self
+        editor.inkSelectionStyle = style
+        return editor
+    }
+}
+
 /// Basic ink is exchanged as sampled paths; the original PencilKit payload also
 /// remains in the sheet so iPad retains textures, transparency and advanced tools.
 @MainActor
 enum PortableInkConverter {
+    /// Edit the original canonical representations in place. Rebuilding the
+    /// portable paths would replace IDs and reconstructing PKStrokes loses masks
+    /// or native identity. A no-op must also preserve the original archive bytes.
+    static func recoloring(_ page: PageContent, strokes ids: Set<UUID>, nativeStrokes indices: Set<Int>,
+                           hex: String) throws -> PageContent {
+        guard hex.utf8.count == 7, hex.first == "#", hex.utf8.dropFirst().allSatisfy({
+            (48...57).contains($0) || (65...70).contains($0) || (97...102).contains($0)
+        }) else { throw LibraryError.invalidData("Choose a six-digit RGB ink color.") }
+        let canonical = hex.uppercased()
+        var result = page
+        var selected = ids
+        if let data = page.pencilKitData, !indices.isEmpty {
+            var native = try validatedDrawing(data, fallback: page.strokes).strokes
+            guard indices.allSatisfy(native.indices.contains) else { throw LibraryError.invalidData("The ink selection has changed.") }
+            // A partially erased native stroke can have several portable paths.
+            // Recolor every visible fragment of the selected physical stroke
+            // when the saved pair has the same native-to-portable ordering.
+            if indices.contains(where: { native[$0].mask != nil && native[$0].maskedPathRanges.count > 1 }) {
+                let counts = native.map { $0.mask == nil ? 1 : $0.maskedPathRanges.count }
+                if counts.reduce(0, +) == page.strokes.count {
+                    var offset = 0
+                    for index in native.indices {
+                        let end = offset + counts[index]
+                        if indices.contains(index), counts[index] > 1 {
+                            let stored = page.strokes[offset..<end]
+                            let fragments = try validatedStrokes(from: PKDrawing(strokes: [native[index]]))
+                            if stored.count == fragments.count,
+                               zip(stored, fragments).allSatisfy({ $0.points == $1.points }) {
+                                selected.formUnion(stored.map(\.id))
+                            }
+                        }
+                        offset = end
+                    }
+                }
+            }
+            let color = ThemeTextAttributes.color(canonical)
+            var changed = false
+            for index in indices where ThemeTextAttributes.hex(native[index].ink.color) != canonical {
+                native[index].ink.color = color.withAlphaComponent(native[index].ink.color.cgColor.alpha)
+                changed = true
+            }
+            if changed {
+                let encoded = PKDrawing(strokes: native).dataRepresentation()
+                guard encoded.count <= LibraryArchive.maximumBytes else { throw LibraryError.tooLarge }
+                result.pencilKitData = encoded
+            }
+        }
+        for index in result.strokes.indices where selected.contains(result.strokes[index].id)
+            && result.strokes[index].colorHex.uppercased() != canonical {
+            result.strokes[index].colorHex = canonical
+        }
+        return result
+    }
+
     /// Both archives and the clipboard cross this boundary before native ink is
     /// rendered or distance-sampled. The JSON byte limit alone cannot bound
     /// transformed geometry or the work required to convert native paths.

@@ -36,11 +36,20 @@ public struct PageClipboardPayload: Codable, Equatable, Sendable {
         diagrams = try values.decodeIfPresent([PageDiagram].self, forKey: .diagrams) ?? []
     }
 
-    // A distinct type prevents older apps silently dropping images from a mixed paste.
+    // Older readers must not pick up a partial representation of newer diagrams.
+    public static let styledDiagramPasteboardType = "io.inotes.page-selection.v5"
     public static let pasteboardType = "io.inotes.page-selection.v4"
     public static let imagePasteboardType = "io.inotes.page-selection.v3"
     public static let legacyPasteboardType = "io.inotes.page-selection"
     public static let maximumBytes = 16 * 1_024 * 1_024
+    public static let readablePasteboardTypes = [styledDiagramPasteboardType, pasteboardType, imagePasteboardType, legacyPasteboardType]
+
+    public var writablePasteboardTypes: [String] {
+        if diagrams.contains(where: \.requiresFormat5) { return [Self.styledDiagramPasteboardType] }
+        if !diagrams.isEmpty { return [Self.pasteboardType] }
+        if !images.isEmpty { return [Self.pasteboardType, Self.imagePasteboardType] }
+        return [Self.pasteboardType, Self.imagePasteboardType, Self.legacyPasteboardType]
+    }
 
     public static func decodeValidated(_ data: Data) throws -> PageClipboardPayload {
         guard data.count <= maximumBytes else { throw LibraryError.tooLarge }

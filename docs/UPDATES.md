@@ -43,7 +43,11 @@ does not publish a release.
 
 ## Build and sign a local update
 
-The current release is **v1.3.0 / build 2021**, from source
+The v1.4.0 candidate uses version **1.4.0 / build 2022**. The user approved
+publication on 26 November 2026 after the isolated floating-toolbar QA build 5.
+See the [release notes](releases/1.4.0.md) and [validation](TESTING.md).
+
+The preceding published release was **v1.3.0 / build 2021**, from source
 `4c9ea4fc29af53b6bf08ee4e0e2822b30db96e28`, published on 6 November 2026.
 Exact-source branch/main Native checks, including iPad compilation, signed
 release run 19 and independent public-download verification passed. The public
@@ -103,10 +107,10 @@ identity, QA build 1, temporary library, and disconnected updater. Recheck the
 public feed and workflow counter before any later publication.
 
 ```sh
-VERSION=1.3.0 BUILD_NUMBER=2021 bash scripts/build-macos.sh
-VERSION=1.3.0 bash scripts/verify-macos.sh
-VERSION=1.3.0 bash scripts/generate-appcast.sh
-VERSION=1.3.0 bash scripts/test-update-signatures.sh
+VERSION=1.4.0 BUILD_NUMBER=2022 bash scripts/build-macos.sh
+VERSION=1.4.0 bash scripts/verify-macos.sh
+VERSION=1.4.0 bash scripts/generate-appcast.sh
+VERSION=1.4.0 bash scripts/test-update-signatures.sh
 ```
 
 The appcast command prepares `dist/update/appcast.xml`. It uses Sparkle's official
@@ -115,7 +119,7 @@ using Apple CryptoKit and the committed public key. It does not upload anything.
 For v1.0.3, the security rebuild 2011 exceeds the initial public build 2010 and
 shared local builds 1010–1012. Check both published and shared `CFBundleVersion`
 values and use a larger number for every update, including same-version rebuilds.
-Defaults (`1.3.0`, build 2021) match the published diagram update. They remain
+Defaults (`1.4.0`, build 2022) target the approved notebook update. They remain
 separate from the release workflow's
 `2002 + GITHUB_RUN_NUMBER`. Run 11 published v1.0.4 build 2012; isolated backup QA
 used build 2013. Run 12 built 2014 but stopped at native diagnostic verification before publication.
@@ -125,7 +129,7 @@ Runs 13, 14 and 15 published 2015, 2016 and 2017. Runs 16 and 17 built 2018 and
 feed/counter check. Failed builds
 2014, 2018 and 2019 remain reserved alongside
 original installers and QA slots.
-The public feed points to the matching `v1.3.0` release's DMG. Never edit a signed appcast
+Each public feed points to its matching versioned release DMG. Never edit a signed appcast
 after generation. Re-run the script if its contents change. The last command
 checks valid signatures and rejects changed feeds, unsigned feeds, changed
 archives, and a different public key.
@@ -146,7 +150,8 @@ HTTPS feed; malformed configured channels are rejected before packaging.
 
 After reviewing the next source and configuring the secret, push a new
 `vX.Y.Z` tag only after publication approval and exact-source Native checks. The user
-authorized v1.3 publication after passing isolated QA build 2 on 6 November 2026;
+authorized v1.4 publication after isolated QA build 5 on 26 November 2026 and
+v1.3 publication after passing QA build 2 on 6 November 2026;
 the earlier v1.2 authorization was on 5 November. Preserve the failed unpublished
 `v1.2.0` tag at `ca051953` and `v1.2.1` tag at `adf533e4`; do not move either to
 changed source or reuse builds 2018/2019. Published `v1.2.2` identifies

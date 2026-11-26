@@ -36,6 +36,8 @@ struct UnifiedPageEditor: UIViewRepresentable {
     var onPageValidate: ((PageContent) -> Bool)? = nil
     var onPageError: ((String) -> Void)? = nil
     var onObjectPlacement: (() -> Void)? = nil
+    var toolbarHistory: PageToolbarHistory?
+    var inkSelectionStyle: PageInkSelectionStyle?
     var onEquationEdit: ((NoteEquation) -> Void)? = nil
 
     init(text: Binding<String>, rtfData: Binding<Data?>, strokes: Binding<[InkStroke]>, pencilKitData: Binding<Data?>,
@@ -48,7 +50,7 @@ struct UnifiedPageEditor: UIViewRepresentable {
          onTextChange: ((String, Data?) -> Void)? = nil, onInkChange: (([InkStroke], Data?) -> Void)? = nil,
          onInputChange: ((String) -> Void)? = nil, onPageChange: ((PageContent) -> Void)? = nil,
          onEquationEdit: ((NoteEquation) -> Void)? = nil, onPageValidate: ((PageContent) -> Bool)? = nil, onPageError: ((String) -> Void)? = nil,
-         onObjectPlacement: (() -> Void)? = nil) {
+         onObjectPlacement: (() -> Void)? = nil, toolbarHistory: PageToolbarHistory? = nil) {
         _text = text; _rtfData = rtfData; _strokes = strokes; _pencilKitData = pencilKitData
         _textBoxes = textBoxes; _equations = equations; _images = images; _diagrams = diagrams; self.tool = tool; self.colorHex = colorHex
         self.lineWidth = lineWidth ?? InkNibPreset.defaultWidth(for: tool); self.paper = paper; self.theme = theme
@@ -58,6 +60,7 @@ struct UnifiedPageEditor: UIViewRepresentable {
         self.onTextChange = onTextChange; self.onInkChange = onInkChange; self.onInputChange = onInputChange
         self.onPageChange = onPageChange; self.onEquationEdit = onEquationEdit; self.onPageValidate = onPageValidate; self.onPageError = onPageError
         self.onObjectPlacement = onObjectPlacement
+        self.toolbarHistory = toolbarHistory
     }
 
     func makeCoordinator() -> Coordinator { Coordinator(self) }
@@ -98,6 +101,10 @@ struct UnifiedPageEditor: UIViewRepresentable {
         private var expectedDrawingData: Data?
         private var toolConfiguration: String?
         private var previousTool: InkTool?
+        private enum NativeHistorySource: Equatable { case body, ink, textBox(UUID) }
+        private var lastNativeHistorySource: NativeHistorySource?
+        private var lastNativeHistoryManager: UndoManager?
+        private var lastNativeHistoryOwnerID: ObjectIdentifier?
         private var pendingFocus: InkTool?
         private var appliedTheme: PageTheme?
         private var canonicalColorsByPath: [StrokeColorKey: UIColor] = [:]
@@ -149,6 +156,9 @@ struct UnifiedPageEditor: UIViewRepresentable {
         deinit { for observer in undoObservers { NotificationCenter.default.removeObserver(observer) } }
 
         func attach(_ view: UnifiedPageScrollView) {
+            lastNativeHistorySource = nil
+            lastNativeHistoryManager = nil
+            lastNativeHistoryOwnerID = nil
             self.view = view
             selection.page = view.page
             view.page.selectionView.controller = selection
@@ -262,6 +272,11 @@ struct UnifiedPageEditor: UIViewRepresentable {
                 // PencilKit assigns stroke identifiers when replacing a
                 // drawing. Old native undo actions must not target stale IDs.
                 view.page.canvas.undoManager?.removeAllActions()
+                if lastNativeHistorySource == .ink {
+                    lastNativeHistorySource = nil
+                    lastNativeHistoryManager = nil
+                    lastNativeHistoryOwnerID = nil
+                }
             }
             appliedTheme = theme
             configureTool(on: view.page.canvas, theme: theme)
@@ -273,14 +288,14 @@ struct UnifiedPageEditor: UIViewRepresentable {
             if !content.images.isEmpty || !content.diagrams.isEmpty {
                 showingUnsupportedWarning = true
                 let objects = !content.images.isEmpty && !content.diagrams.isEmpty ? "images and diagrams" : (content.images.isEmpty ? "diagrams" : "images")
-                view.setInkError("This sheet contains \(objects). Open it on Mac to view and edit all page objects. Page editing is disabled on iPad; your saved content is preserved.")
+                view.setInkError("This page contains \(objects). Open it on Mac to view and edit all page objects. This page is read-only on iPad.")
                 view.panGestureRecognizer.minimumNumberOfTouches = 1
             } else if parent.tool == .diagram {
                 showingUnsupportedWarning = true
                 view.setInkError("Shapes, connectors and tables are currently created on Mac. Choose another tool to continue editing on iPad.")
             } else if showingUnsupportedWarning {
                 showingUnsupportedWarning = false
-                view.setInkError(rejectedDrawing ? "This sheet contains unsupported ink and cannot be edited safely. Its saved drawing has been preserved." : nil)
+                view.setInkError(rejectedDrawing ? "This page contains unsupported ink and cannot be edited safely. Its saved drawing has been preserved." : nil)
             }
             view.resizePage()
             linePreview.frame = view.page.bounds
@@ -288,6 +303,51 @@ struct UnifiedPageEditor: UIViewRepresentable {
                 previousTool = parent.tool
                 if enabled { focus(pendingFocus ?? parent.tool, in: view) }
             }
+            bindToolbarHistory()
+        }
+
+        private func bindToolbarHistory() {
+            selection.inkSelectionStyle = parent.inkSelectionStyle
+            parent.inkSelectionStyle?.bind(selection)
+            parent.toolbarHistory?.bind { [weak self] in self?.toolbarUndoManager() }
+        }
+
+        private func toolbarUndoManager() -> UndoManager? {
+            guard let page = view?.page, page.isUserInteractionEnabled,
+                  !rejectedDrawing, !nativeToolActive else { return nil }
+            // Selection transactions invalidate displaced native histories.
+            // Real native edits clear selection history through load(_:).
+            if selection.history.canUndo || selection.history.canRedo { return selection.history }
+            if let remembered = recordedNativeHistory(in: page), remembered.canUndo || remembered.canRedo {
+                return remembered
+            }
+            if let editor = page.activeTextView { return editor.undoManager }
+            return page.textToolSelected ? page.textView.undoManager : page.canvas.undoManager
+        }
+
+        private func recordedNativeHistory(in page: UnifiedPencilPage) -> UndoManager? {
+            guard let manager = lastNativeHistoryManager, let source = lastNativeHistorySource else { return nil }
+            guard let owner = nativeHistoryOwner(source, in: page), ObjectIdentifier(owner) == lastNativeHistoryOwnerID else { return nil }
+            // UIKit may temporarily expose no manager after resigning. Keep
+            // the recorded stack for that same native view, but reject an
+            // explicitly replaced stack or a different/removed native owner.
+            if let current = owner.undoManager, current !== manager { return nil }
+            return manager
+        }
+
+        private func nativeHistoryOwner(_ source: NativeHistorySource, in page: UnifiedPencilPage) -> UIResponder? {
+            switch source {
+            case .body: return page.textView
+            case .ink: return page.canvas
+            case .textBox(let id): return page.textBoxViews[id]?.editor
+            }
+        }
+
+        private func rememberNativeHistory(_ source: NativeHistorySource, manager: UndoManager?) {
+            lastNativeHistorySource = source
+            lastNativeHistoryManager = manager
+            lastNativeHistoryOwnerID = view.flatMap { nativeHistoryOwner(source, in: $0.page) }.map(ObjectIdentifier.init)
+            bindToolbarHistory()
         }
 
         private func focus(_ tool: InkTool, in view: UnifiedPageScrollView) {
@@ -385,6 +445,9 @@ struct UnifiedPageEditor: UIViewRepresentable {
             selection.onCommit = nil
             selection.page = nil
             view.onAttachment = nil
+            lastNativeHistorySource = nil
+            lastNativeHistoryManager = nil
+            lastNativeHistoryOwnerID = nil
         }
 
         func viewForZooming(in scrollView: UIScrollView) -> UIView? { view?.page }
@@ -513,6 +576,7 @@ struct UnifiedPageEditor: UIViewRepresentable {
             lastStrokes = portable
             var content = selection.content
             content.strokes = portable; content.pencilKitData = data
+            rememberNativeHistory(.ink, manager: canvas.undoManager)
             selection.load(content)
             if parent.onPageChange != nil { publishPage(content) }
             else if let onInkChange = parent.onInkChange { onInkChange(portable, data) }
@@ -523,6 +587,9 @@ struct UnifiedPageEditor: UIViewRepresentable {
         private func publishText(_ text: String, rtf: Data?) {
             guard supportsPageEditing else { return }
             var content = selection.content
+            if content.text != text || content.rtfData != rtf {
+                rememberNativeHistory(.body, manager: view?.page.textView.undoManager)
+            }
             content.text = text; content.rtfData = rtf
             selection.load(content)
             if parent.onPageChange != nil { publishPage(content) }
@@ -552,7 +619,7 @@ struct UnifiedPageEditor: UIViewRepresentable {
                 // Keep the original bytes intact. A failed native load must not
                 // become an empty drawing that is later autosaved over the note.
                 rejectedDrawing = true
-                view.setInkError("This sheet contains unsupported ink and cannot be edited safely. Its saved drawing has been preserved.")
+                view.setInkError("This page contains unsupported ink and cannot be edited safely. Its saved drawing has been preserved.")
                 return PKDrawing()
             }
         }
@@ -573,7 +640,6 @@ struct UnifiedPageEditor: UIViewRepresentable {
 
         private func renderObjects(_ content: PageContent, on view: UnifiedPageScrollView, theme: PageTheme, enabled: Bool) {
             let page = view.page
-            page.diagramView.configure(content.diagrams, theme: theme)
             let textIDs = Set(content.textBoxes.map(\.id)), equationIDs = Set(content.equations.map(\.id))
             for id in Array(page.textBoxViews.keys) where !textIDs.contains(id) { page.textBoxViews.removeValue(forKey: id)?.removeFromSuperview() }
             for id in Array(page.equationViews.keys) where !equationIDs.contains(id) { page.equationViews.removeValue(forKey: id)?.removeFromSuperview() }
@@ -585,6 +651,7 @@ struct UnifiedPageEditor: UIViewRepresentable {
                     guard let self, self.supportsPageEditing, let view, let index = self.selection.content.textBoxes.firstIndex(where: { $0.id == changed.id }) else { return }
                     var value = self.selection.content
                     guard value.textBoxes[index] != changed else { return }
+                    self.rememberNativeHistory(.textBox(changed.id), manager: view.page.textBoxViews[changed.id]?.editor.undoManager)
                     value.textBoxes[index] = changed
                     self.selection.load(value)
                     self.publishPage(value)
@@ -598,6 +665,13 @@ struct UnifiedPageEditor: UIViewRepresentable {
                 object.isUserInteractionEnabled = enabled && parent.tool == .text
                 object.configure(equation: equation, theme: theme, onRequestEdit: { [weak self] in self?.parent.onEquationEdit?(equation) })
             }
+            var diagrams = content.diagrams
+            if diagrams.contains(where: \.hasExternalAttachment) {
+                let frames = PageDiagramGeometry.externalAnchorFrames(images: content.images, textBoxes: content.textBoxes,
+                    equations: content.equations, textBoxHeight: { page.textBoxViews[$0]?.frame.height })
+                diagrams = PageDiagramGeometry.routedConnectors(in: diagrams, frames: frames)
+            } else { diagrams = PageDiagramGeometry.routedConnectors(in: diagrams) }
+            page.diagramView.configure(diagrams, theme: theme)
         }
 
         private struct StrokeColorKey: Hashable {
@@ -752,6 +826,7 @@ struct UnifiedPageEditor: UIViewRepresentable {
                 checks += try runToolShortcutDiagnostics()
                 checks += try runInputRoutingDiagnostics()
                 checks += try runNativeTypingUndoDiagnostics()
+                checks += try runToolbarHistoryDiagnostics()
                 checks += try runDiagramSafetyDiagnostics()
                 result = ["passed": true, "checks": checks, "message": "iPad straight lines, themes, ruled text baselines, canonical ink, mixed page selection and Select All routing from every tool, native metadata, clipboard duplication, atomic undo/redo and read-only diagram previews passed"]
             } catch { result = ["passed": false, "checks": checks, "message": error.localizedDescription] }
@@ -775,7 +850,7 @@ struct UnifiedPageEditor: UIViewRepresentable {
             }
             let shape = PageDiagram(kind: .roundedRectangle, x: 60, y: 80, width: 180, height: 100, text: "Saved नमस्ते")
             let table = PageDiagram(kind: .table, x: 300, y: 80, width: 240, height: 120, rows: 2, columns: 2,
-                cells: ["A", "B", "日本語", "👋"])
+                cells: ["A", "B", "日本語", "👋"], rowFractions: [0.25, 0.75], columnFractions: [0.625, 0.375])
             let arrow = PageDiagram(kind: .connector, start: InkPoint(x: 240, y: 130), end: InkPoint(x: 300, y: 140),
                 startAttachment: PageDiagramAttachment(targetDiagramID: shape.id, side: .right),
                 endAttachment: PageDiagramAttachment(targetDiagramID: table.id, side: .left), route: .elbow, arrowHeads: .both)
@@ -814,6 +889,11 @@ struct UnifiedPageEditor: UIViewRepresentable {
             let light = preview(.light, values: diagrams), dark = preview(.pitchBlack, values: diagrams), blank = preview(.light, values: [])
             try require(light != nil && dark != nil && light != blank && light != dark,
                 "The native iPad renderer draws shapes, connectors and table labels using resolved theme colors")
+            var equalTable = table
+            equalTable.rowFractions = nil
+            equalTable.columnFractions = nil
+            try require(preview(.light, values: [shape, equalTable, arrow]) != light,
+                "Custom row heights and column widths change the rendered table")
             coordinator.parent.theme = .pitchBlack
             coordinator.update(fixture, enabled: true)
             try require(coordinator.selection.content == source && fixture.page.diagramView.diagrams == diagrams && writes == 0,
@@ -827,19 +907,23 @@ struct UnifiedPageEditor: UIViewRepresentable {
             let board = UIPasteboard.general
             let savedItems = board.items
             defer { board.items = savedItems }
-            let payload = PageClipboardPayload(diagrams: diagrams)
-            board.setData(try JSONEncoder().encode(payload), forPasteboardType: PageClipboardPayload.pasteboardType)
             let beforePaste = coordinator.selection.content
             var rejectedPaste = false
             coordinator.selection.onError = { _ in rejectedPaste = true }
-            coordinator.selection.perform(.paste)
-            try require(rejectedPaste && coordinator.selection.content == beforePaste && writes == 0,
-                "A v4 diagram paste is explicitly rejected without dropping objects or editing the destination")
-            rejectedPaste = false
-            let nativeText = fixture.page.textView.text
-            fixture.page.textView.paste(nil)
-            try require(rejectedPaste && fixture.page.textView.text == nativeText && writes == 0,
-                "Native body/text-box Paste also rejects unsupported diagram objects before a plain-text fallback")
+            for value in [equalTable, table] {
+                let payload = PageClipboardPayload(diagrams: [shape, value, arrow])
+                let bytes = try JSONEncoder().encode(payload)
+                board.items = [Dictionary(uniqueKeysWithValues: payload.writablePasteboardTypes.map { ($0, bytes as Any) })]
+                rejectedPaste = false
+                coordinator.selection.perform(.paste)
+                try require(rejectedPaste && coordinator.selection.content == beforePaste && writes == 0,
+                    "Diagram paste rejects both legacy and individually sized tables on iPad")
+                rejectedPaste = false
+                let nativeText = fixture.page.textView.text
+                fixture.page.textView.paste(nil)
+                try require(rejectedPaste && fixture.page.textView.text == nativeText && writes == 0,
+                    "Native body/text-box Paste rejects unsupported diagrams before a plain-text fallback")
+            }
             var invalid = shape
             invalid.width = .infinity
             let renderer = IOSPageDiagramView(frame: CGRect(x: 0, y: 0, width: 100, height: 100))
@@ -1125,6 +1209,29 @@ struct UnifiedPageEditor: UIViewRepresentable {
             coordinator.render(source, on: view, theme: .dark)
             controller.select(polygon: [InkPoint(x: 0, y: 0), InkPoint(x: 400, y: 0), InkPoint(x: 0, y: 400)])
             try require(controller.selection.equations.isEmpty, "Lasso hit-testing must follow its polygon instead of the bounding rectangle")
+            let inkStyle = PageInkSelectionStyle()
+            inkStyle.bind(controller)
+            let beforeRecolor = writes
+            try require(inkStyle.apply("#395baf") && writes == beforeRecolor + 1, "Lassoed iPad handwriting takes one recolor transaction")
+            let recolored = saved
+            var expectedRecolor = source
+            for index in expectedRecolor.strokes.indices { expectedRecolor.strokes[index].colorHex = "#395BAF" }
+            expectedRecolor.pencilKitData = recolored.pencilKitData
+            let recoloredStroke = try PKDrawing(data: recolored.pencilKitData!).strokes[0]
+            let savedStroke = try PKDrawing(data: source.pencilKitData!).strokes[0]
+            try require(recolored == expectedRecolor && recoloredStroke.ink.color.noteHex == "#395BAF" &&
+                        recoloredStroke.transform == savedStroke.transform && recoloredStroke.mask?.bounds == savedStroke.mask?.bounds &&
+                        recoloredStroke.randomSeed == savedStroke.randomSeed && recoloredStroke.path.count == savedStroke.path.count,
+                        "iPad recolor preserves the mixed page, path, mask, texture, transform and portable identities")
+            #if compiler(>=6.4)
+            if #available(iOS 27, *) { try require(recoloredStroke.id == savedStroke.id, "Canonical iPad recolor preserves native stroke identity") }
+            #endif
+            try require(!inkStyle.apply("#395BAF") && writes == beforeRecolor + 1, "A repeated iPad recolor adds no write or history step")
+            controller.history.undo()
+            try require(saved == source, "Undo restores the exact canonical iPad drawing and page")
+            controller.history.redo()
+            try require(saved == recolored, "Redo restores the iPad ink color")
+            controller.history.undo()
             coordinator.parent.paper = .ruled
             coordinator.update(view, enabled: true)
             controller.selection = IOSPageSelection(strokes: Set(source.strokes.map(\.id)), nativeStrokes: [0], textBoxes: Set(source.textBoxes.map(\.id)))
@@ -1453,6 +1560,111 @@ struct UnifiedPageEditor: UIViewRepresentable {
             return checks
         }
 
+        private func runToolbarHistoryDiagnostics() throws -> Int {
+            guard let originalWindow = view?.window, let scene = originalWindow.windowScene else { throw CocoaError(.featureUnsupported) }
+            var checks = 0
+            func require(_ value: @autoclosure () -> Bool, _ message: String) throws {
+                guard value() else { throw NSError(domain: "iNotes.iPadToolbarHistory", code: 1,
+                    userInfo: [NSLocalizedDescriptionKey: message]) }
+                checks += 1
+            }
+            let box = PageTextBox(x: 300, y: 160, text: "Box seed")
+            var saved = PageContent(text: "Body seed", textBoxes: [box])
+            let toolbar = PageToolbarHistory()
+            let editor = UnifiedPageEditor(text: Binding(get: { saved.text }, set: { saved.text = $0 }),
+                rtfData: Binding(get: { saved.rtfData }, set: { saved.rtfData = $0 }),
+                strokes: Binding(get: { saved.strokes }, set: { saved.strokes = $0 }),
+                pencilKitData: Binding(get: { saved.pencilKitData }, set: { saved.pencilKitData = $0 }),
+                textBoxes: Binding(get: { saved.textBoxes }, set: { saved.textBoxes = $0 }),
+                tool: .text, toolbarHistory: toolbar)
+            let coordinator = Coordinator(editor)
+            coordinator.didRunDiagnostics = true
+            let host = UIViewController(), window = UIWindow(windowScene: scene)
+            window.frame = scene.coordinateSpace.bounds
+            window.rootViewController = host
+            window.windowLevel = originalWindow.windowLevel + 1
+            window.makeKeyAndVisible()
+            let fixture = UnifiedPageScrollView(frame: host.view.bounds)
+            host.view.addSubview(fixture)
+            coordinator.attach(fixture)
+            coordinator.update(fixture, enabled: true)
+            defer {
+                coordinator.detach(fixture)
+                fixture.removeFromSuperview()
+                window.isHidden = true; window.rootViewController = nil
+                originalWindow.makeKey()
+            }
+            let page = fixture.page
+            guard let bodyManager = page.textView.undoManager else { throw CocoaError(.featureUnsupported) }
+            let bodyGrouping = bodyManager.groupsByEvent
+            bodyManager.groupsByEvent = false
+            defer { bodyManager.groupsByEvent = bodyGrouping }
+            bodyManager.removeAllActions()
+            try require(page.textView.becomeFirstResponder(), "Toolbar history fixture focuses the actual native body editor")
+            bodyManager.beginUndoGrouping()
+            page.textView.selectedRange = NSRange(location: (page.textView.text as NSString).length, length: 0)
+            page.textView.insertText(" body")
+            coordinator.textViewDidChange(page.textView)
+            bodyManager.endUndoGrouping()
+            try require(saved.text == "Body seed body" && coordinator.lastNativeHistorySource == .body,
+                "A real body text edit records its native history owner")
+            coordinator.parent.tool = .pen; coordinator.update(fixture, enabled: true)
+            try require(coordinator.toolbarUndoManager() === bodyManager,
+                "Changing Text to Pen retains the last body edit instead of choosing a stale canvas history")
+            toolbar.undo()
+            try require(saved.text == "Body seed" && bodyManager.canRedo,
+                "Toolbar Undo from Pen undoes the body edit and preserves native Redo")
+            toolbar.redo()
+            try require(saved.text == "Body seed body", "Toolbar Redo from Pen restores the same body edit")
+
+            coordinator.parent.tool = .text; coordinator.update(fixture, enabled: true)
+            guard let nativeBox = page.textBoxViews[box.id], let boxManager = nativeBox.editor.undoManager else { throw CocoaError(.featureUnsupported) }
+            let boxGrouping = boxManager.groupsByEvent
+            boxManager.groupsByEvent = false
+            defer { boxManager.groupsByEvent = boxGrouping }
+            try require(nativeBox.editor.becomeFirstResponder(), "The native text-box editor owns the next real edit")
+            boxManager.beginUndoGrouping()
+            nativeBox.editor.selectedRange = NSRange(location: (nativeBox.editor.text as NSString).length, length: 0)
+            nativeBox.editor.insertText(" box")
+            nativeBox.persistNativeUndo()
+            boxManager.endUndoGrouping()
+            try require(saved.textBoxes.first?.text == "Box seed box" && coordinator.lastNativeHistorySource == .textBox(box.id),
+                "A text-box edit supersedes the older body history owner")
+            coordinator.parent.tool = .select; coordinator.update(fixture, enabled: true)
+            try require(coordinator.toolbarUndoManager() === boxManager,
+                "Changing to Select retains the actual text-box manager after its editor resigns")
+            toolbar.undo()
+            try require(saved.textBoxes.first?.text == "Box seed" && saved.text == "Body seed body",
+                "Toolbar Undo from Select changes the text box and preserves unrelated body text")
+            toolbar.redo()
+            try require(saved.textBoxes.first?.text == "Box seed box", "Toolbar Redo restores text-box content after focus changes")
+
+            coordinator.parent.tool = .line; coordinator.update(fixture, enabled: true)
+            guard let inkManager = page.canvas.undoManager else { throw CocoaError(.featureUnsupported) }
+            let line = PortableInkConverter.drawing(from: [InkStroke(points: [InkPoint(x: 80, y: 400), InkPoint(x: 240, y: 400)])])
+            coordinator.replaceDrawing(line, in: page.canvas, registerUndo: true)
+            try require(!saved.strokes.isEmpty && coordinator.lastNativeHistorySource == .ink,
+                "A real native line edit supersedes the earlier text-box history")
+            coordinator.parent.tool = .text; coordinator.update(fixture, enabled: true)
+            try require(coordinator.toolbarUndoManager() === inkManager,
+                "Changing to Text retains the most recent native ink history")
+            toolbar.undo()
+            try require(saved.strokes.isEmpty && inkManager.canRedo, "Toolbar Undo from Text reaches the native line action")
+            toolbar.redo()
+            try require(!saved.strokes.isEmpty, "Toolbar Redo from Text restores native ink")
+            coordinator.parent.theme = .dark; coordinator.update(fixture, enabled: true)
+            try require(coordinator.lastNativeHistorySource != .ink && !inkManager.canUndo && !inkManager.canRedo,
+                "Ink reprojection still clears stale native ink history and its retained owner")
+
+            var moved = saved; moved.textBoxes[0].x += 20
+            coordinator.selection.commit(moved, action: "Move toolbar fixture")
+            try require(coordinator.toolbarUndoManager() === coordinator.selection.history,
+                "An atomic selection transaction takes precedence over retained native histories")
+            coordinator.update(fixture, enabled: false)
+            try require(coordinator.toolbarUndoManager() == nil, "Read-only pages cannot route toolbar Undo or Redo")
+            return checks
+        }
+
         private func runNativeTypingUndoDiagnostics() throws -> Int {
             guard let originalView = view, let originalWindow = originalView.window, let scene = originalWindow.windowScene else {
                 throw CocoaError(.featureUnsupported)
@@ -1654,32 +1866,28 @@ final class IOSPageDiagramView: UIView {
             context.addPath(path.cgPath)
             context.strokePath()
             if value.kind == .table {
-                for row in 1..<value.rows {
-                    let y = frame.minY + frame.height * CGFloat(row) / CGFloat(value.rows)
+                for y in PageTableGeometry.edges(in: value, axis: .row).dropFirst().dropLast() {
                     context.move(to: CGPoint(x: frame.minX, y: y)); context.addLine(to: CGPoint(x: frame.maxX, y: y))
                 }
-                for column in 1..<value.columns {
-                    let x = frame.minX + frame.width * CGFloat(column) / CGFloat(value.columns)
+                for x in PageTableGeometry.edges(in: value, axis: .column).dropFirst().dropLast() {
                     context.move(to: CGPoint(x: x, y: frame.minY)); context.addLine(to: CGPoint(x: x, y: frame.maxY))
                 }
                 context.strokePath()
-                for row in 0..<value.rows { for column in 0..<value.columns {
-                    let cell = CGRect(x: frame.minX + frame.width * CGFloat(column) / CGFloat(value.columns),
-                        y: frame.minY + frame.height * CGFloat(row) / CGFloat(value.rows),
-                        width: frame.width / CGFloat(value.columns), height: frame.height / CGFloat(value.rows))
-                    drawText(value.cells[row * value.columns + column], in: cell.insetBy(dx: 5, dy: 3), color: color)
-                } }
+                for (index, text) in value.cells.enumerated() {
+                    let cell = PageTableGeometry.cellRect(index, in: value)
+                    drawText(text, in: cell.insetBy(dx: 5, dy: 3), color: color)
+                }
             } else if value.kind == .connector {
                 context.setLineDash(phase: 0, lengths: [])
                 let points = PageDiagramGeometry.connectorPoints(for: value, in: diagrams)
                 if value.arrowHeads == .end || value.arrowHeads == .both {
                     if let end = points.last, let previous = points.dropLast().last(where: { $0.x != end.x || $0.y != end.y }) {
-                        arrow(at: end, from: previous, width: value.lineWidth, context: context)
+                        drawArrowhead(at: end, from: previous, diagram: value, color: color, context: context)
                     }
                 }
                 if value.arrowHeads == .both, let start = points.first,
                    let next = points.dropFirst().first(where: { $0.x != start.x || $0.y != start.y }) {
-                    arrow(at: start, from: next, width: value.lineWidth, context: context)
+                    drawArrowhead(at: start, from: next, diagram: value, color: color, context: context)
                 }
                 drawText(value.text, in: bounds.insetBy(dx: 10, dy: 3), color: color)
             } else {
@@ -1697,13 +1905,14 @@ final class IOSPageDiagramView: UIView {
         return path
     }
 
-    private func arrow(at point: InkPoint, from previous: InkPoint, width: Double, context: CGContext) {
+    private func drawArrowhead(at point: InkPoint, from previous: InkPoint, diagram: PageDiagram, color: UIColor, context: CGContext) {
         let angle = atan2(point.y - previous.y, point.x - previous.x)
-        let length = max(10, width * 3)
+        let length = max(10, diagram.lineWidth * 3)
         context.move(to: CGPoint(x: point.x - cos(angle - .pi / 6) * length, y: point.y - sin(angle - .pi / 6) * length))
         context.addLine(to: CGPoint(x: point.x, y: point.y))
         context.addLine(to: CGPoint(x: point.x - cos(angle + .pi / 6) * length, y: point.y - sin(angle + .pi / 6) * length))
-        context.strokePath()
+        if diagram.openArrowheads == true { context.strokePath() }
+        else { context.closePath(); context.setFillColor(color.cgColor); context.fillPath() }
     }
 
     private func drawText(_ text: String, in rect: CGRect, color: UIColor) {
@@ -1917,15 +2126,13 @@ final class IOSPageTextView: UITextView {
         if let page = enclosingNotePage {
             guard page.isUserInteractionEnabled && page.selectionInputAllowed else { return }
             let board = UIPasteboard.general
-            if let data = board.data(forPasteboardType: PageClipboardPayload.pasteboardType)
-                ?? board.data(forPasteboardType: PageClipboardPayload.imagePasteboardType)
-                ?? board.data(forPasteboardType: PageClipboardPayload.legacyPasteboardType) {
+            if let data = PageClipboardPayload.readablePasteboardTypes.lazy.compactMap({ board.data(forPasteboardType: $0) }).first {
                 guard let payload = try? PageClipboardPayload.decodeValidated(data) else {
-                    page.selectionView.controller?.onError?("The copied page content could not be pasted safely. Your sheet has not been changed.")
+                    page.selectionView.controller?.onError?("The copied page content could not be pasted safely. Your page content is preserved.")
                     return
                 }
                 guard payload.images.isEmpty && payload.diagrams.isEmpty else {
-                    page.selectionView.controller?.onError?("Pasting page images or diagrams is currently available on Mac. Your sheet has not been changed.")
+                    page.selectionView.controller?.onError?("Pasting page images or diagrams is currently available on Mac. Your page content is preserved.")
                     return
                 }
             }

@@ -4,6 +4,91 @@ import AppKit
 import UniformTypeIdentifiers
 import NotesCore
 
+private struct NotebookExportActionKey: EnvironmentKey {
+    static let defaultValue: (UUID, GroupedExportPlan.Format) -> Void = { _, _ in }
+}
+
+private extension EnvironmentValues {
+    var exportNotebook: (UUID, GroupedExportPlan.Format) -> Void {
+        get { self[NotebookExportActionKey.self] }
+        set { self[NotebookExportActionKey.self] = newValue }
+    }
+}
+
+struct NotebookExportButtons: View {
+    let folder: NoteNode
+    @Environment(\.exportNotebook) private var export
+
+    var body: some View {
+        if folder.kind == .workbook {
+            Button("Export workbook as PDF bundle (ZIP)…") { export(folder.id, .zip) }
+        } else {
+            let kind = folder.kind == .chapter ? "chapter" : "topic"
+            Button("Export \(kind) as PDF…") { export(folder.id, .pdf) }
+            Button("Export \(kind) as PDF bundle (ZIP)…") { export(folder.id, .zip) }
+        }
+    }
+}
+
+/// The workspace owns the save panel and the operation so moving between
+/// pages or closing a context menu cannot abandon an export.
+struct NotebookExportPresenter: ViewModifier {
+    @EnvironmentObject private var store: NotesStore
+    @Environment(\.colorScheme) private var colorScheme
+    @AppStorage("workspaceTheme") private var scenery = "classic"
+    @AppStorage("pageColorScheme") private var paper = "system"
+    @ViewState private var task: Task<Void, Never>?
+    @ViewState private var progress: GroupedPageExport.Progress?
+
+    func body(content: Content) -> some View {
+        content.environment(\.exportNotebook, start)
+            .sheet(isPresented: Binding(get: { progress != nil }, set: { _ in })) {
+                if let progress {
+                    VStack(alignment: .leading, spacing: 14) {
+                        Text(progress.completedSheets == progress.totalSheets ? "Saving export…" : "Exporting pages").font(.headline)
+                        ProgressView(value: Double(progress.completedSheets), total: Double(max(1, progress.totalSheets)))
+                        if progress.completedSheets > 0 && progress.completedSheets < progress.totalSheets {
+                            Text(progress.currentTitle).lineLimit(1).foregroundStyle(.secondary)
+                        }
+                        HStack {
+                            Text("\(progress.completedSheets) of \(progress.totalSheets) pages").monospacedDigit()
+                            Spacer()
+                            Button("Cancel") { task?.cancel() }.keyboardShortcut(.cancelAction)
+                        }
+                    }.padding(22).frame(width: 340).interactiveDismissDisabled()
+                }
+            }
+            .onDisappear { task?.cancel() }
+    }
+
+    private func start(_ folderID: UUID, _ format: GroupedExportPlan.Format) {
+        guard task == nil else { return }
+        let library = store.library
+        do {
+            let plan = try GroupedExportPlan.make(library: library, rootID: folderID, format: format)
+            let panel = NSSavePanel()
+            panel.title = format == .zip ? "Save PDF bundle" : "Save notebook PDF"
+            panel.allowedContentTypes = [format == .zip ? .zip : .pdf]
+            panel.nameFieldStringValue = plan.suggestedFilename
+            panel.canCreateDirectories = true
+            guard panel.runModal() == .OK, let destination = panel.url else { return }
+            let theme = (PageColorScheme(rawValue: paper) ?? .system).resolved(isDark: colorScheme == .dark, scenery: scenery)
+            progress = .init(completedSheets: 0, totalSheets: plan.sheetCount, currentTitle: plan.suggestedFilename)
+            task = Task { @MainActor in
+                defer { progress = nil; task = nil }
+                do {
+                    _ = try await GroupedPageExport.write(plan: plan, library: library, to: destination, theme: theme,
+                                                          shouldCancel: { Task.isCancelled }, progress: { progress = $0 })
+                } catch is CancellationError {
+                    return
+                } catch {
+                    store.errorMessage = error.localizedDescription
+                }
+            }
+        } catch { store.errorMessage = error.localizedDescription }
+    }
+}
+
 @MainActor
 enum MacFileActions {
     static func chooseDriveFolder(_ store: NotesStore) {
@@ -115,7 +200,7 @@ struct NotesCommands: Commands {
                 .disabled(updater.isConfigured && !updater.canCheckForUpdates)
         }
         CommandGroup(replacing: .newItem) {
-            Button("New Sheet") { NotificationCenter.default.post(name: .newSheet, object: nil) }.keyboardShortcut("n")
+            Button("New Page") { NotificationCenter.default.post(name: .newSheet, object: nil) }.keyboardShortcut("n")
         }
         CommandGroup(after: .newItem) {
             Divider()

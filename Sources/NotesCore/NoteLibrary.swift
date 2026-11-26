@@ -1,7 +1,7 @@
 import Foundation
 
 public struct NoteLibrary: Codable, Equatable, Sendable {
-    public static let currentFormatVersion = 4
+    public static let currentFormatVersion = 5
     public var formatVersion: Int
     public private(set) var nodes: [NoteNode]
     public private(set) var modifiedAt: Date
@@ -103,7 +103,7 @@ public struct NoteLibrary: Codable, Equatable, Sendable {
               node.sheetNumber == previous.sheetNumber,
               node.lastSheetNumber == previous.lastSheetNumber,
               node.kind == previous.kind else {
-            throw LibraryError.invalidData("Creation dates and sheet numbering cannot be changed by a content edit.")
+            throw LibraryError.invalidData("Creation dates and page numbering cannot be changed by a content edit.")
         }
         var candidate = self
         var replacement = node
@@ -113,7 +113,8 @@ public struct NoteLibrary: Codable, Equatable, Sendable {
         }
         replacement.updatedAt = Date()
         candidate.nodes[index] = replacement
-        if !replacement.diagrams.isEmpty { candidate.formatVersion = max(candidate.formatVersion, 4) }
+        if replacement.diagrams.contains(where: \.requiresFormat5) { candidate.formatVersion = max(candidate.formatVersion, 5) }
+        else if !replacement.diagrams.isEmpty { candidate.formatVersion = max(candidate.formatVersion, 4) }
         else if !replacement.images.isEmpty { candidate.formatVersion = max(candidate.formatVersion, 3) }
         else if !replacement.textBoxes.isEmpty || !replacement.equations.isEmpty {
             candidate.formatVersion = max(candidate.formatVersion, 2)
@@ -269,6 +270,9 @@ public struct NoteLibrary: Codable, Equatable, Sendable {
         if formatVersion < 4, nodes.contains(where: { !$0.diagrams.isEmpty }) {
             throw LibraryError.invalidData("Shapes, connectors, and tables require archive format 4.")
         }
+        if formatVersion < 5, nodes.contains(where: { $0.diagrams.contains(where: \.requiresFormat5) }) {
+            throw LibraryError.invalidData("Custom table dimensions, open arrowheads, and links to page objects require archive format 5.")
+        }
         guard nodes.count <= 50_000 else { throw LibraryError.invalidData("Too many items.") }
         guard Set(nodes.map(\.id)).count == nodes.count else { throw LibraryError.duplicateID }
         let lookup = Dictionary(uniqueKeysWithValues: nodes.map { ($0.id, $0) })
@@ -289,7 +293,7 @@ public struct NoteLibrary: Codable, Equatable, Sendable {
                     guard let number = node.sheetNumber,
                           number <= parent.lastSheetNumber,
                           usedSheetNumbers[parentID, default: []].insert(number).inserted else {
-                        throw LibraryError.invalidData("A chapter or topic has missing or duplicate sheet numbers.")
+                        throw LibraryError.invalidData("A chapter or topic has missing or duplicate page numbers.")
                     }
                 }
             }
@@ -317,7 +321,7 @@ public struct NoteLibrary: Codable, Equatable, Sendable {
         let chapter = try! library.create(kind: .chapter, title: "Getting started", parentID: workbook)
         let page = try! library.create(kind: .sheet, title: "Welcome to iNotes", parentID: chapter)
         var note = library.node(id: page)!
-        note.body = "A quiet place for your ideas.\n\nOrganize workbooks into chapters, nested topics, and sheets. Write, sketch, attach files, and find everything with search.\n\nYour notes save automatically on this Mac. Connect a Google Drive folder to keep portable backups.\n\nTry creating a chapter for a project or course, then add a sheet to start writing."
+        note.body = "A quiet place for your ideas.\n\nOrganize workbooks into chapters, nested topics, and pages. Write, sketch, attach files, and find everything with search.\n\nYour notes save automatically on this Mac. Connect a Google Drive folder to keep portable backups.\n\nTry creating a chapter for a project or course, then add a page to start writing."
         note.tags = ["welcome"]
         try! library.update(note)
         return library
@@ -333,10 +337,15 @@ public struct NoteLibrary: Codable, Equatable, Sendable {
         _ = try cleanTitle(node.title, kind: node.kind)
         if previous?.images != node.images { try PageImageLimits.validate(node.images) }
         if previous?.diagrams != node.diagrams { try PageDiagramLimits.validate(node.diagrams) }
+        if node.diagrams.contains(where: \.hasExternalAttachment),
+           previous?.diagrams != node.diagrams || previous?.textBoxes != node.textBoxes
+            || previous?.equations != node.equations || previous?.images != node.images {
+            try PageDiagramLimits.validateExternalAttachments(in: node.pageContent)
+        }
         guard node.lastSheetNumber >= 0,
               (node.kind == .chapter || node.kind == .topic || node.lastSheetNumber == 0),
               (node.kind == .sheet ? node.sheetNumber.map { $0 > 0 } == true : node.sheetNumber == nil) else {
-            throw LibraryError.invalidData("Invalid sheet numbering.")
+            throw LibraryError.invalidData("Invalid page numbering.")
         }
         if previous?.textBoxes != node.textBoxes {
             guard node.textBoxes.count <= 10_000,
@@ -392,7 +401,7 @@ public struct NoteLibrary: Codable, Equatable, Sendable {
 
     private mutating func touch() { modifiedAt = Date() }
 
-    private static func pageOrder(_ first: NoteNode, _ second: NoteNode) -> Bool {
+    static func pageOrder(_ first: NoteNode, _ second: NoteNode) -> Bool {
         if first.order != second.order { return first.order < second.order }
         if first.createdAt != second.createdAt { return first.createdAt < second.createdAt }
         return first.id.uuidString < second.id.uuidString
@@ -448,12 +457,12 @@ public struct NoteLibrary: Codable, Equatable, Sendable {
         let indices = Dictionary(uniqueKeysWithValues: nodes.indices.map { (nodes[$0].id, $0) })
         var counters: [UUID: Int] = [:]
         for node in nodes where node.kind == .chapter || node.kind == .topic {
-            guard node.lastSheetNumber >= 0 else { throw LibraryError.invalidData("Invalid sheet numbering.") }
+            guard node.lastSheetNumber >= 0 else { throw LibraryError.invalidData("Invalid page numbering.") }
             counters[node.id] = node.lastSheetNumber
         }
         for node in nodes where node.kind == .sheet {
             if let number = node.sheetNumber {
-                guard number > 0 else { throw LibraryError.invalidData("Invalid sheet numbering.") }
+                guard number > 0 else { throw LibraryError.invalidData("Invalid page numbering.") }
                 if let parent = node.parentID, let counter = counters[parent] { counters[parent] = max(counter, number) }
             }
         }
@@ -468,7 +477,7 @@ public struct NoteLibrary: Codable, Equatable, Sendable {
         for index in missing {
             guard let parent = nodes[index].parentID, let previous = counters[parent] else { continue }
             let (number, overflow) = previous.addingReportingOverflow(1)
-            guard !overflow else { throw LibraryError.invalidData("This chapter or topic has reached its sheet number limit.") }
+            guard !overflow else { throw LibraryError.invalidData("This chapter or topic has reached its page number limit.") }
             nodes[index].sheetNumber = number
             counters[parent] = number
         }

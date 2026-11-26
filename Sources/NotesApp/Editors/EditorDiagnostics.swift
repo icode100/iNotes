@@ -330,10 +330,13 @@ enum EditorDiagnostics {
                   "page centers in both dimensions whenever the whole sheet fits")
         pageScroll.magnification = 1
         pageScroll.contentView.scroll(to: .zero)
+        let pageLayers = page.subviews.filter { $0 !== page.quickAdd?.button }
         try check(!page.textView.drawsBackground && !page.inkView.drawsPaper
-                  && page.subviews.firstIndex(of: page.textView)! < page.subviews.firstIndex(of: page.inkView)!
-                  && page.subviews.last === page.selectionView && !page.selectionView.isOpaque,
+                  && pageLayers.firstIndex(of: page.textView)! < pageLayers.firstIndex(of: page.inkView)!
+                  && pageLayers.last === page.selectionView && !page.selectionView.isOpaque,
                   "transparent ink overlays typed text on the same paper")
+        try check(page.quickAdd?.button.isHidden == true && page.quickAdd?.buttonHit(at: .zero) == nil,
+                  "the hover shortcut leaves the page layers and input unobstructed on blank paper")
         let textPoint = page.convert(NSPoint(x: 80, y: 80), to: page.superview)
         try check(page.hitTest(textPoint) === page.textView, "text tool routes mouse input to native rich text")
         var unrelatedEvents: [NSEvent] = []
@@ -945,6 +948,59 @@ enum EditorDiagnostics {
         selector.history.undo()
         try check(selector.content.pencilKitData == nativeSelectionContent.pencilKitData, "native duplicate undo restores original archived bytes")
 
+        do {
+            selector.history.removeAllActions()
+            var colored = maskedNative
+            colored.ink = PKInk(.marker, color: ThemeTextAttributes.color("#FFFFFF").withAlphaComponent(0.25))
+            let untouched = PortableInkConverter.drawing(from: [untouchedInk]).strokes[0]
+            let native = PKDrawing(strokes: [colored, untouched])
+            let source = PageContent(text: selectionBody.string, rtfData: selectionRTF, strokes: PortableInkConverter.strokes(from: native),
+                                     pencilKitData: native.dataRepresentation(), equations: [equation])
+            selector.load(source)
+            selector.select(polygon: PageSelectionGeometry.rectangle(from: InkPoint(x: 0, y: 0), to: InkPoint(x: 450, y: 350)))
+            let selected = selector.selection
+            let bridge = PageInkSelectionStyle()
+            bridge.bind(selector)
+            let beforeWrites = selectionWrites
+            try check(selected.nativeStrokes == [0] && selected.strokes == [source.strokes[0].id], "lasso selects only the masked handwriting to recolor")
+            try check(bridge.apply("#1d53ac") && selectionWrites == beforeWrites + 1 && selector.selection == selected,
+                      "handwriting recolor commits once and retains the mixed selection")
+            let changed = selector.content
+            let changedNative = try PKDrawing(data: changed.pencilKitData!)
+            let originalNative = try PKDrawing(data: source.pencilKitData!)
+            let edited = changedNative.strokes[0], original = originalNative.strokes[0]
+            var expected = source
+            expected.strokes[0].colorHex = "#1D53AC"
+            expected.pencilKitData = changed.pencilKitData
+            try check(changed == expected && ThemeTextAttributes.hex(edited.ink.color) == "#1D53AC"
+                      && ThemeTextAttributes.hex(changedNative.strokes[1].ink.color) == ThemeTextAttributes.hex(originalNative.strokes[1].ink.color),
+                      "custom RGB edits only selected ink, retaining portable IDs and every unrelated page field")
+            try check(edited.mask?.bounds == original.mask?.bounds && edited.transform == original.transform && edited.path.count == original.path.count
+                      && edited.path.creationDate == original.path.creationDate && edited.randomSeed == original.randomSeed
+                      && edited.ink.inkType == original.ink.inkType && abs(edited.ink.color.cgColor.alpha - original.ink.color.cgColor.alpha) < 0.001,
+                      "native recolor retains mask, path, transform, instrument, highlighter opacity and texture")
+            #if compiler(>=6.4)
+            if #available(macOS 27, *) {
+                try check(edited.id == original.id, "native recolor preserves PencilKit stroke identity")
+            }
+            #endif
+            try check(!bridge.apply("#1D53AC") && !bridge.apply("#Z12345") && selectionWrites == beforeWrites + 1,
+                      "unchanged and malformed ink colors add no writes or undo steps")
+            selector.history.undo()
+            try check(selector.content == source && !selector.history.canUndo, "one ink-color undo restores the exact mixed page and native archive")
+            selector.history.redo()
+            try check(selector.content == changed, "one redo restores exact recolored ink")
+            selectionPage.inkView.isInputEnabled = false
+            try check(!bridge.apply("#004477") && selector.content == changed, "read-only pages reject recoloring")
+            selectionPage.inkView.isInputEnabled = true
+            selectionPage.activeTool = .pen
+            selector.perform(.selectAll)
+            try check(bridge.apply("#004477") && selector.content.strokes.allSatisfy { $0.colorHex == "#004477" }, "Select All from the pen tool recolors all handwriting")
+            selector.perform(.clear)
+            try check(!bridge.apply("#FFFFFF"), "recoloring without a selection does nothing")
+            selectionPage.activeTool = .lasso
+            selector.load(nativeSelectionContent)
+        }
         let savedNativeContent = selector.content
         let writesBeforeInvalid = selectionWrites
         selector.history.removeAllActions()

@@ -3,7 +3,7 @@ import AppKit
 import PencilKit
 import NotesCore
 
-struct MacPageSelection {
+struct MacPageSelection: Equatable {
     var strokes = Set<UUID>()
     var nativeStrokes = Set<Int>()
     var textBoxes = Set<UUID>()
@@ -11,6 +11,9 @@ struct MacPageSelection {
     var images = Set<UUID>()
     var diagrams = Set<UUID>()
     var textRanges: [NSRange] = []
+    var externalObjectIDs: [PageObjectAnchorKind: Set<UUID>] {
+        [.textBox: textBoxes, .equation: equations, .image: images]
+    }
     var isEmpty: Bool { strokes.isEmpty && nativeStrokes.isEmpty && textBoxes.isEmpty && equations.isEmpty && images.isEmpty && diagrams.isEmpty && textRanges.isEmpty }
 }
 
@@ -75,10 +78,40 @@ final class PageUndoManager: UndoManager {
 }
 
 @MainActor
-final class MacPageSelectionController: NSObject {
+final class MacPageSelectionController: NSObject, SelectedInkEditing {
     weak var page: UnifiedMacPageView?
-    var content = PageContent()
-    var selection = MacPageSelection()
+    var content = PageContent() {
+        didSet {
+            inkSelectionStyle?.scheduleRefresh()
+            diagramSelectionStyle?.scheduleRefresh()
+            if !selection.diagrams.isEmpty { page?.selectionView.invalidateDividerCursors() }
+        }
+    }
+    var selection = MacPageSelection() {
+        didSet {
+            inkSelectionStyle?.scheduleRefresh()
+            diagramSelectionStyle?.scheduleRefresh()
+            if (!selection.diagrams.isEmpty || !oldValue.diagrams.isEmpty) && selection != oldValue {
+                page?.selectionView.invalidateDividerCursors()
+            }
+        }
+    }
+    weak var diagramSelectionStyle: MacDiagramSelectionStyle?
+    weak var inkSelectionStyle: PageInkSelectionStyle?
+    var canRecolorSelectedInk: Bool {
+        guard let page, page.inkView.isInputEnabled, !hasPreview,
+              hasToolIndependentSelection || page.activeTool == .select || page.activeTool == .lasso else { return false }
+        return !selection.strokes.isEmpty || !selection.nativeStrokes.isEmpty
+    }
+
+    @discardableResult func recolorSelectedInk(_ hex: String) -> Bool {
+        guard canRecolorSelectedInk else { return false }
+        do {
+            let value = try PortableInkConverter.recoloring(content, strokes: selection.strokes, nativeStrokes: selection.nativeStrokes, hex: hex)
+            guard value != content else { return false }
+            return commit(value, action: "Recolor Ink")
+        } catch { onPasteError?(error.localizedDescription); return false }
+    }
     var onRender: ((PageContent) -> Void)?
     var onCommit: ((PageContent) -> Void)?
     var onValidate: ((PageContent) -> Bool)?
@@ -89,6 +122,16 @@ final class MacPageSelectionController: NSObject {
     private var observer: NSObjectProtocol?
     private var isApplying = false
     private var transientContent: PageContent?
+    var displayedContent: PageContent { transientContent ?? content }
+    var hasPreview: Bool { transientContent != nil }
+    func projectedDiagrams(in value: PageContent, changedDiagrams: Set<UUID>? = nil,
+                           changedObjects: [PageObjectAnchorKind: Set<UUID>] = [:]) -> [PageDiagram] {
+        // A moved target can change the facing side of its stationary neighbor.
+        // The lookup therefore needs both targets, even for a single-object edit.
+        let frames = value.diagrams.contains(where: \.hasExternalAttachment) ? (page?.externalAnchorFrames(in: value) ?? [:]) : [:]
+        return PageDiagramGeometry.routedConnectors(in: value.diagrams, frames: frames,
+            movedDiagramIDs: changedDiagrams, movedObjectIDs: changedObjects)
+    }
     private(set) var hasToolIndependentSelection = false
 
     override init() {
@@ -159,12 +202,13 @@ final class MacPageSelectionController: NSObject {
         for image in content.images where PageSelectionGeometry.intersects(rect: CGRect(x: image.x, y: image.y, width: image.width, height: image.height), polygon: polygon) {
             value.images.insert(image.id)
         }
-        for diagram in content.diagrams {
+        let diagrams = projectedDiagrams(in: content)
+        for diagram in diagrams {
             let hit: Bool
             if diagram.kind == .connector {
-                let stroke = InkStroke(points: PageDiagramGeometry.connectorPoints(for: diagram, in: content.diagrams), width: diagram.lineWidth)
+                let stroke = InkStroke(points: PageDiagramGeometry.connectorPoints(for: diagram, in: diagrams), width: diagram.lineWidth)
                 hit = PageSelectionGeometry.intersects(stroke: stroke, polygon: polygon)
-                    || page.diagramView.labelBounds(of: diagram, in: content.diagrams).map {
+                    || page.diagramView.labelBounds(of: diagram, in: diagrams).map {
                         PageSelectionGeometry.intersects(rect: $0, polygon: polygon)
                     } == true
             } else { hit = PageSelectionGeometry.intersects(rect: PageDiagramGeometry.bounds(of: diagram, in: content.diagrams), polygon: polygon) }
@@ -178,11 +222,14 @@ final class MacPageSelectionController: NSObject {
     func select(at point: InkPoint, extending: Bool = false) {
         guard let page else { return }
         var value = extending ? selection : MacPageSelection()
+        let diagrams = projectedDiagrams(in: content)
         // The last-drawn ink is on top, matching the page's actual hit order.
         if let stroke = content.strokes.reversed().first(where: { PageSelectionGeometry.hits(stroke: $0, at: point) }) {
             value.strokes.insert(stroke.id)
             if let drawing = nativeDrawing(content) {
-                for (index, native) in drawing.strokes.enumerated() where PortableInkConverter.strokes(from: PKDrawing(strokes: [native])).contains(where: { PageSelectionGeometry.hits(stroke: $0, at: point) }) {
+                if let index = drawing.strokes.indices.reversed().first(where: { index in
+                    PortableInkConverter.strokes(from: PKDrawing(strokes: [drawing.strokes[index]])).contains { PageSelectionGeometry.hits(stroke: $0, at: point) }
+                }) {
                     value.nativeStrokes.insert(index)
                 }
             }
@@ -196,8 +243,8 @@ final class MacPageSelectionController: NSObject {
             if let hit = hits.first, hit.location < (content.text as NSString).length {
                 let word = page.textView.selectionRange(forProposedRange: hit, granularity: .selectByWord)
                 value.textRanges = merged(value.textRanges + [word])
-            } else if let diagram = content.diagrams.reversed().first(where: {
-                page.diagramView.hitTestDiagram($0, at: point, in: content.diagrams)
+            } else if let diagram = diagrams.reversed().first(where: {
+                page.diagramView.hitTestDiagram($0, at: point, in: diagrams)
             }) {
                 value.diagrams.insert(diagram.id)
             } else if let image = content.images.reversed().first(where: {
@@ -224,8 +271,9 @@ final class MacPageSelectionController: NSObject {
         rectangles += content.textBoxes.filter { selection.textBoxes.contains($0.id) }.compactMap { page.textBoxViews[$0.id]?.frame }
         rectangles += content.equations.filter { selection.equations.contains($0.id) }.map { CGRect(x: $0.x, y: $0.y, width: $0.width, height: $0.height) }
         rectangles += content.images.filter { selection.images.contains($0.id) }.map { CGRect(x: $0.x, y: $0.y, width: $0.width, height: $0.height) }
-        rectangles += content.diagrams.filter { selection.diagrams.contains($0.id) }.map {
-            page.diagramView.visualBounds(of: $0, in: content.diagrams)
+        let diagrams = projectedDiagrams(in: content)
+        rectangles += diagrams.filter { selection.diagrams.contains($0.id) }.map {
+            page.diagramView.visualBounds(of: $0, in: diagrams)
         }
         rectangles += selection.textRanges.compactMap { bodyRect(range: $0) }
         return rectangles.reduce(nil) { $0?.union($1) ?? $1 }
@@ -259,9 +307,10 @@ final class MacPageSelectionController: NSObject {
         points += base.images.filter { selected.images.contains($0.id) }.flatMap {
             [InkPoint(x: $0.x, y: $0.y), InkPoint(x: $0.x + $0.width, y: $0.y + $0.height)]
         }
-        points += base.diagrams.filter { selected.diagrams.contains($0.id) }.flatMap {
-            let bounds = page?.diagramView.visualBounds(of: $0, in: base.diagrams)
-                ?? PageDiagramGeometry.bounds(of: $0, in: base.diagrams)
+        let diagrams = projectedDiagrams(in: base)
+        points += diagrams.filter { selected.diagrams.contains($0.id) }.flatMap {
+            let bounds = page?.diagramView.visualBounds(of: $0, in: diagrams)
+                ?? PageDiagramGeometry.bounds(of: $0, in: diagrams)
             return [InkPoint(x: bounds.minX, y: bounds.minY), InkPoint(x: bounds.maxX, y: bounds.maxY)]
         }
         let bounds = PageSelectionGeometry.bounds(of: points)
@@ -303,7 +352,10 @@ final class MacPageSelectionController: NSObject {
             result.images[index].x = base.images[index].x + dx
             result.images[index].y = base.images[index].y + dy
         }
-        result.diagrams = PageDiagramGeometry.translated(base.diagrams, selectedIDs: selected.diagrams, dx: dx, dy: dy)
+        let sources = base.diagrams.enumerated().map { selected.diagrams.contains($0.element.id) ? diagrams[$0.offset] : $0.element }
+        result.diagrams = PageDiagramGeometry.translated(sources, selectedIDs: selected.diagrams, dx: dx, dy: dy,
+                                                       selectedObjectIDs: selected.externalObjectIDs)
+        result.diagrams = projectedDiagrams(in: result, changedDiagrams: selected.diagrams, changedObjects: selected.externalObjectIDs)
         return result
     }
 
@@ -327,6 +379,7 @@ final class MacPageSelectionController: NSObject {
         value.images[index].width = min(maximumWidth, max(min(max(24, minimumWidth), maximumWidth), width))
         value.images[index].height = value.images[index].width * ratio
         guard (try? PageImageLimits.validate(value.images)) != nil else { return base }
+        value.diagrams = projectedDiagrams(in: value, changedDiagrams: [], changedObjects: [.image: [id]])
         return value
     }
 
@@ -339,9 +392,10 @@ final class MacPageSelectionController: NSObject {
         rectangles += value.textBoxes.filter { selected == nil || selected!.textBoxes.contains($0.id) }.map { CGRect(x: $0.x, y: $0.y, width: $0.width, height: 24) }
         rectangles += value.equations.filter { selected == nil || selected!.equations.contains($0.id) }.map { CGRect(x: $0.x, y: $0.y, width: $0.width, height: $0.height) }
         rectangles += value.images.filter { selected == nil || selected!.images.contains($0.id) }.map { CGRect(x: $0.x, y: $0.y, width: $0.width, height: $0.height) }
-        rectangles += value.diagrams.filter { selected == nil || selected!.diagrams.contains($0.id) }.map {
-            page?.diagramView.visualBounds(of: $0, in: value.diagrams)
-                ?? PageDiagramGeometry.bounds(of: $0, in: value.diagrams)
+        let diagrams = projectedDiagrams(in: value)
+        rectangles += diagrams.filter { selected == nil || selected!.diagrams.contains($0.id) }.map {
+            page?.diagramView.visualBounds(of: $0, in: diagrams)
+                ?? PageDiagramGeometry.bounds(of: $0, in: diagrams)
         }
         if let drawing = nativeDrawing(value) {
             rectangles += drawing.strokes.enumerated().filter { selected == nil || selected!.nativeStrokes.contains($0.offset) }.map { $0.element.renderBounds }
@@ -377,7 +431,7 @@ final class MacPageSelectionController: NSObject {
         }
         guard (try? InkGeometryLimits.validate(value.strokes)) != nil,
               (try? PageImageLimits.validate(value.images)) != nil,
-              (try? PageDiagramLimits.validate(value.diagrams)) != nil else { NSSound.beep(); return reject() }
+              (try? PageDiagramLimits.validate(value)) != nil else { NSSound.beep(); return reject() }
         if value.pencilKitData != nil, nativeDrawing(value) == nil { NSSound.beep(); return reject() }
         guard onValidate?(value) != false else { return reject() }
         let needsGroup = history.groupingLevel == 0
@@ -400,9 +454,8 @@ final class MacPageSelectionController: NSObject {
         let hadToolIndependentSelection = hasToolIndependentSelection
         if command == .paste {
             let board = NSPasteboard.general
-            if let data = board.data(forType: NSPasteboard.PasteboardType(PageClipboardPayload.pasteboardType))
-                ?? board.data(forType: NSPasteboard.PasteboardType(PageClipboardPayload.imagePasteboardType))
-                ?? board.data(forType: NSPasteboard.PasteboardType(PageClipboardPayload.legacyPasteboardType)) {
+            let types = PageClipboardPayload.readablePasteboardTypes.map { NSPasteboard.PasteboardType($0) }
+            if let type = board.availableType(from: types), let data = board.data(forType: type) {
                 guard let payload = try? PageClipboardPayload.decodeValidated(data) else { NSSound.beep(); return }
                 if payload.images.isEmpty && payload.diagrams.isEmpty, page.activeTool == .text,
                    let editor = page.window?.firstResponder as? NSTextView,
@@ -471,13 +524,10 @@ final class MacPageSelectionController: NSObject {
     @discardableResult func copySelection(to board: NSPasteboard = .general) -> Bool {
         guard let payload = clipboardPayload(), let data = try? JSONEncoder().encode(payload), data.count <= PageClipboardPayload.maximumBytes else { return false }
         board.clearContents()
-        board.setData(data, forType: NSPasteboard.PasteboardType(PageClipboardPayload.pasteboardType))
-        if payload.diagrams.isEmpty {
-            board.setData(data, forType: NSPasteboard.PasteboardType(PageClipboardPayload.imagePasteboardType))
+        for type in payload.writablePasteboardTypes {
+            board.setData(data, forType: NSPasteboard.PasteboardType(type))
         }
-        if payload.images.isEmpty && payload.diagrams.isEmpty {
-            board.setData(data, forType: NSPasteboard.PasteboardType(PageClipboardPayload.legacyPasteboardType))
-        } else if payload.diagrams.isEmpty && payload.images.count == 1, payload.strokes.isEmpty, payload.pencilKitData == nil,
+        if payload.diagrams.isEmpty && payload.images.count == 1, payload.strokes.isEmpty, payload.pencilKitData == nil,
                   payload.textBoxes.isEmpty, payload.equations.isEmpty, payload.text.isEmpty {
             board.setData(payload.images[0].imageData, forType: .png)
         }
@@ -510,9 +560,13 @@ final class MacPageSelectionController: NSObject {
             guard let portable = try? PortableInkConverter.validatedStrokes(from: selected) else { return nil }
             native = selected.dataRepresentation(); ink = portable
         }
-        let diagrams = content.diagrams.filter { selection.diagrams.contains($0.id) }
+        let rendered = projectedDiagrams(in: content)
+        let diagrams = rendered.filter { selection.diagrams.contains($0.id) }
         let identities = Dictionary(uniqueKeysWithValues: diagrams.map { ($0.id, $0.id) })
-        let copiedDiagrams = PageDiagramGeometry.remapped(diagrams, mapping: identities, resolvingIn: content.diagrams)
+        let objectIDs = selection.externalObjectIDs.mapValues { ids in Dictionary(uniqueKeysWithValues: ids.map { ($0, $0) }) }
+        let frames = page?.externalAnchorFrames(in: content) ?? [:]
+        let copiedDiagrams = PageDiagramGeometry.remapped(diagrams, mapping: identities, resolvingIn: rendered,
+            objectMappings: objectIDs, sourceFrames: frames)
         return PageClipboardPayload(text: plain, rtfData: rtf(text), strokes: ink, pencilKitData: native, textBoxes: boxes, equations: equations, images: content.images.filter { selection.images.contains($0.id) }, diagrams: copiedDiagrams)
     }
 
@@ -529,7 +583,9 @@ final class MacPageSelectionController: NSObject {
         value.textBoxes.removeAll { selection.textBoxes.contains($0.id) }
         value.equations.removeAll { selection.equations.contains($0.id) }
         value.images.removeAll { selection.images.contains($0.id) }
-        value.diagrams = PageDiagramGeometry.removing(ids: selection.diagrams, from: value.diagrams)
+        let targetIDs = selection.externalObjectIDs
+        let frames = page?.externalAnchorFrames(in: content) ?? [:]
+        value.diagrams = PageDiagramGeometry.removing(ids: selection.diagrams, from: content.diagrams, objectIDs: targetIDs, frames: frames)
         if !selection.textRanges.isEmpty {
             let body = NSMutableAttributedString(attributedString: canonicalBody())
             for range in selection.textRanges.reversed() where NSMaxRange(range) <= body.length { body.deleteCharacters(in: range) }
@@ -540,7 +596,9 @@ final class MacPageSelectionController: NSObject {
 
     @discardableResult
     func paste(_ payload: PageClipboardPayload, offset: Double, action: String) -> Bool {
-        do { try PageDiagramLimits.validate(payload.diagrams) }
+        let incoming = PageContent(textBoxes: payload.textBoxes, equations: payload.equations,
+                                   images: payload.images, diagrams: payload.diagrams)
+        do { try PageDiagramLimits.validate(incoming) }
         catch {
             onPasteError?(error.localizedDescription)
             NSSound.beep()
@@ -583,8 +641,11 @@ final class MacPageSelectionController: NSObject {
             selected.nativeStrokes = Set(before.strokes.count..<combined.strokes.count)
             selected.strokes = Set(value.strokes.suffix(payload.strokes.count).map(\.id))
         }
+        var objectMappings: [PageObjectAnchorKind: [UUID: UUID]] = [:]
         for var box in payload.textBoxes {
-            box.id = UUID(); box.x += offsetX; box.y = max(0, min(100_000, box.y + offset))
+            let newID = UUID()
+            objectMappings[.textBox, default: [:]][box.id] = newID
+            box.id = newID; box.x += offsetX; box.y = max(0, min(100_000, box.y + offset))
             value.textBoxes.append(box); selected.textBoxes.insert(box.id)
         }
         if payload.textBoxes.isEmpty && payload.equations.isEmpty && payload.diagrams.isEmpty && !payload.text.isEmpty {
@@ -592,15 +653,19 @@ final class MacPageSelectionController: NSObject {
             value.textBoxes.append(box); selected.textBoxes.insert(box.id)
         }
         for var equation in payload.equations {
-            equation.id = UUID(); equation.x += offsetX; equation.y = max(0, min(100_000, equation.y + offset))
+            let newID = UUID()
+            objectMappings[.equation, default: [:]][equation.id] = newID
+            equation.id = newID; equation.x += offsetX; equation.y = max(0, min(100_000, equation.y + offset))
             value.equations.append(equation); selected.equations.insert(equation.id)
         }
         for var image in payload.images {
-            image.id = UUID(); image.x += offsetX; image.y += offset
+            let newID = UUID()
+            objectMappings[.image, default: [:]][image.id] = newID
+            image.id = newID; image.x += offsetX; image.y += offset
             value.images.append(image); selected.images.insert(image.id)
         }
         let mapping = Dictionary(uniqueKeysWithValues: payload.diagrams.map { ($0.id, UUID()) })
-        let diagrams = PageDiagramGeometry.remapped(payload.diagrams, mapping: mapping, dx: offsetX, dy: offset)
+        let diagrams = PageDiagramGeometry.remapped(payload.diagrams, mapping: mapping, dx: offsetX, dy: offset, objectMappings: objectMappings)
         value.diagrams.append(contentsOf: diagrams)
         selected.diagrams = Set(diagrams.map(\.id))
         // Validate the resulting page too: multiple individually bounded pastes
@@ -611,6 +676,11 @@ final class MacPageSelectionController: NSObject {
             onPasteError?(error.localizedDescription)
             NSSound.beep()
             return false
+        }
+        if !diagrams.isEmpty {
+            let frames = page?.externalAnchorFrames(in: value, measuringTextBoxes: selected.textBoxes) ?? [:]
+            value.diagrams = PageDiagramGeometry.routedConnectors(in: value.diagrams, frames: frames,
+                movedDiagramIDs: selected.diagrams, movedObjectIDs: selected.externalObjectIDs)
         }
         guard commit(value, action: action) else { return false }
         if !payload.images.isEmpty || !payload.diagrams.isEmpty { finishObjectPlacement(selecting: selected) }
@@ -688,6 +758,16 @@ final class MacPageSelectionView: NSView {
     private var resizingImageID: UUID?
     private var resizingDiagramID: UUID?
     private var reconnectingDiagram: (id: UUID, starting: Bool)?
+    private struct TableDivider {
+        let tableID: UUID
+        let axis: PageTableAxis
+        let index: Int
+        let coordinate: Double
+        let hitRect: CGRect
+        let grip: CGRect
+        @MainActor var cursor: NSCursor { axis == .column ? .resizeLeftRight : .resizeUpDown }
+    }
+    private var resizingDivider: TableDivider?
     private var creatingDiagramID: UUID?
     private var before: PageContent?
     private var moveBase: PageContent?
@@ -701,12 +781,62 @@ final class MacPageSelectionView: NSView {
         super.init(frame: frame)
         setAccessibilityElement(true); setAccessibilityRole(.group)
         setAccessibilityLabel("Shared page selection")
-        setAccessibilityHelp("Drag a rectangle or lasso around text, images and handwriting, then drag the selection to move it. Drag the lower-right handle of a selected image, shape or table to resize it, or an arrow endpoint to reconnect it. Double-click a shape label or table cell to edit its text. Copy, cut, paste, delete and undo work on the whole selection.")
+        setAccessibilityHelp("Drag a rectangle or lasso around text, images and handwriting, then drag the selection to move it. Drag the lower-right handle of a selected image, shape or table to resize it, or an arrow endpoint to reconnect it. In Select, drag a selected table's internal divider to resize adjacent rows or columns. Double-click a shape label or table cell to edit its text. Copy, cut, paste, delete and undo work on the whole selection.")
     }
     required init?(coder: NSCoder) { fatalError("init(coder:) is unavailable") }
     override func resetCursorRects() {
         guard let tool = controller?.page?.activeTool, tool == .select || tool == .lasso || tool == .diagram else { return }
         addCursorRect(bounds, cursor: tool == .select ? .arrow : .crosshair)
+        for divider in tableDividers() { addCursorRect(divider.hitRect, cursor: divider.cursor) }
+    }
+
+    func invalidateDividerCursors() { window?.invalidateCursorRects(for: self) }
+
+    private func tableDividers() -> [TableDivider] {
+        guard let controller, let page = controller.page, page.activeTool == .select, page.inkView.isInputEnabled,
+              let id = controller.singleSelectedDiagramID,
+              let table = controller.displayedContent.diagrams.first(where: { $0.id == id && $0.kind == .table }) else { return [] }
+        let scale = max(0.01, page.enclosingScrollView?.magnification ?? 1)
+        var dividers: [TableDivider] = []
+        for axis in [PageTableAxis.column, .row] {
+            let edges = PageTableGeometry.edges(in: table, axis: axis)
+            for index in edges.indices.dropFirst().dropLast() {
+                let edge = edges[index]
+                let adjacent = min(edge - edges[index - 1], edges[index + 1] - edge)
+                let tolerance = min(4 / scale, adjacent / 4)
+                let hitRect: CGRect, grip: CGRect
+                if axis == .column {
+                    hitRect = CGRect(x: edge - tolerance, y: table.y, width: 2 * tolerance, height: table.height)
+                    grip = CGRect(x: edge - tolerance, y: table.y - 1.5 / scale, width: 2 * tolerance, height: 3 / scale)
+                } else {
+                    hitRect = CGRect(x: table.x, y: edge - tolerance, width: table.width, height: 2 * tolerance)
+                    grip = CGRect(x: table.x - 1.5 / scale, y: edge - tolerance, width: 3 / scale, height: 2 * tolerance)
+                }
+                dividers.append(TableDivider(tableID: id, axis: axis, index: index, coordinate: edge,
+                                              hitRect: hitRect.union(grip), grip: grip))
+            }
+        }
+        return dividers
+    }
+
+    private func divider(at point: CGPoint) -> TableDivider? {
+        tableDividers().filter { $0.hitRect.contains(point) }.min { lhs, rhs in
+            abs((lhs.axis == .column ? point.x : point.y) - lhs.coordinate)
+                < abs((rhs.axis == .column ? point.x : point.y) - rhs.coordinate)
+        }
+    }
+
+    func tableDividerCursor(at point: CGPoint) -> NSCursor? {
+        resizingDivider?.cursor ?? divider(at: point)?.cursor
+    }
+
+    private func resizeDivider(_ divider: TableDivider, in base: PageContent, from start: InkPoint, to end: InkPoint) -> PageContent {
+        guard let index = base.diagrams.firstIndex(where: { $0.id == divider.tableID }) else { return base }
+        let delta = divider.axis == .column ? end.x - start.x : end.y - start.y
+        var next = base
+        next.diagrams[index] = PageTableGeometry.movingDivider(base.diagrams[index], index: divider.index,
+            on: divider.axis, to: divider.coordinate + delta)
+        return next
     }
 
     override func mouseDown(with event: NSEvent) {
@@ -716,7 +846,7 @@ final class MacPageSelectionView: NSView {
             controller.clearToolIndependentSelection()
             window?.makeFirstResponder(self)
             start = point; before = controller.content; creatingDiagramID = UUID()
-            resizingImageID = nil; resizingDiagramID = nil; reconnectingDiagram = nil; moving = false
+            resizingImageID = nil; resizingDiagramID = nil; reconnectingDiagram = nil; resizingDivider = nil; moving = false
             polygon = []; moveBase = nil; lastPreview = nil
             return
         }
@@ -724,8 +854,8 @@ final class MacPageSelectionView: NSView {
             if let equation = controller.content.equations.reversed().first(where: { CGRect(x: $0.x, y: $0.y, width: $0.width, height: $0.height).contains(CGPoint(x: point.x, y: point.y)) }) {
                 controller.onEquationEdit?(equation); return
             }
-            if let diagram = controller.content.diagrams.reversed().first(where: {
-                page.diagramView.hitTestDiagram($0, at: point, in: controller.content.diagrams)
+            if let diagram = page.diagramView.diagrams.reversed().first(where: {
+                page.diagramView.hitTestDiagram($0, at: point)
             }) {
                 controller.requestDiagramTextEdit(id: diagram.id, at: point); return
             }
@@ -741,11 +871,11 @@ final class MacPageSelectionView: NSView {
         }
         window?.makeFirstResponder(self)
         start = point; before = controller.content; moveBase = nil; lastPreview = nil
-        resizingImageID = nil; resizingDiagramID = nil; reconnectingDiagram = nil; creatingDiagramID = nil
+        resizingImageID = nil; resizingDiagramID = nil; reconnectingDiagram = nil; creatingDiagramID = nil; resizingDivider = nil
         if let id = controller.singleSelectedDiagramID,
-           let diagram = controller.content.diagrams.first(where: { $0.id == id }) {
+           let diagrams = controller.page?.diagramView.diagrams, let diagram = diagrams.first(where: { $0.id == id }) {
             if diagram.kind == .connector {
-                let ends = PageDiagramGeometry.resolvedEndpoints(for: diagram, in: controller.content.diagrams)
+                let ends = PageDiagramGeometry.resolvedEndpoints(for: diagram, in: diagrams)
                 let tolerance = 10 / Double(controller.page?.enclosingScrollView?.magnification ?? 1)
                 if hypot(point.x - ends.start.x, point.y - ends.start.y) <= tolerance { reconnectingDiagram = (id, true) }
                 else if hypot(point.x - ends.end.x, point.y - ends.end.y) <= tolerance { reconnectingDiagram = (id, false) }
@@ -758,6 +888,29 @@ final class MacPageSelectionView: NSView {
             let handle = CGRect(x: bounds.maxX - 3, y: bounds.maxY - 3, width: 16, height: 16)
             if handle.contains(CGPoint(x: point.x, y: point.y)) { resizingImageID = id }
         }
+        if resizingDiagramID == nil, !event.modifierFlags.contains(.shift),
+           let divider = divider(at: CGPoint(x: point.x, y: point.y)) {
+            resizingDivider = divider
+            moving = false
+            polygon = []
+            return
+        }
+        if controller.page?.activeTool == .select, !event.modifierFlags.contains(.shift),
+           resizingImageID == nil, resizingDiagramID == nil, reconnectingDiagram == nil {
+            // Pick up the topmost movable object under the pointer. Pressing a
+            // member of an existing multiple selection keeps the group intact.
+            let previousSelection = controller.selection
+            controller.select(at: point)
+            let hit = controller.selection
+            let picksUpShape = controller.singleSelectedDiagramID.map { id in
+                !previousSelection.diagrams.contains(id)
+                    && controller.content.diagrams.contains(where: { $0.id == id && $0.kind != .connector })
+            } ?? false
+            let picksUpExternalObject = !hit.images.isSubset(of: previousSelection.images)
+                || !hit.textBoxes.isSubset(of: previousSelection.textBoxes)
+                || !hit.equations.isSubset(of: previousSelection.equations)
+            if !picksUpShape && !picksUpExternalObject { controller.selection = previousSelection }
+        }
         moving = resizingImageID == nil && resizingDiagramID == nil && reconnectingDiagram == nil && !controller.selection.isEmpty && controller.selectionBounds()?.insetBy(dx: -5, dy: -5).contains(CGPoint(x: point.x, y: point.y)) == true
         if !moving && resizingImageID == nil && resizingDiagramID == nil && reconnectingDiagram == nil { polygon = [point]; if !event.modifierFlags.contains(.shift) { controller.selection = MacPageSelection() } }
         needsDisplay = true
@@ -766,7 +919,12 @@ final class MacPageSelectionView: NSView {
     override func mouseDragged(with event: NSEvent) {
         guard let start, let controller else { return }
         let point = pagePoint(event)
-        if let id = creatingDiagramID, let before {
+        if let divider = resizingDivider, let before {
+            guard controller.page?.activeTool == .select, controller.page?.inkView.isInputEnabled == true,
+                  controller.content == before, controller.singleSelectedDiagramID == divider.tableID else { return }
+            let value = resizeDivider(divider, in: before, from: start, to: point)
+            lastPreview = value; controller.preview(value)
+        } else if let id = creatingDiagramID, let before {
             let value = controller.diagramCandidate(from: start, to: point, id: id, base: before)
             lastPreview = value; controller.preview(value)
         } else if let reconnectingDiagram, let before {
@@ -801,7 +959,16 @@ final class MacPageSelectionView: NSView {
     override func mouseUp(with event: NSEvent) {
         guard let start, let controller else { return }
         let end = pagePoint(event)
-        if let id = creatingDiagramID, let before {
+        if let divider = resizingDivider {
+            if let before, lastPreview != nil, controller.content == before,
+               controller.page?.activeTool == .select, controller.page?.inkView.isInputEnabled == true,
+               controller.singleSelectedDiagramID == divider.tableID {
+                let value = resizeDivider(divider, in: before, from: start, to: end)
+                controller.commit(value, previous: before, action: divider.axis == .column ? "Resize Table Column" : "Resize Table Row")
+            } else if controller.hasPreview { controller.cancelPreview() }
+            resizingDivider = nil
+            invalidateDividerCursors()
+        } else if let id = creatingDiagramID, let before {
             let value = controller.diagramCandidate(from: start, to: end, id: id, base: before)
             if controller.commit(value, previous: before, action: "Insert Diagram") {
                 controller.finishObjectPlacement(selecting: MacPageSelection(diagrams: [id]))
@@ -835,9 +1002,9 @@ final class MacPageSelectionView: NSView {
                 }
             }
         }
-        if let id = controller.singleSelectedDiagramID,
-           let diagram = (lastPreview ?? controller.content).diagrams.first(where: { $0.id == id && $0.kind == .connector }) {
-            let endpoints = PageDiagramGeometry.resolvedEndpoints(for: diagram, in: (lastPreview ?? controller.content).diagrams)
+        if let id = controller.singleSelectedDiagramID, let diagrams = controller.page?.diagramView.diagrams,
+           let diagram = diagrams.first(where: { $0.id == id && $0.kind == .connector }) {
+            let endpoints = PageDiagramGeometry.resolvedEndpoints(for: diagram, in: diagrams)
             for point in [endpoints.start, endpoints.end] {
                 NSColor.controlAccentColor.setFill()
                 NSBezierPath(ovalIn: CGRect(x: point.x - 5, y: point.y - 5, width: 10, height: 10)).fill()
@@ -856,6 +1023,11 @@ final class MacPageSelectionView: NSView {
                 NSColor.controlAccentColor.setFill(); NSBezierPath(ovalIn: CGRect(x: point.x - 3, y: point.y - 3, width: 6, height: 6)).fill()
             }
         }
+        NSColor.controlAccentColor.setFill()
+        for divider in tableDividers() {
+            let radius = min(divider.grip.width, divider.grip.height) / 2
+            NSBezierPath(roundedRect: divider.grip, xRadius: radius, yRadius: radius).fill()
+        }
     }
 
     override func keyDown(with event: NSEvent) {
@@ -865,6 +1037,7 @@ final class MacPageSelectionView: NSView {
     }
     override func cancelOperation(_ sender: Any?) {
         controller?.perform(.clear)
+        resizingDivider = nil
         start = nil; before = nil; moveBase = nil; lastPreview = nil; polygon = []; moving = false; resizingImageID = nil; resizingDiagramID = nil; reconnectingDiagram = nil; creatingDiagramID = nil
         needsDisplay = true
     }

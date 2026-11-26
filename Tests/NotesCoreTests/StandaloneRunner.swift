@@ -85,7 +85,10 @@ struct StandaloneTestRunner {
         let inkValidation = InkValidationTests()
         let images = PageImageTests()
         let diagrams = PageDiagramTests()
+        let exports = GroupedExportTests()
         let tests: [(String, XCTestCase, () throws -> Void)] = [
+            ("ordered topic PDF and nested bookmarks", exports, exports.testTopicPDFIncludesOrderedPagesAndNestedBookmarks),
+            ("bundle hierarchy and filename collisions", exports, exports.testBundleKeepsDuplicateAndUnsafeFolderTitlesDistinct),
             ("diagram archive persistence import search snapshots", diagrams, diagrams.testDiagramArchivePersistenceDuplicateImportSearchAndSnapshots),
             ("legacy diagram defaults and format promotion", diagrams, diagrams.testLegacyDiagramDefaultsAndStickyFormatFourPromotion),
             ("diagram geometry style attachment atomic rejection", diagrams, diagrams.testInvalidDiagramGeometryStyleAndAttachmentRejectAtomically),
@@ -93,6 +96,13 @@ struct StandaloneTestRunner {
             ("connector anchors routing hit testing", diagrams, diagrams.testConnectorAnchorsRoutingHitTestingAndBoundaryDetachment),
             ("diagram move delete clipboard graph", diagrams, diagrams.testDiagramMoveDeleteAndCopyRemapPreserveConnectorGraph),
             ("mixed diagram clipboard validation", diagrams, diagrams.testDiagramMixedClipboardRoundTripAndValidation),
+            ("individual table divider geometry", diagrams, diagrams.testTableDividerGeometryMatchesDrawingHitTestingAndFrameResizing),
+            ("custom table and arrow archive and clipboard versions", diagrams, diagrams.testStyledDiagramsRequireFormatFiveAndClipboardReadersRetainOlderTypes),
+            ("invalid table and arrow style rejection", diagrams, diagrams.testInvalidCustomTableSizesAndArrowStylesRejectAtomically),
+            ("external connector targets in archives and clipboard", diagrams, diagrams.testExternalArrowReferencesUsePageScopedKindsAndPersistAtomically),
+            ("external endpoint move removal and remapping", diagrams, diagrams.testExternalArrowMoveDeletionAndCopyRetainOnlySelectedTypedTargets),
+            ("automatic connector facing and vertical elbows", diagrams, diagrams.testAutomaticConnectorFacesMovingAndResizedTargetsInEveryDirection),
+            ("automatic external ports pins detachment and clipboard", diagrams, diagrams.testAutomaticConnectorProjectionScopesTypedTargetsPinsAndFreeEnds),
             ("annotated image save duplicate import", images, images.testImageArchiveSaveDuplicateAndImportPreserveAnnotatedPage),
             ("legacy image defaults and version promotion", images, images.testLegacyArchivesSnapshotsAndClipboardDefaultImagesAndPromoteOnlyWhenNeeded),
             ("image geometry atomic rejection", images, images.testImageGeometryAndIDsRejectAtomicallyAcrossArchiveAndClipboard),

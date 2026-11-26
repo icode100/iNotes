@@ -1,6 +1,13 @@
 # iNotes
 
-**iNotes 1.3.0, build 2021** adds Mac shapes, attached arrow connectors and
+**iNotes 1.4.0** adds page navigation at the foot of the notebook, topic PDFs
+and workbook ZIP exports, editable table dimensions, and a movable circular
+toolbar for Full Page. It also adds connected shapes, post-drawing ink colors
+and personal pen and paper defaults. The v1.4.0 candidate has been approved for
+publication. [Latest public Mac release](https://github.com/icode100/iNotes/releases/latest)
+and [v1.4.0 release notes](docs/releases/1.4.0.md).
+
+**iNotes 1.3.0, build 2021** introduced Mac shapes, attached arrow connectors and
 editable table cells. Published and independently verified on 6 November 2026.
 [Download the Mac installer](https://github.com/icode100/iNotes/releases/download/v1.3.0/iNotes-1.3.0-arm64.dmg).
 Exact-source hosted Native checks, iPad compilation, signed release checks and
@@ -15,12 +22,12 @@ The icon palette offers five
 basic shapes, straight/elbow connectors, arrowheads, tinted fills and table
 dimensions, with names on hover. Choose another icon or press **S** to arm the
 next placement; **⌘⌥S** works while typing.
-Diagram pages are read-only on iPad. Archives containing diagrams use format 4
-and require this version; older archives still open.
+Diagram pages are read-only on iPad. The published 1.3.0 app writes archives
+with diagrams in format 4 and also opens earlier formats.
 
 The **v1.2 update (1.2.2, build 2020)** adds paper, ink, title and zoom changes:
 scenery-matched paper, Vintage Black, Pitch Black/White, five pastel papers,
-sixteen ink presets and a native custom color picker. New sheets open blank
+sixteen ink presets and a native custom color picker. New pages open blank
 immediately; type in the underlined title at the top to name them, or leave it
 empty. Mac pages initially fit the visible page width; Command-Plus/Minus zoom
 manually and View → Fit Page Width restores fitting.
@@ -47,31 +54,43 @@ Pencil and Straight Line, and 2 mm for Brush/Marker.
 Its earlier results remain in the [v1.1 release notes](docs/releases/1.1.0.md)
 and [validation history](docs/TESTING.md).
 
-The existing fixes keep active sheets numbered consecutively after
+The existing fixes keep active pages numbered consecutively after
 deletion, restoration, moves, and drag reordering. They also make **⌘A** select
 the whole page from every tool.
 
 A small, native, open-source notebook for Apple silicon Macs, with a shared iPad app target. Built with SwiftUI, AppKit/UIKit, and PencilKit, with Sparkle for signed Mac updates and SwiftMath for offline equations. No Electron, cloud SDK, account, or telemetry.
 
+## Editing in iNotes 1.4
+
+- **Float the toolbar.** Open **Appearance → Full-screen toolbar** and choose **Floating · always visible** or **Floating · show on hover**. Enter **Full Page** (⇧⌘F on Mac) or use the Mac window’s full-screen button. Drag the bubble to park it, then click it to open a circle of tools. In hover mode, move over the small **⋯** handle to reveal the bubble. Tap the handle on iPad. Click the center again to close the tools. The **More page tools** menu includes attachments and workspace controls.
+- **Connect objects on Mac.** Hover over a shape, table, image, positioned text box, equation, or arrow and click the small **+**. Choose a shape or table to place it nearby with an attached arrow. Drag it below its parent and the arrow switches from the side edges to the parent’s bottom and the child’s top. On an existing arrow, **+** continues from its destination or connects its free end to the new object. Undo reverses the insertion in one step.
+- **Edit an arrow on Mac.** Select one connector and click **Arrow**. Choose a straight or elbow route, arrowheads at the end or both ends, or no heads. Change the head style (open or filled), line pattern, width, and color, then click **Apply**. Drag either endpoint to the edge of a shape, table, image, positioned text box, or equation to reconnect it. Dragging an endpoint pins it to the chosen edge. For an arrow created in an earlier build, choose **Attachment sides → Automatic → Apply** to have its ends follow the layout.
+- **Resize table cells on Mac.** Use **Select**, click a table, and drag an internal divider to give one row or column more room. The neighboring row or column shares the same space, and the outside edges stay put. Double-click a cell to edit its text.
+- **Recolor handwriting on Mac or iPad.** Select the strokes with **Select** or **Lasso**. Choose a toolbar swatch, or open **Recolor ink** for more swatches and a custom color. Click **Apply** for a custom color. Recoloring edits just the selected ink, including when the selection also contains other objects. Undo restores the previous colors.
+- **Set your defaults.** Open **Notebook defaults…** from **Appearance**. Set a preset or custom nib width and an optional starting color per drawing tool, including Shapes and arrows on Mac. Choose the paper, template, and template line for newly created pages. These preferences apply across workbooks on this device.
+
 ## What works
 
-- Workbooks → chapters → nested topics → sheets, with distinct sidebar icons, renaming, moving, duplication, and recoverable Trash. Create workbooks using **New workbook** in the sidebar.
-- Resize the sheets pane or hide it independently of the workbook sidebar. Sheet numbers appear with creation dates in the list and page header; sheet titles are optional. Active sheets are numbered 1, 2, 3… in each chapter or topic's page order. Deleting Sheet 2 from three sheets immediately changes the former Sheet 3 to 2, and the next new sheet is 3. Dragging a sheet between others updates their page numbers; removing all sheets restarts at 1. Restored and moved sheets join the destination's page sequence. Renaming, editing, and searching preserve numbers. New sheets open without a naming dialog. Their underlined top title stays blank until you type a name; clearing it restores the blank title. The breadcrumb shows the containing chapter or topic, and the heading can be hidden to make more room for the page.
+- Numbered page dots at the bottom of the notebook switch pages. The adjacent **+** adds a blank page. **Browse pages** opens a searchable page list for finding and organizing notes. The drawing toolbar includes **Undo** and **Redo**.
+- On Mac, open a folder’s context menu or the page’s **More page actions** menu to export a topic or chapter as one PDF. Each notebook page occupies one PDF page, even when it extends below the screen. Bookmarks follow nested topics. Choose **PDF bundle (ZIP)** for a workbook or topic to keep folders and subtopics as directories with separate PDFs. Choose the filename and destination in the save dialog.
+- Workbooks → chapters → nested topics → pages, with distinct sidebar icons, renaming, moving, duplication, and recoverable Trash. Create workbooks using **New workbook** in the sidebar.
+- Page numbers appear with creation dates in the page browser and header. Active pages are numbered consecutively within each chapter or topic and renumber after reordering, moving, deletion, and restoration. New pages open immediately with an empty underlined title. The breadcrumb identifies the containing chapter or topic.
 - Text and handwriting share one scrollable, zoomable page. Select Text, pen, straight line, pencil, marker, highlighter, or eraser without hiding either text or ink. Native rich text includes headings, formatting, lists, links, spell checking, and undo/redo.
 - **Text** routes every pointer, including a pen tablet or Apple Pencil, to the text caret and text selection. Choose a drawing tool for handwriting. Typing in Text mode keeps ordinary letters as text.
 - **Select** draws a rectangular selection; **Lasso** follows a freehand outline. Select typed text, pen strokes, positioned text boxes, equations, images and diagrams together, then move, copy, cut, paste, duplicate, delete, or undo the selection. Moving or pasting selected typed text creates a positioned rich-text box on the same paper.
+- On Mac, select an existing shape or table and choose **Fill → Filled** to tint it with its outline color, or **No fill** to clear it. You can change several shapes together. **Fill new shapes** in the Shapes palette sets the default for the next shape.
 - **⌘A / Select All** from the page editor selects body text, ink, text boxes, equations, images and diagrams together with any tool selected. Search, title, and equation-source fields retain their own native Select All behavior.
-- On Mac, paste a copied image or image file with **⌘V** into the open sheet, then write or draw over it with Text or the ink tools. Use **Select** to move an image, or drag its lower-right selection handle to resize it proportionally. Images and annotations can be selected and moved together; resizing an image alone leaves annotations independent. Images save with the sheet and appear in combined PDF/PNG exports. PNG, TIFF, JPEG, HEIC, GIF (first frame), and BMP clipboard images are accepted within the 10 MiB, 16-megapixel, and 8192-pixel-per-side limits. Image pasting is currently Mac-only.
+- On Mac, paste a copied image or image file with **⌘V** into the open page, then write or draw over it with Text or the ink tools. Use **Select** to move an image, or drag its lower-right selection handle to resize it proportionally. Images and annotations can be selected and moved together; resizing an image alone leaves annotations independent. Images save with the page and appear in combined PDF/PNG exports. PNG, TIFF, JPEG, HEIC, GIF (first frame), and BMP clipboard images are accepted within the 10 MiB, 16-megapixel, and 8192-pixel-per-side limits. Image pasting is currently Mac-only.
 - Editable LaTeX equations with a native live preview, fractions, roots, powers, Greek symbols, sums, integrals, and matrices. Equations share the page with text and handwriting and adapt to light/dark paper. Rendering uses the pinned, open-source SwiftMath 1.7.3 library entirely on the device.
 - Straight-line pen tool for table borders, with near-horizontal/vertical snapping and Shift axis constraints on Mac.
 - Mac pen and pencil cursors show a nib dot sized for the selected width and page zoom. The highlighter uses a slanted chisel-tip cursor.
-- Extra Fine/Fine/Medium/Broad/Extra Broad nominal nibs: Pen uses 0.3/0.45/0.7/1/1.5 mm; Pencil and Straight Line use 0.3/0.45/0.7/1/1.3 mm; Brush (Marker) uses 0.5/0.7/1/1.5/2 mm. Selecting a writing tool starts at Fine; existing notes keep their stored widths. Highlighter retains its prior choices. Nib, paper, line, template, and theme menus show the selected choice, including custom saved nib widths.
+- Fine is the factory starting width for each writing tool. The Extra Fine, Fine, Medium, Broad and Extra Broad nibs measure 0.3/0.45/0.7/1/1.5 mm for Pen, 0.3/0.45/0.7/1/1.3 mm for Pencil and Straight Line, and 0.5/0.7/1/1.5/2 mm for Brush (Marker). Highlighter has its own choices. Nib, paper, line, template, and theme menus show the selected choice, including custom saved nib widths.
 - Pressure-aware pen-tablet input on Mac, including stylus proximity and hardware eraser events. Read-only HID presence detection excludes touchpads; the input indicator confirms actual pen activity. No global input capture or tablet SDK is required.
-- Apple Pencil and native PencilKit tools on iPad, with palm rejection and actual Pencil touch detection. Basic ink paths and instrument styles transfer between Mac and iPad; native PencilKit data is retained. Grid, ruled, dotted, and blank paper save with each sheet.
+- Apple Pencil and native PencilKit tools on iPad, with palm rejection and actual Pencil touch detection. Basic ink paths and instrument styles transfer between Mac and iPad; native PencilKit data is retained. Grid, ruled, dotted, and blank paper save with each page.
 - Ruled paper aligns typed baselines with its guides, including wrapped paragraphs, headings, and moved text boxes. The native layout follows whole ruled rows while preserving saved rich-text formatting and colors.
 - Light, dark, and system appearance for the shared page, readable ink colors, and prominent grids, rules, and dots. Switching appearance preserves original note colors. The single-pencil app icon includes native light and dark appearances.
 - Classic plus Coast, Alpine, Arctic, Open Skyscape, Ruby Hills, and Nature workspace scenery, with paired light/dark photographs. A saved Forest preference now shows Nature. The matching page-color choice follows scenery and appearance; explicit vintage, pitch and pastel papers stay fixed. Scenery never changes saved note content.
-- Search across titles, text, positioned text boxes, equation source, diagram labels, table cells and tags; favorite sheets; embedded file attachments.
+- Search across titles, text, positioned text boxes, equation source, diagram labels, table cells and tags; favorite pages; embedded file attachments.
 - Automatic local saves, a previous-version backup, explicit damaged-library recovery, and external-change checks that prevent overwriting another app instance's changes.
 - Portable `.inotes` import/export. Import creates a separate copy; it never replaces existing notebooks.
 - Mac text/RTF export includes canonical typed text, positioned text, LaTeX source, diagram labels and table cells. Combined-page PDF/PNG export preserves rendered text, ink, text boxes, equations, images and diagrams together. Files export on iPad.
@@ -110,7 +129,7 @@ Requires an Apple silicon Mac and macOS 14+. Building the installer requires ful
 open dist/iNotes.app
 ```
 
-The installer target is `dist/iNotes-1.3.0-arm64.dmg`; defaults match published 1.3.0/build 2021. Failed, unpublished 1.2.0/build 2018 and 1.2.1/build 2019 stay reserved. Downloaded public builds are ad hoc signed: **they are not Apple notarized**, so macOS may report that Apple could not verify iNotes is free of malware.
+The installer target is `dist/iNotes-1.4.0-arm64.dmg`. The packaging defaults are version 1.4.0 and build 2022. Failed, unpublished 1.2.0/build 2018 and 1.2.1/build 2019 stay reserved. Downloaded public builds are ad hoc signed: **they are not Apple notarized**, so macOS may report that Apple could not verify iNotes is free of malware.
 
 If you trust the download from the [official releases](https://github.com/icode100/iNotes/releases), follow Apple's [per-app first-open procedure](https://support.apple.com/en-us/102445):
 
@@ -154,7 +173,9 @@ A successful folder write confirms a local/provider write; it does not confirm a
 
 The local library is `~/Library/Application Support/iNotes/Library.json`; the previous saved version is `Library.previous.json`. Use **File → Show Library in Finder**. A malformed primary library is kept intact and saves pause. If a valid previous version exists, **Backups → Recover previous local version…** preserves the damaged file before restoring it. Always keep independent exported backups.
 
-The portable library format is versioned JSON with embedded rich text, pen data, positioned text boxes, editable LaTeX source, and attachments. Format 3 reads legacy formats 1 and 2. Movable text/equations promote a legacy library to format 2; adding a page image promotes it to format 3. Older apps reject image-containing libraries rather than silently dropping images. The shared iPad source preserves these images and marks image-bearing sheets read-only until iPad image support is added. The attachment picker accepts individual files up to 10 MiB. Archive imports use a 64 MiB aggregate limit, including embedded attachments, rather than a separate per-attachment limit. This intentionally bounded release targets personal notebooks, not multi-gigabyte OneNote libraries. Text and attachment contents are saved locally in readable form; device storage protection is provided by macOS/iPadOS.
+iNotes 1.4 reads library formats 1 through 5. New libraries start in format 2, which supports positioned text and equations. Adding an image requires format 3, and basic diagrams require format 4. Custom table row heights or column widths, open arrowheads, automatic attachment sides, and arrows attached to images, positioned text boxes or equations require format 5. Once a library uses format 5, opening it requires a format-5-capable build even if those objects are later removed. The iPad app opens pages containing images or diagrams read-only.
+
+The attachment picker accepts files up to 10 MiB. A library archive can contain up to 64 MiB in total, including its attachments. Text and attachments are stored locally in readable form and rely on macOS or iPadOS for device storage protection.
 
 ## Scope and compatibility
 

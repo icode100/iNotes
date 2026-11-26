@@ -35,6 +35,9 @@ struct UnifiedPageEditor: NSViewRepresentable {
     var onInkChange: (([InkStroke], Data?) -> Void)? = nil
     var onInputChange: ((String) -> Void)? = nil
     var onObjectPlacement: (() -> Void)? = nil
+    var toolbarHistory: PageToolbarHistory?
+    var inkSelectionStyle: PageInkSelectionStyle?
+    private var diagramSelectionStyle: MacDiagramSelectionStyle?
 
     init(text: Binding<String>, rtfData: Binding<Data?>, strokes: Binding<[InkStroke]>, pencilKitData: Binding<Data?>,
          textBoxes: Binding<[PageTextBox]> = .constant([]), equations: Binding<[NoteEquation]> = .constant([]), images: Binding<[PageImage]> = .constant([]),
@@ -47,7 +50,7 @@ struct UnifiedPageEditor: NSViewRepresentable {
          onTextChange: ((String, Data?) -> Void)? = nil, onInkChange: (([InkStroke], Data?) -> Void)? = nil,
          onInputChange: ((String) -> Void)? = nil, onPageChange: ((PageContent) -> Void)? = nil,
          onEquationEdit: ((NoteEquation) -> Void)? = nil, onPageValidate: ((PageContent) -> Bool)? = nil, onPageError: ((String) -> Void)? = nil,
-         onObjectPlacement: (() -> Void)? = nil) {
+         onObjectPlacement: (() -> Void)? = nil, toolbarHistory: PageToolbarHistory? = nil) {
         _text = text; _rtfData = rtfData; _strokes = strokes; _pencilKitData = pencilKitData
         _textBoxes = textBoxes; _equations = equations; _images = images; _diagrams = diagrams
         self.diagramKind = diagramKind; self.connectorRoute = connectorRoute; self.arrowHeads = arrowHeads
@@ -58,9 +61,16 @@ struct UnifiedPageEditor: NSViewRepresentable {
         self.onTextChange = onTextChange; self.onInkChange = onInkChange; self.onInputChange = onInputChange
         self.onPageChange = onPageChange; self.onEquationEdit = onEquationEdit; self.onPageValidate = onPageValidate; self.onPageError = onPageError
         self.onObjectPlacement = onObjectPlacement
+        self.toolbarHistory = toolbarHistory
     }
 
     func makeCoordinator() -> Coordinator { Coordinator(self) }
+
+    func observingDiagramSelection(_ style: MacDiagramSelectionStyle) -> Self {
+        var editor = self
+        editor.diagramSelectionStyle = style
+        return editor
+    }
 
     func makeNSView(context: Context) -> NSScrollView {
         let scroll = PageZoomScrollView()
@@ -91,12 +101,6 @@ struct UnifiedPageEditor: NSViewRepresentable {
         guard let page = scroll.documentView as? UnifiedMacPageView else { return }
         context.coordinator.parent = self
         context.coordinator.richText.parent = textEditor
-        let contentChanged = context.coordinator.richText.lastText != text || context.coordinator.richText.lastRTF != rtfData
-        let themeChanged = page.theme != theme
-        page.theme = theme
-        if contentChanged || themeChanged {
-            context.coordinator.richText.load(text: text, rtf: rtfData, into: page.textView)
-        }
         configure(page, coordinator: context.coordinator, isEnabled: context.environment.isEnabled)
     }
 
@@ -105,8 +109,18 @@ struct UnifiedPageEditor: NSViewRepresentable {
     }
 
     private func configure(_ page: UnifiedMacPageView, coordinator: Coordinator, isEnabled: Bool) {
+        toolbarHistory?.bind { [weak history = coordinator.selection.history] in isEnabled ? history : nil }
         let value = PageContent(text: text, rtfData: rtfData, strokes: strokes, pencilKitData: pencilKitData, textBoxes: textBoxes, equations: equations, images: images, diagrams: diagrams)
         coordinator.selection.load(value)
+        // A drag is a transient page snapshot until mouse-up. A SwiftUI
+        // toolbar/theme/layout refresh must render that same snapshot, rather
+        // than replacing its objects or promoted body text with saved values.
+        let displayed = coordinator.selection.displayedContent
+        let themeChanged = page.theme != theme
+        page.theme = theme
+        if coordinator.richText.lastText != displayed.text || coordinator.richText.lastRTF != displayed.rtfData || themeChanged {
+            coordinator.richText.load(text: displayed.text, rtf: displayed.rtfData, into: page.textView)
+        }
         page.textView.pageUndoManager = coordinator.selection.history
         coordinator.richText.parent.onChange = { [weak coordinator] text, rtf in coordinator?.nativeTextChanged(text, rtf: rtf) }
         page.inkView.pageSelectionHistory = coordinator.selection.history
@@ -134,9 +148,13 @@ struct UnifiedPageEditor: NSViewRepresentable {
             }
         }
         page.inkView.isInputEnabled = isEnabled
+        coordinator.selection.diagramSelectionStyle = diagramSelectionStyle
+        diagramSelectionStyle?.bind(coordinator.selection)
         page.diagramOptions = MacDiagramOptions(kind: diagramKind, route: connectorRoute, arrowHeads: arrowHeads,
                                                rows: tableRows, columns: tableColumns, fill: diagramFill)
         page.activeTool = tool
+        coordinator.selection.inkSelectionStyle = inkSelectionStyle
+        inkSelectionStyle?.bind(coordinator.selection)
         page.theme = theme
         page.textView.isEditable = isEnabled && tool == .text
         page.textView.isSelectable = isEnabled && tool == .text
@@ -150,9 +168,9 @@ struct UnifiedPageEditor: NSViewRepresentable {
         if page.inkView.paper != paper { page.inkView.paper = paper; page.inkView.needsDisplay = true }
         if page.paperView.paper != paper { page.paperView.paper = paper; page.paperView.needsDisplay = true }
         RuledTextLayout.attach(to: page.textView, paper: paper, pageOriginY: page.textView.frame.minY)
-        coordinator.renderObjects(value, on: page, enabled: isEnabled)
-        if !page.inkView.isDrawing, page.inkView.strokes != strokes {
-            page.inkView.strokes = strokes
+        coordinator.renderObjects(displayed, on: page, enabled: isEnabled)
+        if !page.inkView.isDrawing, page.inkView.strokes != displayed.strokes {
+            page.inkView.strokes = displayed.strokes
             page.inkView.needsDisplay = true
         }
         page.inkView.onChange = { value in
@@ -199,6 +217,27 @@ struct UnifiedPageEditor: NSViewRepresentable {
                 guard let self, let page, let index = self.selection.content.textBoxes.firstIndex(where: { $0.id == id }) else { return }
                 var value = self.selection.content
                 value.textBoxes[index].text = text; value.textBoxes[index].rtfData = rtf
+                if value.diagrams.contains(where: {
+                    [$0.startAttachment, $0.endAttachment].contains { $0?.targetKind == .textBox && $0?.targetDiagramID == id }
+                }) {
+                    // AppKit's live typing attributes and the saved RTF can have
+                    // different font metrics. Measure the canonical snapshot with
+                    // the same view used for reopening and export. Keep the active
+                    // field's selection, marked text and native undo transaction.
+                    let frames = page.externalAnchorFrames(in: value, measuringTextBoxes: [id])
+                    let projected = PageDiagramGeometry.routedConnectors(in: value.diagrams, frames: frames,
+                        movedDiagramIDs: [], movedObjectIDs: [.textBox: [id]])
+                    if projected != value.diagrams {
+                        value.diagrams = projected
+                        guard self.selection.onValidate?(value) != false else {
+                            page.textBoxViews[id]?.reloadAfterRejectedEdit()
+                            self.selection.cancelPreview()
+                            return
+                        }
+                        page.diagramView.diagrams = PageDiagramGeometry.routedConnectors(in: page.diagramView.diagrams, frames: frames,
+                            movedDiagramIDs: [], movedObjectIDs: [.textBox: [id]])
+                    }
+                }
                 self.selection.content = value
                 self.selection.onCommit?(value)
                 page.resizePaperToContent()
@@ -372,8 +411,14 @@ final class UnifiedMacPageView: NSView {
     let diagramView = MacPageDiagramView(frame: .zero)
     var diagramOptions = MacDiagramOptions()
     let selectionView = MacPageSelectionView(frame: .zero)
-    weak var selectionController: MacPageSelectionController?
+    private(set) var quickAdd: MacDiagramQuickAdd?
+    weak var selectionController: MacPageSelectionController? {
+        didSet {
+            if selectionController != nil && quickAdd == nil { quickAdd = MacDiagramQuickAdd(page: self) }
+        }
+    }
     var textBoxViews: [UUID: MacPageTextBoxView] = [:]
+    lazy var textBoxMeasurement = MacPageTextBoxView(frame: .zero)
     var equationViews: [UUID: EquationDisplayView] = [:]
     var imageViews: [UUID: MacPageImageView] = [:]
     private var toolTrackingArea: NSTrackingArea?
@@ -452,7 +497,9 @@ final class UnifiedMacPageView: NSView {
     override func cursorUpdate(with event: NSEvent) {
         // Updates from the top selection layer travel through this parent,
         // not through its sibling ink view.
-        if let cursor = activePageCursor { cursor.set() }
+        let point = selectionView.convert(event.locationInWindow, from: nil)
+        if activeTool == .select, let cursor = selectionView.tableDividerCursor(at: point) { cursor.set() }
+        else if let cursor = activePageCursor { cursor.set() }
         else { super.cursorUpdate(with: event) }
     }
 
@@ -467,6 +514,7 @@ final class UnifiedMacPageView: NSView {
 
     func inputView(at location: NSPoint, event: NSEvent?) -> NSView? {
         guard bounds.contains(location) else { return nil }
+        if let addButton = quickAdd?.buttonHit(at: location) { return addButton }
         if activeTool == .select || activeTool == .lasso || activeTool == .diagram { return selectionView }
         if event?.type == .leftMouseDown {
             selectionController?.clearToolIndependentSelection()
@@ -512,6 +560,7 @@ final class UnifiedMacPageView: NSView {
     }
 
     func refreshToolCursor() {
+        quickAdd?.hide()
         inkView.tool = activeTool == .text ? .pen : activeTool
         inkView.showsTipCursor = activeTool != .text && activeTool != .select && activeTool != .lasso && activeTool != .diagram
         updateTrackingAreas()
@@ -522,7 +571,9 @@ final class UnifiedMacPageView: NSView {
         }
         guard let window, window.isKeyWindow, !isHiddenOrHasHiddenAncestor,
               visibleRect.contains(convert(window.mouseLocationOutsideOfEventStream, from: nil)) else { return }
-        (activePageCursor ?? .iBeam).set()
+        let point = selectionView.convert(window.mouseLocationOutsideOfEventStream, from: nil)
+        let dividerCursor = activeTool == .select ? selectionView.tableDividerCursor(at: point) : nil
+        (dividerCursor ?? activePageCursor ?? .iBeam).set()
     }
 
     @discardableResult
@@ -561,6 +612,7 @@ final class UnifiedMacPageView: NSView {
     }
 
     func resizePaperToContent() {
+        quickAdd?.contentDidChange()
         RuledTextLayout.attach(to: textView, paper: paperView.paper, pageOriginY: textView.frame.minY)
         let manager = textView.layoutManager
         if let container = textView.textContainer { manager?.ensureLayout(for: container) }

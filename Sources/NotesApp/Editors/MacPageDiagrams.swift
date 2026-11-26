@@ -1,5 +1,6 @@
 #if os(macOS)
 import AppKit
+import Combine
 import NotesCore
 
 struct MacDiagramOptions {
@@ -9,6 +10,62 @@ struct MacDiagramOptions {
     var rows = 3
     var columns = 3
     var fill = false
+}
+
+/// Sheet-local bridge between native selection and the selected-shape controls.
+/// Never publishes while SwiftUI is configuring its representable, and never
+/// retains the page/controller or changes the creation defaults.
+@MainActor
+final class MacDiagramSelectionStyle: ObservableObject {
+    @Published private(set) var selectedCount = 0
+    @Published private(set) var fill: Bool? = nil
+    @Published private(set) var canEdit = false
+    @Published private(set) var editableConnector: PageDiagram?
+    private weak var controller: MacPageSelectionController?
+    private var refreshPending = false
+
+    var accessibilityValue: String {
+        guard selectedCount > 0 else { return "No shapes selected" }
+        return fill.map { $0 ? "Filled" : "No fill" } ?? "Mixed"
+    }
+
+    func bind(_ controller: MacPageSelectionController) {
+        self.controller = controller
+        scheduleRefresh()
+    }
+
+    func textBoxHeight(_ id: UUID) -> CGFloat? { controller?.page?.textBoxViews[id]?.frame.height }
+
+    func scheduleRefresh() {
+        guard !refreshPending else { return }
+        refreshPending = true
+        DispatchQueue.main.async { [weak self] in
+            guard let self else { return }
+            refreshPending = false
+            let shapes = controller?.selectedFillableDiagrams ?? []
+            let currentFill: Bool? = shapes.first.flatMap { first in
+                shapes.allSatisfy { $0.fill == first.fill } ? first.fill : nil
+            }
+            let editable = !shapes.isEmpty && controller?.page?.inkView.isInputEnabled == true
+            if selectedCount != shapes.count { selectedCount = shapes.count }
+            if fill != currentFill { fill = currentFill }
+            if canEdit != editable { canEdit = editable }
+            let arrow = controller.flatMap { controller in
+                controller.page?.inkView.isInputEnabled == true ? controller.selectedConnector : nil
+            }
+            if editableConnector != arrow { editableConnector = arrow }
+        }
+    }
+
+    @discardableResult
+    func setFill(_ filled: Bool) -> Bool {
+        controller?.setSelectedDiagramFill(filled) ?? false
+    }
+
+    @discardableResult
+    func apply(_ appearance: ConnectorAppearance, to id: UUID) -> Bool {
+        controller?.applyConnectorAppearance(appearance, to: id) ?? false
+    }
 }
 
 /// One bounded vector layer shares the page's coordinates and export path.
@@ -75,12 +132,10 @@ final class MacPageDiagramView: NSView {
             path.setLineDash(dash, count: dash.count, phase: 0)
         }
         if value.kind == .table {
-            for row in 1..<value.rows {
-                let y = rect.minY + rect.height * Double(row) / Double(value.rows)
+            for y in PageTableGeometry.edges(in: value, axis: .row).dropFirst().dropLast() {
                 path.move(to: CGPoint(x: rect.minX, y: y)); path.line(to: CGPoint(x: rect.maxX, y: y))
             }
-            for column in 1..<value.columns {
-                let x = rect.minX + rect.width * Double(column) / Double(value.columns)
+            for x in PageTableGeometry.edges(in: value, axis: .column).dropFirst().dropLast() {
                 path.move(to: CGPoint(x: x, y: rect.minY)); path.line(to: CGPoint(x: x, y: rect.maxY))
             }
         }
@@ -89,16 +144,16 @@ final class MacPageDiagramView: NSView {
             let points = PageDiagramGeometry.connectorPoints(for: value, in: diagrams)
             if value.arrowHeads != .none, let end = points.last,
                let tail = points.dropLast().reversed().first(where: { hypot(end.x - $0.x, end.y - $0.y) > 0.01 }) {
-                arrow(at: end, from: tail, width: value.lineWidth, color: color)
+                arrow(at: end, from: tail, width: value.lineWidth, color: color, open: value.openArrowheads == true)
             }
             if value.arrowHeads == .both, let start = points.first,
                let tail = points.dropFirst().first(where: { hypot(start.x - $0.x, start.y - $0.y) > 0.01 }) {
-                arrow(at: start, from: tail, width: value.lineWidth, color: color)
+                arrow(at: start, from: tail, width: value.lineWidth, color: color, open: value.openArrowheads == true)
             }
             if let label = labelBounds(of: value) { drawText(value.text, in: label) }
         } else if value.kind == .table {
             for index in value.cells.indices {
-                let cell = cellRect(index, in: value).insetBy(dx: 5, dy: 3)
+                let cell = PageTableGeometry.cellRect(index, in: value).insetBy(dx: 5, dy: 3)
                 drawText(value.cells[index], in: cell)
             }
         } else {
@@ -138,13 +193,22 @@ final class MacPageDiagramView: NSView {
         if let first = points.first { path.move(to: first); for point in points.dropFirst() { path.line(to: point) }; path.close() }
         return path
     }
-    private func arrow(at tip: InkPoint, from tail: InkPoint, width: Double, color: NSColor) {
+    private func arrow(at tip: InkPoint, from tail: InkPoint, width: Double, color: NSColor, open: Bool) {
         let angle = atan2(tip.y - tail.y, tip.x - tail.x), length = max(8, width * 3)
         let base = CGPoint(x: tip.x - cos(angle) * length, y: tip.y - sin(angle) * length)
         let half = length * 0.45
-        color.setFill()
-        polygon([CGPoint(x: tip.x, y: tip.y), CGPoint(x: base.x - sin(angle) * half, y: base.y + cos(angle) * half),
-                 CGPoint(x: base.x + sin(angle) * half, y: base.y - cos(angle) * half)]).fill()
+        let left = CGPoint(x: base.x - sin(angle) * half, y: base.y + cos(angle) * half)
+        let right = CGPoint(x: base.x + sin(angle) * half, y: base.y - cos(angle) * half)
+        let point = CGPoint(x: tip.x, y: tip.y)
+        if open {
+            let head = NSBezierPath()
+            head.move(to: left); head.line(to: point); head.line(to: right)
+            head.lineWidth = width; head.lineJoinStyle = .round
+            color.setStroke(); head.stroke()
+        } else {
+            color.setFill()
+            polygon([point, left, right]).fill()
+        }
     }
     private func drawText(_ text: String, in rect: CGRect) {
         guard !text.isEmpty, rect.width > 0, rect.height > 0 else { return }
@@ -153,12 +217,6 @@ final class MacPageDiagramView: NSView {
             .foregroundColor: InkRenderer.color(theme.textHex), .paragraphStyle: paragraph]
         (text as NSString).draw(with: rect, options: [.usesLineFragmentOrigin, .truncatesLastVisibleLine], attributes: attributes)
     }
-}
-
-func cellRect(_ index: Int, in table: PageDiagram) -> CGRect {
-    let width = table.width / Double(max(1, table.columns)), height = table.height / Double(max(1, table.rows))
-    return CGRect(x: table.x + Double(index % max(1, table.columns)) * width,
-                  y: table.y + Double(index / max(1, table.columns)) * height, width: width, height: height)
 }
 
 extension MacPageSelectionController {
@@ -189,11 +247,11 @@ extension MacPageSelectionController {
         if options.kind == .connector {
             diagram.start = first
             diagram.end = click ? bounded(InkPoint(x: first.x + 180, y: first.y + 80)) : last
-            diagram.startAttachment = nearestDiagramAnchor(to: diagram.start, in: base.diagrams)
-            diagram.endAttachment = nearestDiagramAnchor(to: diagram.end, in: base.diagrams)
+            (diagram.start, diagram.startAttachment) = snappedEndpoint(at: diagram.start, in: base)
+            (diagram.end, diagram.endAttachment) = snappedEndpoint(at: diagram.end, in: base)
         }
         var result = base; result.diagrams.append(diagram)
-        return (try? PageDiagramLimits.validate(result.diagrams)) != nil ? result : base
+        return (try? PageDiagramLimits.validate(result)) != nil ? result : base
     }
 
     @discardableResult
@@ -205,19 +263,80 @@ extension MacPageSelectionController {
         return true
     }
 
-    func nearestDiagramAnchor(to point: InkPoint, in diagrams: [PageDiagram], excluding: UUID? = nil) -> PageDiagramAttachment? {
-        let tolerance = 18 / Double(page?.enclosingScrollView?.magnification ?? 1)
-        var best: (Double, PageDiagramAttachment)?
-        for target in diagrams.reversed() where target.id != excluding && target.kind != .connector {
+    private func snappedEndpoint(at point: InkPoint, in base: PageContent) -> (InkPoint, PageDiagramAttachment?) {
+        guard point.x.isFinite, point.y.isFinite else { return (point, nil) }
+        let scale = Double(page?.enclosingScrollView?.magnification ?? 1)
+        let tolerance = 18 / (scale.isFinite && scale > 0 ? scale : 1)
+        typealias Candidate = (distance: Double, port: InkPoint, attachment: PageDiagramAttachment)
+        var bestPort: Candidate?, bestEdge: Candidate?
+        func consider(_ id: UUID, _ kind: PageObjectAnchorKind?, _ frame: CGRect, shape: PageDiagram? = nil) {
+            guard frame.insetBy(dx: -tolerance, dy: -tolerance).contains(CGPoint(x: point.x, y: point.y)) else { return }
+            func port(_ side: PageDiagram.AnchorSide) -> InkPoint {
+                if let shape { return PageDiagramGeometry.anchorPoint(on: shape, side: side) }
+                return PageDiagramGeometry.anchorPoint(in: frame, side: side)
+            }
             for side in PageDiagram.AnchorSide.allCases {
-                let anchor = PageDiagramGeometry.anchorPoint(on: target, side: side)
-                let distance = hypot(anchor.x - point.x, anchor.y - point.y)
-                if distance <= tolerance, distance < (best?.0 ?? .infinity) {
-                    best = (distance, PageDiagramAttachment(targetDiagramID: target.id, side: side))
+                let anchor = port(side), distance = hypot(anchor.x - point.x, anchor.y - point.y)
+                if distance <= tolerance && distance < (bestPort?.distance ?? .infinity) {
+                    bestPort = (distance, anchor, PageDiagramAttachment(targetDiagramID: id, side: side, targetKind: kind))
+                }
+            }
+            if bestPort == nil {
+                let edge = diagramEdge(to: point, in: frame, kind: shape?.kind ?? .rectangle)
+                if edge.distance <= tolerance && edge.distance < (bestEdge?.distance ?? .infinity) {
+                    bestEdge = (edge.distance, port(edge.side), PageDiagramAttachment(targetDiagramID: id, side: edge.side, targetKind: kind))
                 }
             }
         }
-        return best?.1
+        // Text boxes and equations are drawn over diagrams, and images are
+        // underneath. Equal-distance ports keep the first visible candidate.
+        for box in base.textBoxes.reversed() {
+            if let frame = page?.textBoxViews[box.id]?.frame { consider(box.id, .textBox, frame) }
+        }
+        for eq in base.equations.reversed() { consider(eq.id, .equation, CGRect(x: eq.x, y: eq.y, width: eq.width, height: eq.height)) }
+        for target in base.diagrams.reversed() where target.kind != .connector {
+            consider(target.id, nil, PageDiagramGeometry.bounds(of: target, in: base.diagrams), shape: target)
+        }
+        for image in base.images.reversed() { consider(image.id, .image, CGRect(x: image.x, y: image.y, width: image.width, height: image.height)) }
+        guard let hit = bestPort ?? bestEdge else { return (point, nil) }
+        return (hit.port, hit.attachment)
+    }
+
+    private func diagramEdge(to point: InkPoint, in frame: CGRect, kind: PageDiagram.Kind) -> (side: PageDiagram.AnchorSide, distance: Double) {
+        let x = frame.minX, y = frame.minY, w = frame.width, h = frame.height
+        func segment(_ a: InkPoint, _ b: InkPoint) -> Double {
+            let dx = b.x - a.x, dy = b.y - a.y, length = dx * dx + dy * dy
+            let t = length > 0 ? max(0, min(1, ((point.x - a.x) * dx + (point.y - a.y) * dy) / length)) : 0
+            return hypot(point.x - a.x - t * dx, point.y - a.y - t * dy)
+        }
+        if kind == .ellipse {
+            let rx = w / 2, ry = h / 2, dx = point.x - x - rx, dy = point.y - y - ry
+            let angle = atan2(dy / ry, dx / rx)
+            let distance = hypot(dx - cos(angle) * rx, dy - sin(angle) * ry)
+            let side: PageDiagram.AnchorSide = abs(dx / rx) >= abs(dy / ry)
+                ? (dx >= 0 ? .right : .left) : (dy >= 0 ? .bottom : .top)
+            return (side, distance)
+        }
+        if kind == .triangle {
+            let top = InkPoint(x: x + w / 2, y: y), left = InkPoint(x: x, y: y + h), right = InkPoint(x: x + w, y: y + h)
+            return [(PageDiagram.AnchorSide.left, segment(top, left)), (.right, segment(top, right)), (.bottom, segment(left, right))]
+                .min { $0.1 < $1.1 }.map { ($0.0, $0.1) }!
+        }
+        if kind == .diamond {
+            let points = [InkPoint(x: x + w / 2, y: y), InkPoint(x: x + w, y: y + h / 2),
+                          InkPoint(x: x + w / 2, y: y + h), InkPoint(x: x, y: y + h / 2)]
+            let distance = points.indices.map { segment(points[$0], points[($0 + 1) % points.count]) }.min()!
+            let side = PageDiagram.AnchorSide.allCases.min {
+                let a = PageDiagramGeometry.anchorPoint(in: frame, side: $0), b = PageDiagramGeometry.anchorPoint(in: frame, side: $1)
+                return hypot(point.x - a.x, point.y - a.y) < hypot(point.x - b.x, point.y - b.y)
+            }!
+            return (side, distance)
+        }
+        return [(PageDiagram.AnchorSide.top, segment(InkPoint(x: x, y: y), InkPoint(x: x + w, y: y))),
+                (.right, segment(InkPoint(x: x + w, y: y), InkPoint(x: x + w, y: y + h))),
+                (.bottom, segment(InkPoint(x: x, y: y + h), InkPoint(x: x + w, y: y + h))),
+                (.left, segment(InkPoint(x: x, y: y), InkPoint(x: x, y: y + h)))]
+            .min { $0.1 < $1.1 }.map { ($0.0, $0.1) }!
     }
 
     func resizedDiagram(_ base: PageContent, id: UUID, width: Double, height: Double) -> PageContent {
@@ -227,6 +346,7 @@ extension MacPageSelectionController {
         let original = value.diagrams[index]
         value.diagrams[index].width = min(10_000, min(Double(page?.bounds.width ?? InkExport.paperSize.width) - original.x, max(24, width)))
         value.diagrams[index].height = min(10_000, min(100_000 - original.y, max(24, height)))
+        value.diagrams = projectedDiagrams(in: value, changedDiagrams: [id])
         return (try? PageDiagramLimits.validate(value.diagrams)) != nil ? value : base
     }
 
@@ -235,10 +355,31 @@ extension MacPageSelectionController {
               let index = base.diagrams.firstIndex(where: { $0.id == id && $0.kind == .connector }) else { return base }
         var value = base
         let point = InkPoint(x: max(0, min(Double(page?.bounds.width ?? InkExport.paperSize.width), point.x)), y: max(0, min(100_000, point.y)))
-        let attachment = nearestDiagramAnchor(to: point, in: base.diagrams, excluding: id)
-        if starting { value.diagrams[index].start = point; value.diagrams[index].startAttachment = attachment }
-        else { value.diagrams[index].end = point; value.diagrams[index].endAttachment = attachment }
-        return (try? PageDiagramLimits.validate(value.diagrams)) != nil ? value : base
+        let endpoint = snappedEndpoint(at: point, in: base)
+        if starting { (value.diagrams[index].start, value.diagrams[index].startAttachment) = endpoint }
+        else { (value.diagrams[index].end, value.diagrams[index].endAttachment) = endpoint }
+        // Snapping explicitly pins the dragged end. The opposite end keeps its
+        // policy and can face the new attached target or free endpoint.
+        value.diagrams = projectedDiagrams(in: value, changedDiagrams: [id])
+        return (try? PageDiagramLimits.validate(value)) != nil ? value : base
+    }
+
+    var selectedFillableDiagrams: [PageDiagram] {
+        content.diagrams.filter { selection.diagrams.contains($0.id) && $0.kind != .connector }
+    }
+
+    /// Mixed selections apply only to their closed shapes/tables. A single
+    /// validated page snapshot gives the whole fill change one undo transaction.
+    @discardableResult
+    func setSelectedDiagramFill(_ filled: Bool) -> Bool {
+        guard let page, page.inkView.isInputEnabled else { return false }
+        let ids = Set(selectedFillableDiagrams.map(\.id))
+        guard !ids.isEmpty else { return false }
+        var value = content
+        for index in value.diagrams.indices where ids.contains(value.diagrams[index].id) {
+            value.diagrams[index].fill = filled
+        }
+        return commit(value, action: filled ? "Fill Shapes" : "Remove Shape Fill")
     }
 
     @discardableResult
@@ -260,9 +401,8 @@ extension MacPageSelectionController {
               let value = content.diagrams.first(where: { $0.id == id }) else { return }
         let cell: Int?
         if value.kind == .table {
-            let column = min(value.columns - 1, max(0, Int((point.x - value.x) / (value.width / Double(value.columns)))))
-            let row = min(value.rows - 1, max(0, Int((point.y - value.y) / (value.height / Double(value.rows)))))
-            cell = row * value.columns + column
+            guard let index = PageTableGeometry.cellIndex(at: point, in: value) else { return }
+            cell = index
         } else { cell = nil }
         let text = cell.map { value.cells[$0] } ?? value.text
         let alert = NSAlert(); alert.messageText = cell == nil ? "Diagram label" : "Table cell"

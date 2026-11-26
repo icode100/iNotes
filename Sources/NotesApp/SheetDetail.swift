@@ -130,8 +130,16 @@ enum InkNibPreset: String, CaseIterable {
     }
 
     static func customLabel(width: Double, tool: InkTool) -> String {
-        let millimeters = width * multiplier(for: tool) / pointsPerMillimeter
+        let millimeters = millimeters(width: width, tool: tool)
         return "Custom · \(String(format: "%.2f", millimeters)) mm"
+    }
+
+    static func millimeters(width: Double, tool: InkTool) -> Double {
+        width * multiplier(for: tool) / pointsPerMillimeter
+    }
+
+    static func storedWidth(millimeters: Double, tool: InkTool) -> Double {
+        millimeters * pointsPerMillimeter / multiplier(for: tool)
     }
 
     private static func multiplier(for tool: InkTool) -> Double {
@@ -154,8 +162,56 @@ enum InkNibPreset: String, CaseIterable {
     }
 }
 
+/// Owned by the sheet-keyed editor. Toolbar actions use its native history
+/// even when clicking a button changes the window's first responder.
+@MainActor
+final class PageToolbarHistory: ObservableObject {
+    @Published private(set) var canUndo = false
+    @Published private(set) var canRedo = false
+    private var manager: () -> UndoManager? = { nil }
+    private var observers: [NSObjectProtocol] = []
+    private var refreshPending = false
+
+    init() {
+        for name: Notification.Name in [.NSUndoManagerDidOpenUndoGroup, .NSUndoManagerDidCloseUndoGroup,
+                                         .NSUndoManagerDidUndoChange, .NSUndoManagerDidRedoChange] {
+            observers.append(NotificationCenter.default.addObserver(forName: name, object: nil, queue: .main) { [weak self] _ in
+                MainActor.assumeIsolated { self?.scheduleRefresh() }
+            })
+        }
+    }
+
+    deinit { for observer in observers { NotificationCenter.default.removeObserver(observer) } }
+
+    func bind(_ resolve: @escaping () -> UndoManager?) {
+        manager = resolve
+        scheduleRefresh()
+    }
+
+    private func scheduleRefresh() {
+        guard !refreshPending else { return }
+        refreshPending = true
+        DispatchQueue.main.async { [weak self] in
+            guard let self else { return }
+            refreshPending = false
+            let current = manager()
+            let undo = current?.canUndo == true
+            let redo = current?.canRedo == true
+            if undo != canUndo { canUndo = undo }
+            if redo != canRedo { canRedo = redo }
+        }
+    }
+
+    func undo() { if let manager = manager(), manager.canUndo { manager.undo() } }
+    func redo() { if let manager = manager(), manager.canRedo { manager.redo() } }
+}
+
 struct SheetDetail: View {
+    @Environment(\.openNotebookDefaults) private var openNotebookDefaults
     @EnvironmentObject private var store: NotesStore
+    #if os(macOS)
+    @Environment(\.workspaceDiagnosticControls) private var diagnosticControls
+    #endif
     @EnvironmentObject private var inputDevice: InputDeviceMonitor
     @EnvironmentObject private var presentation: EditorPresentation
     @Environment(\.colorScheme) private var colorScheme
@@ -163,9 +219,31 @@ struct SheetDetail: View {
     @AppStorage("pageColorScheme") private var pageColorScheme = "system"
     @AppStorage("linePattern") private var linePattern = "solid"
     let sheetID: UUID
+    @StateObject private var pageHistory = PageToolbarHistory()
+    @StateObject private var selectedInkStyle = PageInkSelectionStyle()
+    #if os(macOS)
+    @StateObject private var selectedDiagramStyle = MacDiagramSelectionStyle()
+    #endif
     @AppStorage("inkColor") private var inkColor = "#30343B"
     @AppStorage("inkWidth") private var inkWidth = InkNibPreset.defaultWidth(for: .pen)
     @AppStorage("inkTool") private var selectedTool = "pen"
+    @AppStorage("fullScreenToolbarMode") private var fullScreenToolbarMode = FullScreenToolbarMode.docked
+    @AppStorage("floatingToolbarAnchorX") private var floatingAnchorX = 0.90
+    @AppStorage("floatingToolbarAnchorY") private var floatingAnchorY = 0.32
+    private var showsFloatingToolbar: Bool {
+        presentation.toolsVisible && presentation.isFullScreenWorkspace && fullScreenToolbarMode != .docked
+    }
+    private var floatingHoverOnly: Bool { fullScreenToolbarMode == .hover }
+    private var floatingAnchor: Binding<CGPoint> {
+        Binding(get: { CGPoint(x: floatingAnchorX, y: floatingAnchorY) }, set: {
+            guard $0.x.isFinite, $0.y.isFinite else { return }
+            floatingAnchorX = min(1, max(0, $0.x))
+            floatingAnchorY = min(1, max(0, $0.y))
+        })
+    }
+    private var fullScreenToolbarModeMenu: some View {
+        FullScreenToolbarModeMenu { presentation.toolsVisible = true }
+    }
     @AppStorage("diagramKind") private var diagramKindPreference = "rectangle"
     @AppStorage("diagramConnectorRoute") private var connectorRoutePreference = "straight"
     @AppStorage("diagramArrowHeads") private var arrowHeadsPreference = "end"
@@ -180,6 +258,7 @@ struct SheetDetail: View {
     @ViewState private var equationDraft: NoteEquation?
     @ViewState private var renameRequest: NameRequest?
     @ViewState private var showInkColors = false
+    @ViewState private var recolorDraft = "#30343B"
     @ViewState private var showDiagramPalette = false
     private var sheet: NoteNode? { store.library.node(id: sheetID) }
     private var inkTool: InkTool { InkTool(rawValue: selectedTool) ?? .pen }
@@ -200,7 +279,7 @@ struct SheetDetail: View {
             VStack(spacing: 0) {
                 if sheet.isTrashed {
                     HStack {
-                        Label("This sheet is in Trash", systemImage: "trash").foregroundStyle(.secondary)
+                        Label("This page is in Trash", systemImage: "trash").foregroundStyle(.secondary)
                         Spacer()
                         Button("Restore") { store.restore(sheet.id) }
                     }.padding().background(.orange.opacity(0.1))
@@ -222,11 +301,11 @@ struct SheetDetail: View {
                                 Image(systemName: sheet.isFavorite ? "star.fill" : "star")
                                     .foregroundStyle(sheet.isFavorite ? Color.orange : Color.secondary)
                                     .frame(width: 30, height: 30)
-                            }.buttonStyle(.plain).help("Favorite sheet").disabled(sheet.isTrashed)
-                                .accessibilityLabel(sheet.isFavorite ? "Remove from favorites" : "Favorite sheet")
+                            }.buttonStyle(.plain).help("Favorite page").disabled(sheet.isTrashed)
+                                .accessibilityLabel(sheet.isFavorite ? "Remove from favorites" : "Favorite page")
                             Menu {
                                 if !sheet.isTrashed {
-                                    Button("Rename sheet…") {
+                                    Button("Rename page…") {
                                         renameRequest = NameRequest(kind: .sheet, renameID: sheet.id, title: sheet.title)
                                     }
                                     Divider()
@@ -234,12 +313,19 @@ struct SheetDetail: View {
                                 Button("Export text…") { exportText(sheet) }
                                 #if os(macOS)
                                 Button("Export rich text…") { MacFileActions.exportRichText(sheet, store: store) }
-                                Button("Export sheet as PDF…") { MacFileActions.exportPDF(sheet, theme: pageTheme, store: store) }
+                                Button("Export page as PDF…") { MacFileActions.exportPDF(sheet, theme: pageTheme, store: store) }
                                 Button("Export page as PNG…") { MacFileActions.exportPagePNG(sheet, paper: paper, theme: pageTheme, store: store) }
+                                if !sheet.isTrashed, let parentID = sheet.parentID, let folder = store.library.node(id: parentID) {
+                                    Divider()
+                                    NotebookExportButtons(folder: folder)
+                                    if let workbook = store.library.path(to: folder.id).first, workbook.kind == .workbook {
+                                        NotebookExportButtons(folder: workbook)
+                                    }
+                                }
                                 #endif
                                 Divider()
                                 if !sheet.isTrashed {
-                                    Button("Duplicate sheet") { store.duplicate(sheet.id) }
+                                    Button("Duplicate page") { store.duplicate(sheet.id) }
                                     MoveMenu(node: sheet)
                                     Divider()
                                     Button("Move to Trash", role: .destructive) { store.trash(sheet.id) }
@@ -252,7 +338,7 @@ struct SheetDetail: View {
                             .menuIndicator(.hidden)
                             #endif
                             .frame(width: 30, height: 30)
-                            .help("More sheet actions").accessibilityLabel("More sheet actions")
+                            .help("More page actions").accessibilityLabel("More page actions")
                         }.font(.system(size: 18)).frame(height: 30)
                     }
                     TagsField(tags: store.binding(sheet.id, \.tags, fallback: [])).disabled(sheet.isTrashed)
@@ -260,10 +346,15 @@ struct SheetDetail: View {
                     .background { WorkspaceScenery() }
                 Divider()
                 }
-                if presentation.toolsVisible {
+                if presentation.toolsVisible && !showsFloatingToolbar {
                 HStack(spacing: 10) {
                     ScrollView(.horizontal, showsIndicators: false) {
                         HStack(spacing: 12) {
+                            HStack(spacing: 2) {
+                                historyButton("Undo", symbol: "arrow.uturn.backward", enabled: pageHistory.canUndo, action: pageHistory.undo)
+                                historyButton("Redo", symbol: "arrow.uturn.forward", enabled: pageHistory.canRedo, action: pageHistory.redo)
+                            }
+                            Divider().frame(height: 22)
                             drawingTools
                             #if os(macOS)
                             diagramTools
@@ -277,25 +368,15 @@ struct SheetDetail: View {
                             #endif
                         }.fixedSize(horizontal: true, vertical: false)
                     }.frame(height: 34).disabled(sheet.isTrashed)
-                    Button { showAttachmentImporter = true } label: { Image(systemName: "paperclip") }
-                        .buttonStyle(.plain).help("Attach a file (up to 10 MiB)").disabled(sheet.isTrashed)
+                    attachmentButton(sheet)
                     sheetsButton
                     headingButton
                     fullPageButton
                     toolbarButton
+                    if presentation.isFullScreenWorkspace { toolbarLayoutButton }
                 }.padding(.horizontal, 18).padding(.vertical, 10)
                 HStack {
-                    Menu {
-                        Text(inputDevice.status)
-                        #if os(macOS)
-                        ForEach(inputDevice.tabletNames, id: \.self) { Text($0) }
-                        Button("Check connected tablets") { inputDevice.refresh() }
-                        #endif
-                        Text("Stylus activity is detected when your pen reaches the page.")
-                    } label: {
-                        Label(inputDevice.status, systemImage: inputDevice.detected ? "pencil.tip.crop.circle.badge.checkmark" : "pencil.tip")
-                            .font(.caption).foregroundStyle(inputDevice.detected ? workspaceAccent : Color.secondary)
-                    }
+                    tabletStatusMenu
                     Spacer(minLength: 0)
                     Text("Text and ink share this page").font(.caption).foregroundStyle(.secondary)
                 }.padding(.horizontal, 20).padding(.bottom, 9)
@@ -322,30 +403,47 @@ struct SheetDetail: View {
                                   onEquationEdit: { equationDraft = $0 },
                                   onPageValidate: { store.validatePageChange(sheet.id, content: $0) },
                                   onPageError: { store.errorMessage = $0 },
-                                  onObjectPlacement: { selectedTool = InkTool.select.rawValue })
+                                  onObjectPlacement: { selectedTool = InkTool.select.rawValue },
+                                  toolbarHistory: pageHistory)
+                    .observingInkSelection(selectedInkStyle)
+                    #if os(macOS)
+                    .observingDiagramSelection(selectedDiagramStyle)
+                    #endif
                     .frame(maxWidth: .infinity, maxHeight: .infinity).disabled(sheet.isTrashed)
                     .overlay(alignment: .topTrailing) {
                         VStack(alignment: .trailing, spacing: 8) {
                             if !presentation.toolsVisible {
-                                HStack(spacing: 12) { sheetsButton; headingButton; fullPageButton; toolbarButton }
+                                HStack(spacing: 12) {
+                                    sheetsButton; headingButton; fullPageButton; toolbarButton
+                                    if presentation.isFullScreenWorkspace { toolbarLayoutButton }
+                                }
                                     .padding(10).background(.regularMaterial, in: Capsule())
                             }
-                            let number = store.sheetNumber(sheet.id).map { "Sheet \($0)" } ?? "Sheet"
+                            let number = sheet.numberedPageTitle ?? "Page"
                             Text(number)
                                 .font(.system(.caption, design: .monospaced)).fontWeight(.medium)
                                 .foregroundStyle(.primary).fixedSize()
                                 .padding(.horizontal, 12).padding(.vertical, 8)
                                 .background(.regularMaterial, in: Capsule())
                                 .allowsHitTesting(false)
-                                .accessibilityLabel("Current sheet, \(number)")
+                                .accessibilityLabel("Current page, \(number)")
                         }.padding(12)
+                    }
+                    .overlay {
+                        if showsFloatingToolbar { floatingDrawingToolbar(sheet) }
                     }
                 if !sheet.attachments.isEmpty { attachments(sheet) }
             }
             .background(editorBackground)
             .navigationTitle(store.sheetHeading(sheet.id))
+            .focusedSceneValue(\.floatingPagePresentation, showsFloatingToolbar ? presentation : nil)
             .onReceive(NotificationCenter.default.publisher(for: .noteToolShortcut)) { note in
                 if let tool = note.object as? InkTool, !sheet.isTrashed { selectTool(tool) }
+            }
+            .onChange(of: store.notebookDefaults) { old, new in
+                guard NotebookDefaults.writingTools.contains(inkTool) else { return }
+                if old.width(for: inkTool) != new.width(for: inkTool) { inkWidth = new.width(for: inkTool) }
+                if old.colors[inkTool.rawValue] != new.colors[inkTool.rawValue], let color = new.color(for: inkTool) { inkColor = color }
             }
             #if os(iOS)
             .navigationBarTitleDisplayMode(.inline)
@@ -355,6 +453,15 @@ struct SheetDetail: View {
                     store.update(sheet.id) { note in
                         if let index = note.equations.firstIndex(where: { $0.id == saved.id }) { note.equations[index] = saved }
                         else { note.equations.append(saved) }
+                        let frames = PageDiagramGeometry.externalAnchorFrames(images: note.images, textBoxes: note.textBoxes, equations: note.equations) { id in
+                            #if os(macOS)
+                            selectedDiagramStyle.textBoxHeight(id)
+                            #else
+                            nil
+                            #endif
+                        }
+                        note.diagrams = PageDiagramGeometry.routedConnectors(in: note.diagrams, frames: frames,
+                            movedDiagramIDs: [], movedObjectIDs: [.equation: [saved.id]])
                     }
                 }
             }
@@ -373,8 +480,27 @@ struct SheetDetail: View {
         }
     }
 
+    private func historyButton(_ title: String, symbol: String, enabled: Bool, action: @escaping () -> Void,
+                               floating: Bool = false) -> some View {
+        let id = (floating ? "floating." : "page.history.") + title.lowercased()
+        return Button(action: action) {
+            Image(systemName: symbol).frame(width: 28, height: 30).contentShape(Rectangle())
+                .floatingHitArea(floating)
+        }
+        .buttonStyle(.borderless).disabled(!enabled).help(title).accessibilityLabel(title)
+        .accessibilityIdentifier(id)
+        #if os(macOS)
+        .background {
+            if let diagnosticControls {
+                WorkspaceDiagnosticControlProbe(controls: diagnosticControls, identifier: id,
+                                                enabled: enabled, value: title, action: action)
+            }
+        }
+        #endif
+    }
+
     private func headerMetadata(_ sheet: NoteNode) -> some View {
-        let number = store.sheetNumber(sheet.id).map { "Sheet \($0)" } ?? "Sheet"
+        let number = sheet.numberedPageTitle ?? "Page"
         let created = "Created " + sheet.createdAt.formatted(date: .abbreviated, time: .shortened)
         let words = ([sheet.body] + sheet.textBoxes.map(\.text) + sheet.diagrams.map { $0.text + " " + $0.cells.joined(separator: " ") }).joined(separator: " ")
             .split(whereSeparator: \.isWhitespace).count
@@ -401,11 +527,11 @@ struct SheetDetail: View {
     private var sheetsButton: some View {
         let visible = !presentation.fullPage && presentation.sheetsVisible
         return Button { presentation.toggleSheets() } label: {
-            Image(systemName: visible ? "sidebar.right" : "rectangle.split.2x1")
+            Image(systemName: visible ? "ellipsis.rectangle.fill" : "ellipsis.rectangle")
                 .frame(width: 24, height: 28)
         }.buttonStyle(.plain)
-            .help(visible ? "Hide sheets pane" : "Show sheets pane")
-            .accessibilityLabel(visible ? "Hide sheets pane" : "Show sheets pane")
+            .help(visible ? "Hide page navigation" : "Show page navigation")
+            .accessibilityLabel(visible ? "Hide page navigation" : "Show page navigation")
             .keyboardShortcut("2", modifiers: [.command, .shift])
     }
 
@@ -440,6 +566,17 @@ struct SheetDetail: View {
             .keyboardShortcut("t", modifiers: [.command, .shift])
     }
 
+    private var toolbarLayoutButton: some View {
+        fullScreenToolbarModeMenu
+            .labelStyle(.iconOnly)
+            #if os(macOS)
+            .menuStyle(.borderlessButton)
+            .menuIndicator(.hidden)
+            #endif
+            .frame(width: 28, height: 28)
+            .accessibilityLabel("Full-screen toolbar")
+    }
+
     private var editorBackground: Color {
         #if os(macOS)
         Color(nsColor: .textBackgroundColor)
@@ -448,17 +585,44 @@ struct SheetDetail: View {
         #endif
     }
 
+    private func attachmentButton(_ sheet: NoteNode, inMenu: Bool = false) -> some View {
+        Button { showAttachmentImporter = true } label: {
+            if inMenu { Label("Attach a file…", systemImage: "paperclip") }
+            else { Image(systemName: "paperclip") }
+        }
+        .buttonStyle(.plain).help("Attach a file (up to 10 MiB)").accessibilityLabel("Attach a file")
+        .disabled(sheet.isTrashed)
+    }
+
+    @ViewBuilder private var tabletStatusEntries: some View {
+        Text(inputDevice.status)
+        #if os(macOS)
+        ForEach(inputDevice.tabletNames, id: \.self) { Text($0) }
+        Button("Check connected tablets") { inputDevice.refresh() }
+        #endif
+        Text("Stylus activity is detected when your pen reaches the page.")
+    }
+
+    private var tabletStatusMenu: some View {
+        Menu { tabletStatusEntries } label: {
+            Label(inputDevice.status, systemImage: inputDevice.detected ? "pencil.tip.crop.circle.badge.checkmark" : "pencil.tip")
+                .font(.caption).foregroundStyle(inputDevice.detected ? workspaceAccent : Color.secondary)
+        }
+    }
+
     #if os(macOS)
+    private static let formatCommands: [(title: String, icon: String, command: RichTextCommand)] = [
+        ("Bold", "bold", .bold), ("Italic", "italic", .italic), ("Underline", "underline", .underline),
+        ("Heading", "textformat.size", .heading), ("Body text", "textformat", .body),
+        ("Bullet list", "list.bullet", .bullet), ("Checklist", "checklist", .checklist)
+    ]
+
     private var formattingToolbar: some View {
         HStack(spacing: 4) {
-            formatButton("Bold", "bold", .bold)
-            formatButton("Italic", "italic", .italic)
-            formatButton("Underline", "underline", .underline)
-            Divider().frame(height: 16).padding(.horizontal, 3)
-            formatButton("Heading", "textformat.size", .heading)
-            formatButton("Body text", "textformat", .body)
-            formatButton("Bullet list", "list.bullet", .bullet)
-            formatButton("Checklist", "checklist", .checklist)
+            ForEach(Self.formatCommands, id: \.command) { item in
+                if item.command == .heading { Divider().frame(height: 16).padding(.horizontal, 3) }
+                formatButton(item.title, item.icon, item.command)
+            }
         }
     }
     private func formatButton(_ title: String, _ symbol: String, _ command: RichTextCommand) -> some View {
@@ -467,43 +631,36 @@ struct SheetDetail: View {
     }
     #endif
 
+    private static let drawingChoices: [(tool: InkTool, title: String, symbol: String)] = [
+        (.text, "Text", "textformat"), (.select, "Select", "cursorarrow"), (.lasso, "Lasso", "lasso"),
+        (.pen, "Pen", "pencil.tip"), (.line, "Straight line", "line.diagonal"), (.pencil, "Pencil", "pencil"),
+        (.marker, "Marker", "paintbrush.pointed"), (.highlighter, "Highlighter", "highlighter"), (.eraser, "Eraser", "eraser")
+    ]
+
     private var drawingTools: some View {
         HStack(spacing: 3) {
-            toolButton(.text, title: "Text", symbol: "textformat")
-            toolButton(.select, title: "Select", symbol: "cursorarrow")
-            toolButton(.lasso, title: "Lasso", symbol: "lasso")
-            toolButton(.pen, title: "Pen", symbol: "pencil.tip")
-            toolButton(.line, title: "Straight line", symbol: "line.diagonal")
-            toolButton(.pencil, title: "Pencil", symbol: "pencil")
-            toolButton(.marker, title: "Marker", symbol: "paintbrush.pointed")
-            toolButton(.highlighter, title: "Highlighter", symbol: "highlighter")
-            toolButton(.eraser, title: "Eraser", symbol: "eraser")
+            ForEach(Self.drawingChoices, id: \.tool) { item in
+                toolButton(item.tool, title: item.title, symbol: item.symbol)
+            }
         }
     }
 
-    private func toolButton(_ tool: InkTool, title: String, symbol: String) -> some View {
+    private func toolButton(_ tool: InkTool, title: String, symbol: String, floating: Bool = false) -> some View {
         Button { selectTool(tool) } label: {
             Image(systemName: symbol).font(.system(size: 15)).frame(width: 30, height: 30)
                 .background(inkTool == tool ? workspaceAccent.opacity(0.18) : .clear, in: RoundedRectangle(cornerRadius: 6))
+                .floatingHitArea(floating)
         }.buttonStyle(.plain)
             .help((tool == .line ? "Draw a straight line. Nearby horizontal and vertical lines snap into place; hold Shift on Mac to lock an axis." : "\(title) tool.") + " " + ToolShortcuts.help(for: tool))
             .accessibilityLabel("\(title) tool")
+            .accessibilityValue(inkTool == tool ? "Selected" : "Not selected")
     }
 
     private func selectTool(_ tool: InkTool) {
         selectedTool = tool.rawValue
-        switch tool {
-        case .pen, .pencil, .marker:
-            inkWidth = InkNibPreset.defaultWidth(for: tool)
-        case .line:
-            inkWidth = InkNibPreset.defaultWidth(for: tool)
-            inkColor = "#30343B"
-        case .diagram:
-            inkWidth = InkNibPreset.defaultWidth(for: .line)
-        case .highlighter:
-            inkWidth = InkNibPreset.defaultWidth(for: tool)
-            inkColor = "#E2B84D"
-        case .text, .select, .lasso, .eraser: break
+        if NotebookDefaults.writingTools.contains(tool) {
+            inkWidth = store.notebookDefaults.width(for: tool)
+            if let color = store.notebookDefaults.color(for: tool) { inkColor = color }
         }
         NotificationCenter.default.post(name: .noteToolFocus, object: tool)
     }
@@ -543,9 +700,17 @@ struct SheetDetail: View {
     }
 
     private var diagramTools: some View {
+        HStack(spacing: 5) {
+            diagramPaletteButton()
+            selectedDiagramAppearance
+        }
+    }
+
+    private func diagramPaletteButton(floating: Bool = false) -> some View {
         Button { showDiagramPalette.toggle() } label: {
             Image(systemName: "square.on.circle").font(.system(size: 15)).frame(width: 30, height: 30)
                 .background(inkTool == .diagram ? workspaceAccent.opacity(0.18) : .clear, in: RoundedRectangle(cornerRadius: 6))
+                .floatingHitArea(floating)
         }.buttonStyle(.plain).help("Shapes, arrow connectors and tables")
             .accessibilityLabel("Shapes and tables")
             .accessibilityValue(inkTool == .diagram ? diagramKindPreference : "Not selected")
@@ -588,33 +753,71 @@ struct SheetDetail: View {
                             Stepper("Columns: \(tableColumns)", value: $tableColumns, in: 1...12)
                         }.controlSize(.small)
                     }
-                    Toggle("Fill shapes", isOn: $diagramFill)
+                    Toggle("Fill new shapes", isOn: $diagramFill)
+                    Divider()
+                    HStack {
+                        Text("Selection").font(.caption).foregroundStyle(.secondary)
+                        Spacer()
+                        selectedDiagramAppearance
+                    }
                     Text("Choose an icon, then drag once. Click blank paper to deselect; double-click an object to edit its text.")
                         .font(.caption).foregroundStyle(.secondary).fixedSize(horizontal: false, vertical: true)
                 }.padding(16).frame(width: 302)
                     .onAppear { tableRows = min(20, max(1, tableRows)); tableColumns = min(12, max(1, tableColumns)) }
             }
     }
+
+    @ViewBuilder private var selectedDiagramAppearance: some View {
+        if let arrow = selectedDiagramStyle.editableConnector {
+            ConnectorAppearanceButton(connector: arrow, selection: selectedDiagramStyle).id(arrow.id)
+        } else {
+            selectedShapeFillMenu
+        }
+    }
+
+    private var selectedShapeFillMenu: some View {
+        Menu {
+            if selectedDiagramStyle.fill == nil && selectedDiagramStyle.selectedCount > 0 {
+                Text("Mixed fill")
+            }
+            CheckedMenuButton(title: "Filled", isSelected: selectedDiagramStyle.fill == true) {
+                selectedDiagramStyle.setFill(true)
+            }
+            CheckedMenuButton(title: "No fill", isSelected: selectedDiagramStyle.fill == false) {
+                selectedDiagramStyle.setFill(false)
+            }
+        } label: {
+            Label("Fill", systemImage: "paintbrush.fill").font(.caption).frame(height: 30)
+        }
+        .menuStyle(.borderlessButton)
+        .disabled(!selectedDiagramStyle.canEdit)
+        .help(selectedDiagramStyle.selectedCount == 0 ? "Select a shape or table to edit its fill" : "Change fill on selected shapes and tables")
+        .accessibilityLabel("Fill selected shapes")
+        .accessibilityValue(selectedDiagramStyle.accessibilityValue)
+        .accessibilityIdentifier("page.diagram.fill")
+    }
     #endif
 
     @ViewBuilder
     private var selectionActions: some View {
         if inkTool == .select || inkTool == .lasso {
-            Menu {
-                selectionAction("Copy selection", .copy)
-                selectionAction("Cut selection", .cut)
-                selectionAction("Paste", .paste)
-                selectionAction("Duplicate selection", .duplicate)
-                selectionAction("Delete selection", .delete)
-                Divider()
-                selectionAction("Undo selection change", .undo)
-                selectionAction("Redo selection change", .redo)
-                Divider()
-                selectionAction("Select all page content", .selectAll)
-                selectionAction("Clear selection", .clear)
-            } label: { Image(systemName: "square.dashed").frame(width: 30, height: 30) }
+            Menu { selectionCommands } label: { Image(systemName: "square.dashed").frame(width: 30, height: 30) }
             .help("Selection actions").accessibilityLabel("Selection actions")
         }
+    }
+
+    @ViewBuilder private var selectionCommands: some View {
+        selectionAction("Copy selection", .copy)
+        selectionAction("Cut selection", .cut)
+        selectionAction("Paste", .paste)
+        selectionAction("Duplicate selection", .duplicate)
+        selectionAction("Delete selection", .delete)
+        Divider()
+        selectionAction("Undo selection change", .undo)
+        selectionAction("Redo selection change", .redo)
+        Divider()
+        selectionAction("Select all page content", .selectAll)
+        selectionAction("Clear selection", .clear)
     }
 
     private func selectionAction(_ title: String, _ command: PageSelectionCommand) -> some View {
@@ -622,20 +825,22 @@ struct SheetDetail: View {
     }
 
     private var equationActions: some View {
-        Menu {
-            Button("Insert equation…") {
-                let bottom = max(sheet?.equations.map { $0.y + $0.height }.max() ?? 60,
-                                 sheet?.strokes.flatMap(\.points).map(\.y).max() ?? 60)
-                equationDraft = NoteEquation(x: 60, y: min(99_000, bottom + 30))
-            }
-            if let equations = sheet?.equations, !equations.isEmpty {
-                Divider()
-                ForEach(equations) { equation in
-                    Button("Edit: " + String(equation.latex.prefix(48))) { equationDraft = equation }
-                }
-            }
-        } label: { Image(systemName: "function").frame(width: 30, height: 30) }
+        Menu { equationCommands } label: { Image(systemName: "function").frame(width: 30, height: 30) }
         .help("Insert or edit a LaTeX equation").accessibilityLabel("Equations")
+    }
+
+    @ViewBuilder private var equationCommands: some View {
+        Button("Insert equation…") {
+            let bottom = max(sheet?.equations.map { $0.y + $0.height }.max() ?? 60,
+                             sheet?.strokes.flatMap(\.points).map(\.y).max() ?? 60)
+            equationDraft = NoteEquation(x: 60, y: min(99_000, bottom + 30))
+        }
+        if let equations = sheet?.equations, !equations.isEmpty {
+            Divider()
+            ForEach(equations) { equation in
+                Button("Edit: " + String(equation.latex.prefix(48))) { equationDraft = equation }
+            }
+        }
     }
 
     private var inkSettings: some View {
@@ -643,23 +848,53 @@ struct SheetDetail: View {
             ForEach(Array(InkColors.palette.prefix(5)), id: \.hex) { choice in
                 inkSwatch(choice)
             }
-            Button { showInkColors.toggle() } label: {
-                Image(systemName: "paintpalette").frame(width: 24, height: 26)
-            }.buttonStyle(.plain).help("More ink colors").accessibilityLabel("More ink colors")
-                .popover(isPresented: $showInkColors) {
-                    VStack(alignment: .leading, spacing: 14) {
-                        Text("Ink colors").font(.headline)
-                        LazyVGrid(columns: Array(repeating: GridItem(.fixed(42)), count: 4), spacing: 12) {
-                            ForEach(InkColors.palette, id: \.hex) { choice in
-                                inkSwatch(choice)
+            inkPaletteButton()
+            if !selectedInkStyle.canEdit { customInkPicker.labelsHidden().frame(width: 26) }
+            paperSettingsMenu()
+        }
+    }
+
+    private func inkPaletteButton(compact: Bool = false) -> some View {
+        Button {
+            if !showInkColors { recolorDraft = inkColor }
+            showInkColors.toggle()
+        } label: {
+            if selectedInkStyle.canEdit && !compact { Label("Recolor ink", systemImage: "paintpalette") }
+            else { Image(systemName: "paintpalette").frame(width: 24, height: 26).floatingHitArea(compact) }
+        }.buttonStyle(.plain)
+            .help(selectedInkStyle.canEdit ? "Recolor selected handwriting" : "More ink colors")
+            .accessibilityLabel(selectedInkStyle.canEdit ? "Recolor selected handwriting" : "More ink colors")
+            .popover(isPresented: $showInkColors) {
+                VStack(alignment: .leading, spacing: 14) {
+                    Text(selectedInkStyle.canEdit ? "Recolor selected ink" : "Ink colors").font(.headline)
+                    LazyVGrid(columns: Array(repeating: GridItem(.fixed(42)), count: 4), spacing: 12) {
+                        ForEach(InkColors.palette, id: \.hex) { choice in
+                            inkSwatch(choice)
+                        }
+                    }
+                    if selectedInkStyle.canEdit {
+                        ColorPicker("Custom color", selection: Binding(get: { Color(hex: recolorDraft) },
+                            set: { recolorDraft = InkColors.canonicalHex($0) }), supportsOpacity: false)
+                        HStack {
+                            Text(recolorDraft).font(.caption.monospaced()).foregroundStyle(.secondary)
+                            Spacer()
+                            Button("Apply") {
+                                selectedInkStyle.apply(recolorDraft)
+                                showInkColors = false
                             }
                         }
+                    } else {
                         customInkPicker
                         Text(inkColor.uppercased()).font(.caption.monospaced()).foregroundStyle(.secondary)
-                    }.padding(18)
-                }
-            customInkPicker.labelsHidden().frame(width: 26)
-            Menu {
+                    }
+                }.padding(18)
+            }
+            .onChange(of: selectedInkStyle.canEdit) { _, _ in showInkColors = false }
+    }
+
+    private func paperSettingsMenu(readOnly: Bool = false, floating: Bool = false) -> some View {
+        Menu {
+            Group {
                 let presets = InkNibPreset.presets(for: inkTool)
                 if !presets.contains(where: { abs(inkWidth - $0.width(for: inkTool)) < 0.000_001 }) {
                     CheckedMenuButton(title: InkNibPreset.customLabel(width: inkWidth, tool: inkTool), isSelected: true) {}
@@ -699,11 +934,12 @@ struct SheetDetail: View {
                         }
                     }
                 }
-                Divider()
-                AppearanceMenu()
-            } label: { Image(systemName: "slider.horizontal.3") }
-            .help("Nib width, line style, paper templates, and appearance").accessibilityLabel("Paper and appearance")
-        }
+            }.disabled(readOnly)
+            Divider()
+            Button("Notebook defaults…", action: openNotebookDefaults)
+            AppearanceMenu()
+        } label: { Image(systemName: "slider.horizontal.3").floatingHitArea(floating) }
+        .help("Nib width, line style, paper templates, and appearance").accessibilityLabel("Paper and appearance")
     }
 
     private func templateTitle(_ template: PageTemplate) -> String {
@@ -725,12 +961,19 @@ struct SheetDetail: View {
     }
 
     private func inkSwatch(_ choice: (name: String, hex: String)) -> some View {
-        Button { inkColor = choice.hex } label: {
+        let isCurrent = !selectedInkStyle.canEdit && inkColor.uppercased() == choice.hex
+        let label = selectedInkStyle.canEdit ? "Recolor selected ink " + choice.name : choice.name + " ink"
+        return Button {
+            if selectedInkStyle.canEdit {
+                selectedInkStyle.apply(choice.hex)
+                showInkColors = false
+            } else { inkColor = choice.hex }
+        } label: {
             Circle().fill(Color(hex: pageTheme.resolvedInkHex(choice.hex))).frame(width: 15, height: 15)
-                .padding(5).overlay(Circle().stroke(inkColor.uppercased() == choice.hex ? Color.primary : .clear, lineWidth: 1.5))
-        }.buttonStyle(.plain).help(choice.name + " ink")
-            .accessibilityLabel(choice.name + " ink")
-            .accessibilityValue(inkColor.uppercased() == choice.hex ? "Selected" : "Not selected")
+                .padding(5).overlay(Circle().stroke(isCurrent ? Color.primary : .clear, lineWidth: 1.5))
+        }.buttonStyle(.plain).help(label)
+            .accessibilityLabel(label)
+            .accessibilityValue(selectedInkStyle.canEdit ? "" : (isCurrent ? "Selected" : "Not selected"))
     }
 
     private func attachments(_ sheet: NoteNode) -> some View {
@@ -780,6 +1023,112 @@ struct SheetDetail: View {
         exportType = .plainText
         exportName = sheet.displayTitle
         showExporter = true
+    }
+}
+
+
+private extension View {
+    @ViewBuilder func floatingHitArea(_ enabled: Bool) -> some View {
+        if enabled { frame(maxWidth: .infinity, maxHeight: .infinity).contentShape(Circle()) }
+        else { self }
+    }
+}
+
+private enum FloatingPageTool: Hashable {
+    case drawing(InkTool), colors, undo, redo, paper, more
+    #if os(macOS)
+    case shapes
+    #endif
+}
+
+extension SheetDetail {
+    func floatingDrawingToolbar(_ sheet: NoteNode) -> some View {
+        var items = Self.drawingChoices.map { FloatingPageTool.drawing($0.tool) }
+        #if os(macOS)
+        items.append(.shapes)
+        #endif
+        items += [.colors, .undo, .redo, .paper, .more]
+        return FloatingPageToolbar(items: items, hoverOnly: floatingHoverOnly, anchor: floatingAnchor) { item in
+            floatingControl(item, sheet: sheet)
+        }
+    }
+
+    @ViewBuilder private func floatingControl(_ item: FloatingPageTool, sheet: NoteNode) -> some View {
+        #if os(macOS)
+        let readOnly = sheet.isTrashed
+        #else
+        let readOnly = sheet.isTrashed || !sheet.images.isEmpty || !sheet.diagrams.isEmpty
+        #endif
+        switch item {
+        case .drawing(let tool):
+            if let choice = Self.drawingChoices.first(where: { $0.tool == tool }) {
+                toolButton(tool, title: choice.title, symbol: choice.symbol, floating: true)
+                    .disabled(readOnly)
+                    .accessibilityIdentifier("floating." + tool.rawValue)
+                    #if os(macOS)
+                    .background {
+                        if let diagnosticControls {
+                            WorkspaceDiagnosticControlProbe(controls: diagnosticControls, identifier: "floating." + tool.rawValue,
+                                enabled: !readOnly, value: inkTool == tool ? "Selected" : "Not selected", action: { selectTool(tool) })
+                        }
+                    }
+                    #endif
+            }
+        #if os(macOS)
+        case .shapes:
+            diagramPaletteButton(floating: true).disabled(readOnly)
+        #endif
+        case .colors:
+            inkPaletteButton(compact: true).disabled(readOnly)
+        case .undo:
+            historyButton("Undo", symbol: "arrow.uturn.backward", enabled: !readOnly && pageHistory.canUndo,
+                          action: pageHistory.undo, floating: true)
+        case .redo:
+            historyButton("Redo", symbol: "arrow.uturn.forward", enabled: !readOnly && pageHistory.canRedo,
+                          action: pageHistory.redo, floating: true)
+        case .paper:
+            paperSettingsMenu(readOnly: readOnly, floating: true)
+                #if os(macOS)
+                .menuStyle(.borderlessButton).menuIndicator(.hidden)
+                #endif
+        case .more:
+            moreFloatingTools(sheet, readOnly: readOnly)
+        }
+    }
+
+    private func moreFloatingTools(_ sheet: NoteNode, readOnly: Bool) -> some View {
+        Menu {
+            Group {
+                Menu("Selection") { selectionCommands }
+                Menu("Equations") { equationCommands }
+                #if os(macOS)
+                if inkTool == .text {
+                    Menu("Format text") {
+                        ForEach(Self.formatCommands, id: \.command) { item in
+                            Button(item.title) { RichTextEditor.perform(item.command) }
+                        }
+                    }
+                }
+                #endif
+                attachmentButton(sheet, inMenu: true)
+            }.disabled(readOnly)
+            Divider()
+            Button(!presentation.fullPage && presentation.sheetsVisible ? "Hide page navigation" : "Show page navigation") {
+                presentation.toggleSheets()
+            }
+            Button(!presentation.fullPage && presentation.headingVisible ? "Hide heading" : "Show heading") {
+                presentation.toggleHeading()
+            }
+            Button(presentation.fullPage ? "Exit full page" : "Full page") { presentation.fullPage.toggle() }
+            fullScreenToolbarModeMenu
+            Button("Hide drawing toolbar") { presentation.toolsVisible.toggle() }
+            Divider()
+            Menu(inputDevice.status) { tabletStatusEntries }
+        } label: { Image(systemName: "ellipsis.circle").floatingHitArea(true) }
+        #if os(macOS)
+        .menuStyle(.borderlessButton).menuIndicator(.hidden)
+        #endif
+        .help("More page tools").accessibilityLabel("More page tools")
     }
 }
 
