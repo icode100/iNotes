@@ -48,10 +48,17 @@ The build script validates the property list, architecture, app signature, and D
 before publishing outputs. The verification script mounts it read-only and checks
 the packaged app and Applications shortcut.
 
-The v1.4.0 candidate uses production defaults **1.4.0 / build 2022**. The user
-authorized publication after the isolated floating-toolbar QA build 5 on
-26 November 2026. The local QA executable, its separate identity and its test
-results are recorded in [validation](TESTING.md).
+The packaging defaults match **v1.4.0 / build 2022**, published on 26 November
+2026 from `d2f3a180df370d72ba69c0f734e3410adac67238`. Native run 51 passed,
+including the iPad simulator build, and signed release run 20 published the Mac
+installer. Independent public-download verification passed. The DMG contains
+35,758,722 bytes and the installed app contains 45,512,731 regular-file bytes.
+The validation record distinguishes the earlier run 50 toolbar
+fixture failure, isolated QA build 5, hosted checks and public asset checks.
+[GitHub release](https://github.com/icode100/iNotes/releases/tag/v1.4.0) ·
+[Native run 51](https://github.com/icode100/iNotes/actions/runs/45776994590) ·
+[Signed release run 20](https://github.com/icode100/iNotes/actions/runs/45784645826) ·
+[Validation](TESTING.md)
 
 The previous published **1.3.0 / build 2021** came from source
 `4c9ea4fc29af53b6bf08ee4e0e2822b30db96e28`, released on 6 November 2026.
@@ -114,8 +121,8 @@ Sparkle compares build numbers, not just the displayed version.
 The release workflow uses `2002 + GITHUB_RUN_NUMBER`: run 12 built 2014 but failed
 before publishing; runs 13/14/15 published 2015/2016/2017. Runs 16 and 17 built
 2018 and 2019 but failed before publication; run 18 published 2020 and run 19
-published 2021. The next fresh run 20 must produce **2022**, subject to a
-feed/counter recheck. A rerun does not
+published 2021. Run 20 published 2022. The next new run, 21, should produce
+**2023**. Recheck the public feed and workflow counter before tagging. A rerun does not
 increase its build number. The local v1.1.0 QA apps use separate
 identities, QA builds 1 and 2, temporary libraries and
 disconnected updaters. User QA passed the initial candidate; the final Pen-only

@@ -1,5 +1,40 @@
 # Validation
 
+## v1.4.0 / build 2022 published and independently verified — 26 November 2026
+
+The [GitHub release](https://github.com/icode100/iNotes/releases/tag/v1.4.0)
+ships source `d2f3a180df370d72ba69c0f734e3410adac67238`.
+[Native run 51](https://github.com/icode100/iNotes/actions/runs/45776994590)
+passed the Mac package, editor checks, disk-image verification and iPad simulator
+compilation. [Signed release run 20](https://github.com/icode100/iNotes/actions/runs/45784645826)
+passed on macOS 26.7.2 (25G332), signed the installer and feed with the
+established Ed25519 identity, and published all three assets. Both jobs passed
+142 core tests, 1,299 native editor checks (429 diagram), 31 equation,
+9 shortcut, 12 ruled-text, 2,082 workspace and 13 notebook PDF/ZIP checks.
+The corrected local workspace suite also passed 2,082 checks on macOS 27.2.1.
+The user approved the earlier isolated QA build 5. The follow-up changed the
+diagnostic for docked history controls. Physical iPad and Pencil testing and
+manual installation of this public build were outside these checks.
+
+Separate public downloads matched the GitHub API asset sizes and SHA-256
+digests. The installer matched the published checksum, and the latest update
+feed matched the versioned feed byte for byte. The valid feed and installer
+passed Ed25519 verification. The verifier rejected a modified feed, an unsigned
+feed, a modified installer and a different public key.
+
+| Published asset | Bytes | SHA-256 |
+| --- | ---: | --- |
+| `iNotes-1.4.0-arm64.dmg` | 35,758,722 | `b2cc5654677d9e4c6f95cd73b13d1654af7c04989db1a90002bc6992372634c1` |
+| `iNotes-1.4.0-arm64.dmg.sha256` | 89 | `c8183c2a38f92aed5bdd1f548148a1520e7fcebbb36db7d6fca08041b66158b8` |
+| `appcast.xml` | 1,268 | `df3d605fe388b8f05a7e6620da1dbe47f3a22f02f6cdacaba5f3502b1a7a0592` |
+
+The read-only mounted DMG contained the production ARM64 `io.inotes.app`,
+version 1.4.0/build 2022, its production update feed and original public key.
+The bundle passed strict ad hoc signature, resource and updater-configuration
+checks and ran the smoke test with a disposable notebook. Its 106 regular files
+totaled 45,512,731 bytes. The independent machine-readable record is in
+`dist/public-v1.4.0/verification.json`.
+
 ## v1.4.0 hosted toolbar history follow-up
 
 [Native run 50](https://github.com/icode100/iNotes/actions/runs/45775476467)

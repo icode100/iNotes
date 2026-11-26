@@ -43,9 +43,15 @@ does not publish a release.
 
 ## Build and sign a local update
 
-The v1.4.0 candidate uses version **1.4.0 / build 2022**. The user approved
-publication on 26 November 2026 after the isolated floating-toolbar QA build 5.
-See the [release notes](releases/1.4.0.md) and [validation](TESTING.md).
+The current public release is **1.4.0 / build 2022**, published on 26 November
+2026 from source `d2f3a180df370d72ba69c0f734e3410adac67238`. The user
+authorized publication after isolated floating-toolbar QA build 5. Native run
+51 passed, including iPad compilation, and signed release run 20 published
+the Mac installer and Sparkle feed. Independent public-download verification passed.
+[GitHub release](https://github.com/icode100/iNotes/releases/tag/v1.4.0) ·
+[Native run 51](https://github.com/icode100/iNotes/actions/runs/45776994590) ·
+[Signed release run 20](https://github.com/icode100/iNotes/actions/runs/45784645826) ·
+[Validation](TESTING.md)
 
 The preceding published release was **v1.3.0 / build 2021**, from source
 `4c9ea4fc29af53b6bf08ee4e0e2822b30db96e28`, published on 6 November 2026.
@@ -119,14 +125,14 @@ using Apple CryptoKit and the committed public key. It does not upload anything.
 For v1.0.3, the security rebuild 2011 exceeds the initial public build 2010 and
 shared local builds 1010–1012. Check both published and shared `CFBundleVersion`
 values and use a larger number for every update, including same-version rebuilds.
-Defaults (`1.4.0`, build 2022) target the approved notebook update. They remain
+Defaults (`1.4.0`, build 2022) match the published notebook update. They remain
 separate from the release workflow's
 `2002 + GITHUB_RUN_NUMBER`. Run 11 published v1.0.4 build 2012; isolated backup QA
 used build 2013. Run 12 built 2014 but stopped at native diagnostic verification before publication.
 Runs 13, 14 and 15 published 2015, 2016 and 2017. Runs 16 and 17 built 2018 and
 2019 but failed before publication. Run 18 published 2020 and run 19 published
-2021. The next new release run (20) must produce **2022**, subject to a fresh
-feed/counter check. Failed builds
+2021. Run 20 published 2022. The next new run, 21, should produce **2023**.
+Recheck the public feed and workflow counter before tagging. Failed builds
 2014, 2018 and 2019 remain reserved alongside
 original installers and QA slots.
 Each public feed points to its matching versioned release DMG. Never edit a signed appcast
@@ -156,7 +162,8 @@ the earlier v1.2 authorization was on 5 November. Preserve the failed unpublishe
 `v1.2.0` tag at `ca051953` and `v1.2.1` tag at `adf533e4`; do not move either to
 changed source or reuse builds 2018/2019. Published `v1.2.2` identifies
 `aa392994`; preserve its build 2020. Published `v1.3.0` identifies `4c9ea4fc` and
-build 2021; preserve that tag/installer too and use a higher number for a new binary.
+build 2021. Published `v1.4.0` identifies `d2f3a180` and build 2022. Preserve
+each release tag and installer, and use a higher build number for a new binary.
 `.github/workflows/release.yml` runs unit/integration tests, builds the
 ARM64 DMG, verifies the mounted bundle, signs and independently verifies the
 appcast, then publishes the DMG, SHA-256 checksum, and `appcast.xml` as GitHub

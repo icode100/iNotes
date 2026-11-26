@@ -1,15 +1,14 @@
 # iNotes
 
-**iNotes 1.4.0** adds page navigation at the foot of the notebook, topic PDFs
-and workbook ZIP exports, editable table dimensions, and a movable circular
-toolbar for Full Page. It also adds connected shapes, post-drawing ink colors
-and personal pen and paper defaults. The v1.4.0 candidate has been approved for
-publication. [Latest public Mac release](https://github.com/icode100/iNotes/releases/latest)
-and [v1.4.0 release notes](docs/releases/1.4.0.md).
+**iNotes 1.4.0, build 2022**, released on 26 November 2026, adds numbered
+page navigation, topic PDFs, workbook ZIP exports and a movable circular
+toolbar for full-screen writing. You can connect shapes, resize table rows
+and columns, recolor existing handwriting and set your own pen and paper defaults.
+[Download the Apple silicon Mac installer](https://github.com/icode100/iNotes/releases/download/v1.4.0/iNotes-1.4.0-arm64.dmg)
+or [read the release notes](https://github.com/icode100/iNotes/releases/tag/v1.4.0).
 
 **iNotes 1.3.0, build 2021** introduced Mac shapes, attached arrow connectors and
 editable table cells. Published and independently verified on 6 November 2026.
-[Download the Mac installer](https://github.com/icode100/iNotes/releases/download/v1.3.0/iNotes-1.3.0-arm64.dmg).
 Exact-source hosted Native checks, iPad compilation, signed release checks and
 independent public-download verification passed. See the
 [release notes](docs/releases/1.3.0.md) and [validation record](docs/TESTING.md).

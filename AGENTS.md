@@ -96,12 +96,16 @@ or signed-release runs; this does not establish its cause or a general fix.
 User QA2 approved the placement and icon UX and later reported the installed
 public update works; this does not add physical stylus/IME validation.
 
-On **26 November 2026** the user authorized v1.4.0 publication after the
-isolated floating-toolbar QA build 5. Production metadata targets **1.4.0 /
-build 2022**. QA used a separate identity, disposable notes and no updater.
-Its local suite passed 142 core tests, 1,301 editor checks, 2,081 workspace
-checks and 13 PDF/ZIP checks. Consult `docs/TESTING.md` for release-specific
-hosted and downloaded-asset evidence.
+**v1.4.0 / build 2022** was published on **26 November 2026** from source
+`d2f3a180df370d72ba69c0f734e3410adac67238`. The user approved publication
+after the isolated floating-toolbar QA build 5. That local QA suite passed
+142 core tests, 1,301 editor checks, 2,081 workspace checks and 13 PDF/ZIP
+checks. Hosted Native run 50 stopped at the toolbar Redo fixture on earlier
+source. After the fixture correction, Native run 51 passed on the released
+source, including iPad compilation. Signed release run 20 published build
+2022. Independent verification of the public installer and signed feed passed.
+Consult `docs/TESTING.md` for the hosted results, public download checks
+and physical-device limits.
 
 ## Priorities
 
@@ -583,14 +587,14 @@ exact-source Native checks,
 signed release checks and independently downloaded public assets passed.
 Run 19 published v1.3.0/build 2021 from `4c9ea4fc`; exact-source Native,
 signed-release and independent public verification passed on 6 November 2026.
-Defaults target v1.4.0/build 2022. Prior tags and release assets remain
+Run 20 published v1.4.0/build 2022 from `d2f3a180`. The packaging defaults match this release. Prior tags and release assets remain
 unchanged, including the failed 1.2.0/1.2.1 reservations.
 Initial v1.2.0 user QA and publication authorization were recorded on
 5 November 2026; they do not establish
 later-source or public-build results. The v1.1.0 local QA identities use separate
 QA builds 1 and 2 (final Pen correction). The 1.3 QA apps use separate identities
 and temporary libraries, QA builds 1 and 2, with no updater. The next new
-signed-release run (20) must produce 2022; recheck feed and counter before publishing.
+signed-release run (21) should produce build 2023. Recheck the feed and counter before publishing.
 A workflow rerun does not
 advance `GITHUB_RUN_NUMBER`. Never reuse its build number for an updated binary.
 The release workflow supports an explicit `workflow_dispatch` for the current
