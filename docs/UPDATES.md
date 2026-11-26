@@ -43,7 +43,15 @@ does not publish a release.
 
 ## Build and sign a local update
 
-The current public release is **1.4.0 / build 2022**, published on 26 November
+The current public release is **1.4.2 / build 2024**, published on 26 November
+2026 from `f21afe8db77b4df8ee3e3aaabd19afebaf0c8a93`. Signed release run 22 published the
+installer, checksum and update feed. The downloaded installer and feed passed
+independent Ed25519 verification.
+[GitHub release](https://github.com/icode100/iNotes/releases/tag/v1.4.2) ·
+[Signed release run 22](https://github.com/icode100/iNotes/actions/runs/45810819768) ·
+[Validation](TESTING.md)
+
+The preceding published release was **1.4.0 / build 2022**, published on 26 November
 2026 from source `d2f3a180df370d72ba69c0f734e3410adac67238`. The user
 authorized publication after isolated floating-toolbar QA build 5. Native run
 51 passed, including iPad compilation, and signed release run 20 published
@@ -125,7 +133,7 @@ using Apple CryptoKit and the committed public key. It does not upload anything.
 For v1.0.3, the security rebuild 2011 exceeds the initial public build 2010 and
 shared local builds 1010–1012. Check both published and shared `CFBundleVersion`
 values and use a larger number for every update, including same-version rebuilds.
-Defaults (`1.4.2`, build 2024) identify the page-navigation candidate. They remain
+Defaults (`1.4.2`, build 2024) match the published page-navigation update. They remain
 separate from the release workflow's
 `2002 + GITHUB_RUN_NUMBER`. Run 11 published v1.0.4 build 2012; isolated backup QA
 used build 2013. Run 12 built 2014 but stopped at native diagnostic verification before publication.
@@ -133,7 +141,7 @@ Runs 13, 14 and 15 published 2015, 2016 and 2017. Runs 16 and 17 built 2018 and
 2019 but failed before publication. Run 18 published 2020 and run 19 published
 2021. Run 20 published 2022. Run 21 stopped before publication at the pinned footer
 viewport-height assertion and reserved v1.4.1/build 2023.
-The next new run, 22, should produce **2024**.
+Run 22 published 2024. The next new run, 23, should produce **2025**.
 Recheck the public feed and workflow counter before tagging. Failed builds
 2014, 2018, 2019 and 2023 remain reserved alongside
 original installers and QA slots.
@@ -164,7 +172,9 @@ the earlier v1.2 authorization was on 5 November. Preserve the failed unpublishe
 `v1.2.0` tag at `ca051953` and `v1.2.1` tag at `adf533e4`; do not move either to
 changed source or reuse builds 2018/2019. Published `v1.2.2` identifies
 `aa392994`; preserve its build 2020. Published `v1.3.0` identifies `4c9ea4fc` and
-build 2021. Published `v1.4.0` identifies `d2f3a180` and build 2022. Preserve
+build 2021. Published `v1.4.0` identifies `d2f3a180` and build 2022.
+Keep unpublished `v1.4.1` at `164868ff` with build 2023 reserved. Published
+`v1.4.2` identifies `f21afe8d` and build 2024. Preserve
 each release tag and installer, and use a higher build number for a new binary.
 `.github/workflows/release.yml` runs unit/integration tests, builds the
 ARM64 DMG, verifies the mounted bundle, signs and independently verifies the

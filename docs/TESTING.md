@@ -1,5 +1,40 @@
 # Validation
 
+## iNotes 1.4.2 / build 2024 published and verified — 26 November 2026
+
+[Native run 55](https://github.com/icode100/iNotes/actions/runs/45808324178)
+passed on `f21afe8db77b4df8ee3e3aaabd19afebaf0c8a93`. The macOS
+26.7.2 runner passed 142 core tests, 1,299 native editor checks
+(429 diagram), 31 equation, 9 shortcut, 12 ruled-text, 2,170 workspace
+and 13 notebook PDF/ZIP checks. It verified the Mac disk image and compiled
+the iPad simulator target. An isolated native run from the same source on
+macOS 27.2.1 passed 1,301 editor and 2,170 workspace checks, as well as
+the notebook exports and storage regressions. The user's hands-on approval
+applies to isolated 1.4.1 QA build 1. Native full-screen coverage in the
+fixture uses the window's notification state.
+
+[Signed release run 22](https://github.com/icode100/iNotes/actions/runs/45810819768)
+passed the native suite on the tagged source, verified the mounted installer
+and signed updates, and published all three assets to the
+[GitHub release](https://github.com/icode100/iNotes/releases/tag/v1.4.2).
+Independent public downloads matched the GitHub asset sizes and digests.
+The latest Sparkle feed matched the versioned feed on the first read.
+The downloaded installer matched its checksum. The valid feed and DMG passed
+verification. The checker rejected a changed feed, an unsigned feed,
+a changed archive and a signature checked against the wrong key.
+
+| Public asset | Bytes | SHA-256 |
+| --- | ---: | --- |
+| Apple silicon DMG | 35,828,588 | `49eae6bd4f32c69fc8e48231e8d11fd49cea0202afe12634415bf7bdc46218a3` |
+| DMG checksum file | 89 | `58247e2f802b7c49a6a50ad6d01c1231a4c21e98f5a15ed2c466feb85c46cdf4` |
+| Signed Sparkle feed | 1,268 | `8a0101667d36a4d1a3d1d4ac285850e8b027bf2482fa896452803bf0f4b40f4a` |
+
+Mounted read-only, the production app passed signature and resource verification
+and a smoke test with temporary notes. The ARM64 bundle used `io.inotes.app`,
+version 1.4.2/build 2024, ad hoc app signing and the production update key.
+Its 106 regular files totalled 45,830,539 bytes. The executable was 10,863,520
+bytes with SHA-256 `f8b775a9333ff2cb57fffa3945024009f0a133cf00d8433d47ac01ffa9ff9ec5`.
+
 ## Page navigation release follow-up — 26 November 2026
 
 An instrumented offscreen run of the original windowed sequence (browse,

@@ -8,7 +8,7 @@ on:
       version:
         description: 'Existing visible version to rebuild without moving its tag'
         required: true
-        default: '1.4.0'
+        default: '1.4.2'
         type: string
       source_commit:
         description: 'Full source commit that passed Native checks'
@@ -62,7 +62,8 @@ jobs:
           printf 'RELEASE_TAG=%s\n' "$release_tag" >> "$GITHUB_ENV"
           # Public run 11 shipped 2012; the isolated backup QA build used 2013.
           # Runs 16 and 17 reserved 2018 and 2019 but failed before publication.
-          # Runs 18 and 19 published 2020 and 2021; the next fresh run 20 uses 2022.
+          # Runs 18 through 20 published builds 2020 through 2022.
+          # Run 21 reserved 2023 before publication; run 22 published 2024.
           printf 'BUILD_NUMBER=%s\n' "$((2002 + GITHUB_RUN_NUMBER))" >> "$GITHUB_ENV"
       - name: Check existing release before rebuilding
         if: github.event_name == 'workflow_dispatch'

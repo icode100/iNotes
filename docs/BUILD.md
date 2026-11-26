@@ -48,12 +48,21 @@ The build script validates the property list, architecture, app signature, and D
 before publishing outputs. The verification script mounts it read-only and checks
 the packaged app and Applications shortcut.
 
-The page-navigation candidate uses packaging defaults **1.4.2 / build 2024**.
+The packaging defaults match **v1.4.2 / build 2024**, published on 26 November
+2026 from `f21afe8db77b4df8ee3e3aaabd19afebaf0c8a93`. Native run 55 passed the
+Mac checks and iPad simulator build. Signed release run 22 published the Mac
+installer and update feed. Independent downloads passed checksum, signature and
+mounted bundle verification.
+[GitHub release](https://github.com/icode100/iNotes/releases/tag/v1.4.2) ·
+[Native run 55](https://github.com/icode100/iNotes/actions/runs/45808324178) ·
+[Signed release run 22](https://github.com/icode100/iNotes/actions/runs/45810819768) ·
+[Validation](TESTING.md)
+
 The original isolated QA app used version 1.4.1, QA build 1. Signed release
 run 21 stopped at the pinned footer viewport-height check, reserving
 `v1.4.1` and production build 2023.
 
-The current public release is **v1.4.0 / build 2022**, published on 26 November
+The preceding release was **v1.4.0 / build 2022**, published on 26 November
 2026 from `d2f3a180df370d72ba69c0f734e3410adac67238`. Native run 51 passed,
 including the iPad simulator build, and signed release run 20 published the Mac
 installer. Independent public-download verification passed. The DMG contains
@@ -126,8 +135,8 @@ Sparkle compares build numbers, not just the displayed version.
 The release workflow uses `2002 + GITHUB_RUN_NUMBER`: run 12 built 2014 but failed
 before publishing; runs 13/14/15 published 2015/2016/2017. Runs 16 and 17 built
 2018 and 2019 but failed before publication; run 18 published 2020 and run 19
-published 2021. Run 20 published 2022. Run 21 reserved 2023 before publication. The next new
-run, 22, should produce **2024**. Recheck the public feed and workflow counter before tagging. A rerun does not
+published 2021. Run 20 published 2022. Run 21 reserved 2023 before publication. Run 22
+published 2024. The next new run, 23, should produce **2025**. Recheck the public feed and workflow counter before tagging. A rerun does not
 increase its build number. The local v1.1.0 QA apps use separate
 identities, QA builds 1 and 2, temporary libraries and
 disconnected updaters. User QA passed the initial candidate; the final Pen-only

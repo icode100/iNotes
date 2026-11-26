@@ -107,6 +107,16 @@ source, including iPad compilation. Signed release run 20 published build
 Consult `docs/TESTING.md` for the hosted results, public download checks
 and physical-device limits.
 
+**v1.4.2 / build 2024** was published on **26 November 2026** from source
+`f21afe8db77b4df8ee3e3aaabd19afebaf0c8a93`. The user approved the original isolated
+1.4.1 QA build 1 for the page-navigation update. Signed release run 21 stopped
+before publishing 1.4.1 at the pinned footer viewport-height check. Native run
+55 verified the final source and iPad simulator build. It passed 142 core tests,
+1,299 editor checks (429 diagram), 2,170 workspace checks and 13 PDF/ZIP checks.
+Signed release run 22 published the installer and feed. Independent public
+downloads passed verification. See `docs/TESTING.md` for the fixture corrections
+and evidence for each build.
+
 ## Priorities
 
 - Use **Page** and **Pages** throughout the product, including the numbered
@@ -117,7 +127,7 @@ and physical-device limits.
   bottom page navigation and an adjacent add-page control. Preserve the stable
   sidebar owner and sheet-keyed editor, native heading heights, visible viewport,
   page order, and sheet-local undo/redo when changing the carousel.
-- The page navigation follow-up defaults to **Show on hover** and persists
+- Version 1.4.2 defaults page navigation to **Show on hover** and persists
   **Pin to bottom** across windows and launches. Hover overlays the page;
   pinning reserves the footer. Both modes work in Full Page and native Mac full
   screen. Keep the window's explicit show/hide choice independent of its
@@ -597,14 +607,15 @@ Run 20 published v1.4.0/build 2022 from `d2f3a180`. Native run 53 passed at
 `164868ff`, including iPad compilation. The user authorized publication after
 approving the source push for isolated 1.4.1 QA build 1. Signed release run 21
 then failed the pinned footer viewport-height check before publication.
-Reserve tag v1.4.1 and build 2023. The follow-up candidate uses 1.4.2/build 2024. Prior tags and release assets remain
+Reserve tag v1.4.1 and build 2023. Run 22 published v1.4.2/build 2024 from
+`f21afe8d`. Packaging defaults match v1.4.2. Prior tags and release assets remain
 unchanged, including the failed 1.2.0/1.2.1 reservations.
 Initial v1.2.0 user QA and publication authorization were recorded on
 5 November 2026; they do not establish
 later-source or public-build results. The v1.1.0 local QA identities use separate
 QA builds 1 and 2 (final Pen correction). The 1.3 QA apps use separate identities
 and temporary libraries, QA builds 1 and 2, with no updater. The next new
-signed-release run (22) should produce build 2024. Recheck the feed and counter before publishing.
+signed-release run (23) should produce build 2025. Recheck the feed and counter before publishing.
 A workflow rerun does not
 advance `GITHUB_RUN_NUMBER`. Never reuse its build number for an updated binary.
 The release workflow supports an explicit `workflow_dispatch` for the current

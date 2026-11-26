@@ -1,11 +1,16 @@
 # iNotes
 
-**iNotes 1.4.0, build 2022**, released on 26 November 2026, adds numbered
-page navigation, topic PDFs, workbook ZIP exports and a movable circular
-toolbar for full-screen writing. You can connect shapes, resize table rows
-and columns, recolor existing handwriting and set your own pen and paper defaults.
-[Download the Apple silicon Mac installer](https://github.com/icode100/iNotes/releases/download/v1.4.0/iNotes-1.4.0-arm64.dmg)
-or [read the release notes](https://github.com/icode100/iNotes/releases/tag/v1.4.0).
+**iNotes 1.4.2, build 2024**, released on 26 November 2026, lets you reveal
+page navigation by moving the pointer to the bottom of the window or pin the
+bar to keep it visible. Both modes work in a regular Mac window, in Full Page
+and in macOS full screen. On iPad, tap the bottom handle to reveal the bar.
+[Download the Apple silicon Mac installer](https://github.com/icode100/iNotes/releases/download/v1.4.2/iNotes-1.4.2-arm64.dmg)
+or [read the release notes](https://github.com/icode100/iNotes/releases/tag/v1.4.2).
+
+**iNotes 1.4.0, build 2022**, introduced numbered page navigation, topic
+PDFs, workbook ZIP exports and a movable circular toolbar. It also added
+connected diagram objects, resizable table cells, handwriting recoloring and
+personal pen and paper defaults. [1.4.0 release notes](docs/releases/1.4.0.md)
 
 **iNotes 1.3.0, build 2021** introduced Mac shapes, attached arrow connectors and
 editable table cells. Published and independently verified on 6 November 2026.
@@ -68,7 +73,7 @@ A small, native, open-source notebook for Apple silicon Macs, with a shared iPad
 - **Recolor handwriting on Mac or iPad.** Select the strokes with **Select** or **Lasso**. Choose a toolbar swatch, or open **Recolor ink** for more swatches and a custom color. Click **Apply** for a custom color. Recoloring edits just the selected ink, including when the selection also contains other objects. Undo restores the previous colors.
 - **Set your defaults.** Open **Notebook defaults…** from **Appearance**. Set a preset or custom nib width and an optional starting color per drawing tool, including Shapes and arrows on Mac. Choose the paper, template, and template line for newly created pages. These preferences apply across workbooks on this device.
 
-### Page navigation in the 1.4.2 candidate
+### Page navigation in 1.4.2
 
 Move the pointer to the bottom edge of the notebook to reveal the page numbers,
 page browser and **+** button. Click the pin on the bar to keep it in view, or
@@ -136,7 +141,7 @@ Requires an Apple silicon Mac and macOS 14+. Building the installer requires ful
 open dist/iNotes.app
 ```
 
-Building the current source produces `dist/iNotes-1.4.2-arm64.dmg`, build 2024. The public installer linked above is 1.4.0, build 2022. Unpublished versions 1.2.0/build 2018, 1.2.1/build 2019 and 1.4.1/build 2023 stay reserved. Downloaded public builds are ad hoc signed: **they are not Apple notarized**, so macOS may report that Apple could not verify iNotes is free of malware.
+The public installer and the packaging defaults both use version 1.4.2, build 2024. Unpublished versions 1.2.0/build 2018, 1.2.1/build 2019 and 1.4.1/build 2023 stay reserved. Downloaded public builds are ad hoc signed: **they are not Apple notarized**, so macOS may report that Apple could not verify iNotes is free of malware.
 
 If you trust the download from the [official releases](https://github.com/icode100/iNotes/releases), follow Apple's [per-app first-open procedure](https://support.apple.com/en-us/102445):
 
