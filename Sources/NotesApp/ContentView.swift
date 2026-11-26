@@ -242,6 +242,13 @@ struct ContentView: View {
                 .frame(maxWidth: .infinity, maxHeight: .infinity)
                 if reservesNavigationSpace {
                     Color.clear.frame(height: Self.carouselHeight)
+                        #if os(macOS)
+                        .background {
+                            if let diagnosticControls {
+                                WorkspaceDiagnosticControlProbe(controls: diagnosticControls, identifier: "page-navigation-reservation")
+                            }
+                        }
+                        #endif
                         .allowsHitTesting(false).accessibilityHidden(true)
                 }
             }

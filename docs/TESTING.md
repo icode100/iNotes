@@ -1,5 +1,36 @@
 # Validation
 
+## Page navigation release follow-up — 26 November 2026
+
+An instrumented offscreen run of the original windowed sequence (browse,
+close, then pin) observed the footer controls and saved pin preference
+ready while the native editor was still 508 points high. The first native
+scroll-frame change arrived 22 ms later at 458 points, exactly 50 points
+shorter. The same ordering occurred in Full Page and the native full-screen
+notification fixture. The original release log lacks the frames needed to
+attribute its failure to that timing.
+
+The revised check observes a native frame change on the same scroll view,
+the reservation spacer mounting or disappearing, and completion of navigation
+callbacks before it compares the geometry. It keeps the five-second bound
+and footer tolerance, checks that unpinning restores the viewport, and
+records the first changed frame and the relevant rectangles on failure.
+
+## Unpublished 1.4.1 / build 2023 — 26 November 2026
+
+[Native run 53](https://github.com/icode100/iNotes/actions/runs/45794540819)
+passed on source `164868ff1f9412f13fb90158c3372c6bd7f4bd82`, including the
+Mac installer and iPad simulator build. It recorded 142 core tests, 1,299
+native editor checks (429 diagram), 31 equation, 9 tool-shortcut, 12
+ruled-text, 2,158 workspace and 13 notebook PDF/ZIP checks.
+
+[Release run 21](https://github.com/icode100/iNotes/actions/runs/45802621276)
+built the Mac DMG from that same source. The windowed workspace fixture
+stopped at the comparison between the native editor viewport and the pinned
+page footer. The log retained the assertion message but did not include the
+actual frame measurements. Ed25519 signing and publication were never reached.
+The `v1.4.1` tag and build 2023 remain reserved.
+
 ## Bottom-edge page navigation — local QA, 26 November 2026
 
 The 1.4.1 QA build uses the separate bundle ID

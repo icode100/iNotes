@@ -593,16 +593,18 @@ exact-source Native checks,
 signed release checks and independently downloaded public assets passed.
 Run 19 published v1.3.0/build 2021 from `4c9ea4fc`; exact-source Native,
 signed-release and independent public verification passed on 6 November 2026.
-Run 20 published v1.4.0/build 2022 from `d2f3a180`. The page-navigation
-source candidate uses packaging defaults 1.4.1/build 2023. The user authorized
-the source push after isolated 1.4.1 QA build 1. Prior tags and release assets remain
+Run 20 published v1.4.0/build 2022 from `d2f3a180`. Native run 53 passed at
+`164868ff`, including iPad compilation. The user authorized publication after
+approving the source push for isolated 1.4.1 QA build 1. Signed release run 21
+then failed the pinned footer viewport-height check before publication.
+Reserve tag v1.4.1 and build 2023. The follow-up candidate uses 1.4.2/build 2024. Prior tags and release assets remain
 unchanged, including the failed 1.2.0/1.2.1 reservations.
 Initial v1.2.0 user QA and publication authorization were recorded on
 5 November 2026; they do not establish
 later-source or public-build results. The v1.1.0 local QA identities use separate
 QA builds 1 and 2 (final Pen correction). The 1.3 QA apps use separate identities
 and temporary libraries, QA builds 1 and 2, with no updater. The next new
-signed-release run (21) should produce build 2023. Recheck the feed and counter before publishing.
+signed-release run (22) should produce build 2024. Recheck the feed and counter before publishing.
 A workflow rerun does not
 advance `GITHUB_RUN_NUMBER`. Never reuse its build number for an updated binary.
 The release workflow supports an explicit `workflow_dispatch` for the current
