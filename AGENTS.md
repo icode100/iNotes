@@ -117,6 +117,12 @@ and physical-device limits.
   bottom page navigation and an adjacent add-page control. Preserve the stable
   sidebar owner and sheet-keyed editor, native heading heights, visible viewport,
   page order, and sheet-local undo/redo when changing the carousel.
+- The page navigation follow-up defaults to **Show on hover** and persists
+  **Pin to bottom** across windows and launches. Hover overlays the page;
+  pinning reserves the footer. Both modes work in Full Page and native Mac full
+  screen. Keep the window's explicit show/hide choice independent of its
+  sidebar, heading and full-screen state. Keep Browse pages open during use
+  and keep the first-page action reachable in an empty chapter or topic.
 - Full Page (and macOS window full screen) can use a docked toolbar, a movable
   floating bubble, or the hover-reveal bubble. Docked is the initial choice.
   Keep the visibility toggle independent of the preferred layout. Store the
@@ -587,7 +593,9 @@ exact-source Native checks,
 signed release checks and independently downloaded public assets passed.
 Run 19 published v1.3.0/build 2021 from `4c9ea4fc`; exact-source Native,
 signed-release and independent public verification passed on 6 November 2026.
-Run 20 published v1.4.0/build 2022 from `d2f3a180`. The packaging defaults match this release. Prior tags and release assets remain
+Run 20 published v1.4.0/build 2022 from `d2f3a180`. The page-navigation
+source candidate uses packaging defaults 1.4.1/build 2023. The user authorized
+the source push after isolated 1.4.1 QA build 1. Prior tags and release assets remain
 unchanged, including the failed 1.2.0/1.2.1 reservations.
 Initial v1.2.0 user QA and publication authorization were recorded on
 5 November 2026; they do not establish

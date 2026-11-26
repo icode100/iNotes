@@ -1,6 +1,9 @@
 import SwiftUI
 import UniformTypeIdentifiers
 import NotesCore
+#if os(macOS)
+import AppKit
+#endif
 
 // Disambiguate the classic property wrapper from newer SDK State macros.
 typealias ViewState<Value> = SwiftUI.State<Value>
@@ -28,6 +31,156 @@ struct BackupDocument: FileDocument {
     func fileWrapper(configuration: WriteConfiguration) throws -> FileWrapper { FileWrapper(regularFileWithContents: data) }
 }
 
+#if os(macOS)
+/// Track the lower edge across both split-view columns. The view never accepts
+/// clicks, scrolls, or ink. A pointer must reach the narrow edge to reveal the
+/// bar, but can then move over any part of the expanded bar to use its tools.
+struct PageNavigationHoverRegion: NSViewRepresentable {
+    let revealHeight: CGFloat
+    let onHover: (Bool) -> Void
+
+    final class TrackingView: NSView {
+        var revealHeight: CGFloat = 0 {
+            didSet { if oldValue != revealHeight { synchronizeAreas() } }
+        }
+        var onHover: (Bool) -> Void = { _ in }
+        private var trackingBar = false
+        private var edgeArea: NSTrackingArea?
+        private var barArea: NSTrackingArea?
+
+        override func hitTest(_ point: NSPoint) -> NSView? { nil }
+
+        override init(frame frameRect: NSRect) {
+            super.init(frame: frameRect)
+            setAccessibilityElement(false)
+        }
+        required init?(coder: NSCoder) { return nil }
+
+        override func viewDidMoveToWindow() {
+            super.viewDidMoveToWindow()
+            let center = NotificationCenter.default
+            for name in [NSWindow.didBecomeKeyNotification, NSWindow.didResignKeyNotification] {
+                center.removeObserver(self, name: name, object: nil)
+                if let window {
+                    center.addObserver(self, selector: #selector(keyWindowChanged(_:)), name: name, object: window)
+                }
+            }
+            synchronizeAreas()
+        }
+
+        @objc private func keyWindowChanged(_ notification: Notification) {
+            guard let window, notification.object as? NSWindow === window else { return }
+            if notification.name == NSWindow.didResignKeyNotification {
+                setHovered(false)
+            } else {
+                track(windowPoint: window.mouseLocationOutsideOfEventStream)
+            }
+        }
+
+        override func setFrameSize(_ newSize: NSSize) {
+            super.setFrameSize(newSize)
+            synchronizeAreas()
+        }
+        override func setBoundsSize(_ newSize: NSSize) {
+            super.setBoundsSize(newSize)
+            synchronizeAreas()
+        }
+        override func updateTrackingAreas() {
+            super.updateTrackingAreas()
+            synchronizeAreas()
+        }
+
+        private func synchronizeAreas() {
+            let barRect = window == nil ? .zero : bounds
+            let edgeRect = NSRect(x: barRect.minX, y: barRect.minY, width: barRect.width,
+                                  height: min(barRect.height, revealHeight))
+            guard barRect != barArea?.rect || edgeRect != edgeArea?.rect else { return }
+            if let edgeArea { removeTrackingArea(edgeArea) }
+            if let barArea { removeTrackingArea(barArea) }
+            edgeArea = nil
+            barArea = nil
+            guard !edgeRect.isEmpty else { return }
+            // The native hosting view can report a visibleRect as tall as the
+            // whole split view even though these bounds are just the footer.
+            let options: NSTrackingArea.Options = [.activeInKeyWindow, .mouseEnteredAndExited]
+            let bar = NSTrackingArea(rect: barRect, options: options.union(.mouseMoved), owner: self, userInfo: nil)
+            let edge = NSTrackingArea(rect: edgeRect, options: options, owner: self, userInfo: nil)
+            barArea = bar
+            edgeArea = edge
+            addTrackingArea(bar)
+            addTrackingArea(edge)
+        }
+
+        override func mouseEntered(with event: NSEvent) {
+            guard event.window === window else { return }
+            if let area = event.trackingArea {
+                if area === edgeArea { setHovered(true) }
+                else if area === barArea { track(windowPoint: event.locationInWindow) }
+            } else { track(windowPoint: event.locationInWindow) }
+        }
+        override func mouseMoved(with event: NSEvent) {
+            if event.window === window { track(windowPoint: event.locationInWindow) }
+        }
+        override func mouseExited(with event: NSEvent) {
+            guard event.window === window else { return }
+            if let area = event.trackingArea {
+                if area === barArea { setHovered(false) }
+            } else { track(windowPoint: event.locationInWindow) }
+        }
+
+        private func track(windowPoint: CGPoint) {
+            let point = convert(windowPoint, from: nil)
+            let distance = point.y - bounds.minY
+            setHovered(bounds.contains(point) && (trackingBar || distance <= revealHeight))
+        }
+
+        private func setHovered(_ value: Bool) {
+            guard trackingBar != value else { return }
+            trackingBar = value
+            onHover(value)
+        }
+    }
+
+    func makeNSView(context: Context) -> TrackingView { TrackingView(frame: .zero) }
+    func updateNSView(_ view: TrackingView, context: Context) {
+        view.revealHeight = revealHeight
+        view.onHover = onHover
+    }
+}
+#else
+/// Observe hover on the existing workspace so a touch or Pencil stroke outside
+/// the small handle still goes directly to the page.
+private struct PageNavigationHoverRegion: ViewModifier {
+    let enabled: Bool
+    let revealHeight: CGFloat
+    let carouselHeight: CGFloat
+    let onHover: (Bool) -> Void
+    @ViewState private var height: CGFloat = 0
+    @ViewState private var trackingBar = false
+
+    func body(content: Content) -> some View {
+        content
+            .onGeometryChange(for: CGFloat.self) { $0.size.height } action: { height = $0 }
+            .onContinuousHover { phase in
+                guard enabled else { return }
+                let inside: Bool
+                switch phase {
+                case .active(let point):
+                    let distance = height - point.y
+                    inside = distance >= 0 && distance <= (trackingBar ? carouselHeight : revealHeight)
+                case .ended:
+                    inside = false
+                }
+                if trackingBar != inside {
+                    trackingBar = inside
+                    onHover(inside)
+                }
+            }
+            .onChange(of: enabled) { _, _ in trackingBar = false }
+    }
+}
+#endif
+
 extension UTType { static var iNotesArchive: UTType { UTType(exportedAs: "io.inotes.archive", conformingTo: .json) } }
 extension Notification.Name {
     static let newSheet = Notification.Name("iNotes.newSheet")
@@ -43,6 +196,7 @@ struct ContentView: View {
     @Environment(\.workspaceDiagnosticControls) private var diagnosticControls
     #endif
     @AppStorage("workspaceTheme") private var workspaceTheme = "classic"
+    @AppStorage("pageNavigationMode") private var pageNavigationMode = PageNavigationMode.hover
     @ViewState private var nameRequest: NameRequest?
     @ViewState private var showImporter = false
     @ViewState private var backupFolderDestination: BackupDestination?
@@ -57,6 +211,8 @@ struct ContentView: View {
     @ViewState private var previousColumns: NavigationSplitViewVisibility = .all
     @ViewState private var navigationLeadingInset: CGFloat = 0
     @ViewState private var showPageBrowser = false
+    @ViewState private var navigationHovered = false
+    @ViewState private var navigationOpened = false
     @FocusState private var searchFocused: Bool
 
     @MainActor
@@ -84,10 +240,12 @@ struct ContentView: View {
                     }
                 }
                 .frame(maxWidth: .infinity, maxHeight: .infinity)
-                if !presentation.fullPage && (presentation.sheetsVisible || store.selectedSheet == nil) {
-                    pageCarousel
+                if reservesNavigationSpace {
+                    Color.clear.frame(height: Self.carouselHeight)
+                        .allowsHitTesting(false).accessibilityHidden(true)
                 }
             }
+            .overlay(alignment: .bottom) { bottomPageNavigation }
             #if os(macOS)
             .padding(.leading, navigationLeadingInset)
             .background {
@@ -99,6 +257,23 @@ struct ContentView: View {
                     .frame(width: 0, height: 0).allowsHitTesting(false)
             }
             #endif
+        }
+        #if os(macOS)
+        .background(alignment: .bottom) {
+            if usesHoverNavigation {
+                PageNavigationHoverRegion(revealHeight: Self.navigationHandleHeight,
+                                          onHover: navigationHoverChanged)
+                    .frame(maxWidth: .infinity)
+                    .frame(height: Self.carouselHeight)
+            }
+        }
+        #else
+        .modifier(PageNavigationHoverRegion(enabled: usesHoverNavigation, revealHeight: 16,
+                                            carouselHeight: Self.carouselHeight, onHover: navigationHoverChanged))
+        #endif
+        .onChange(of: usesHoverNavigation) { _, _ in
+            navigationHovered = false
+            navigationOpened = false
         }
         .environmentObject(presentation)
         #if os(macOS)
@@ -126,7 +301,7 @@ struct ContentView: View {
                 Button { presentation.toggleSheets() } label: {
                     Label(presentation.sheetsVisible ? "Hide page navigation" : "Show page navigation", systemImage: "ellipsis.rectangle")
                 }.help(presentation.sheetsVisible ? "Hide page navigation" : "Show page navigation")
-                AppearanceMenu()
+                AppearanceMenu(showPageNavigation: { presentation.sheetsVisible = true })
                 Menu {
                     Button("New workbook", systemImage: "books.vertical") { nameRequest = NameRequest(kind: .workbook) }
                     if let folder = store.folders.first(where: { $0.id == store.folderID }) {
@@ -330,18 +505,107 @@ struct ContentView: View {
         }.padding(12).background(.quaternary.opacity(0.35))
     }
 
+    private static let carouselHeight: CGFloat = 50
+    #if os(macOS)
+    private static let navigationHandleHeight: CGFloat = 16
+    #else
+    private static let navigationHandleHeight: CGFloat = 44
+    #endif
+
+    private var usesHoverNavigation: Bool {
+        presentation.sheetsVisible && pageNavigationMode == .hover && store.selectedSheet != nil
+    }
+
+    private var reservesNavigationSpace: Bool {
+        store.selectedSheet == nil || (presentation.sheetsVisible && pageNavigationMode == .pinned)
+    }
+
+    private var navigationIsRevealed: Bool {
+        navigationHovered || navigationOpened || showPageBrowser
+    }
+
+    private func navigationHoverChanged(_ inside: Bool) {
+        navigationHovered = inside
+        if !inside { navigationOpened = false }
+    }
+
+    private func toggleNavigationHandle() {
+        if navigationIsRevealed {
+            navigationHovered = false
+            navigationOpened = false
+            showPageBrowser = false
+        } else {
+            navigationOpened = true
+        }
+    }
+
+    private func toggleNavigationPin() {
+        presentation.sheetsVisible = true
+        pageNavigationMode = pageNavigationMode == .hover ? .pinned : .hover
+    }
+
+    /// Keep the browser button's popover anchor in the same subtree when a
+    /// search inside the popover changes the selection to or from an empty page.
+    private var bottomPageNavigation: some View {
+        ZStack(alignment: .bottom) {
+            if reservesNavigationSpace || (usesHoverNavigation && navigationIsRevealed) {
+                pageCarousel
+            }
+            if usesHoverNavigation {
+                Button(action: toggleNavigationHandle) {
+                    Group {
+                        if navigationIsRevealed {
+                            Image(systemName: "chevron.down")
+                        } else {
+                            Capsule().fill(.secondary).frame(width: 28, height: 3)
+                                .padding(.horizontal, 7).padding(.vertical, 2)
+                                .background(.regularMaterial, in: Capsule())
+                        }
+                    }
+                        .frame(width: navigationIsRevealed ? 36 : 56,
+                               height: navigationIsRevealed ? 44 : Self.navigationHandleHeight)
+                        .contentShape(Rectangle())
+                }
+                .buttonStyle(.plain)
+                .help(navigationIsRevealed ? "Collapse page navigation" : "Reveal page navigation")
+                .accessibilityLabel(navigationIsRevealed ? "Collapse page navigation" : "Reveal page navigation")
+                .accessibilityValue(navigationIsRevealed ? "Expanded" : "Collapsed")
+                .accessibilityIdentifier("page-navigation-handle")
+                #if os(macOS)
+                .background {
+                    if let diagnosticControls {
+                        WorkspaceDiagnosticControlProbe(controls: diagnosticControls, identifier: "page-navigation-handle",
+                            value: navigationIsRevealed ? "Expanded" : "Collapsed", action: toggleNavigationHandle)
+                    }
+                }
+                #endif
+                .frame(maxWidth: .infinity, alignment: navigationIsRevealed ? .trailing : .center)
+                .padding(.horizontal, navigationIsRevealed ? 8 : 0)
+                .padding(.vertical, navigationIsRevealed ? 3 : 0)
+            }
+        }
+    }
+
     private var pageCarousel: some View {
         let sheets = carouselSheets
         let addPage = { newSheet() }
         let canAddPage = pageCreationParent != nil
         return GeometryReader { geometry in
             HStack(spacing: 4) {
-                Button { showPageBrowser.toggle() } label: {
+                Button(action: togglePageBrowser) {
                     Image(systemName: "square.grid.2x2").frame(width: 36, height: 44)
                 }.buttonStyle(.plain)
                     .help("Browse and organize pages")
                     .accessibilityLabel("Browse and organize pages")
                     .accessibilityIdentifier("page-browser-button")
+                    #if os(macOS)
+                    .background {
+                        if let diagnosticControls {
+                            WorkspaceDiagnosticControlProbe(controls: diagnosticControls, identifier: "page-browser-button",
+                                value: showPageBrowser ? "open" : "closed", action: togglePageBrowser)
+                        }
+                    }
+                    #endif
                     .popover(isPresented: $showPageBrowser) {
                         sheetList.frame(minWidth: 300, idealWidth: 360, maxWidth: 440,
                                         minHeight: 320, idealHeight: 480, maxHeight: 600)
@@ -365,7 +629,8 @@ struct ContentView: View {
                             if let selected = store.sheetID { proxy.scrollTo(selected, anchor: .center) }
                         }
                 }
-                .frame(width: sheets.isEmpty ? 0 : min(CGFloat(sheets.count) * 46 + 4, max(0, geometry.size.width - 128)))
+                .frame(width: sheets.isEmpty ? 0 : min(CGFloat(sheets.count) * 46 + 4,
+                    max(0, geometry.size.width - (usesHoverNavigation ? 168 : 128))))
                 if sheets.isEmpty {
                     Text(store.filter == .trash ? "Trash is empty" : !store.search.isEmpty ? "No matching pages" : store.filter == .favorites ? "No favorite pages" : "No pages here")
                         .font(.caption).foregroundStyle(.secondary).lineLimit(1)
@@ -384,7 +649,28 @@ struct ContentView: View {
                         #endif
                     }
                 Spacer(minLength: 0)
-                Color.clear.frame(width: 36).allowsHitTesting(false).accessibilityHidden(true)
+                Button(action: toggleNavigationPin) {
+                    Image(systemName: pageNavigationMode == .pinned ? "pin.fill" : "pin")
+                        .frame(width: 36, height: 44)
+                }
+                .buttonStyle(.plain)
+                .help(pageNavigationMode == .pinned ? "Unpin page navigation" : "Pin page navigation")
+                .accessibilityLabel(pageNavigationMode == .pinned ? "Unpin page navigation" : "Pin page navigation")
+                .accessibilityValue(pageNavigationMode == .pinned ? "Pinned" : "Show on hover")
+                .accessibilityIdentifier("page-navigation-pin")
+                #if os(macOS)
+                .background {
+                    if let diagnosticControls {
+                        WorkspaceDiagnosticControlProbe(controls: diagnosticControls, identifier: "page-navigation-pin",
+                            value: pageNavigationMode.rawValue, action: toggleNavigationPin)
+                    }
+                }
+                #endif
+                if usesHoverNavigation {
+                    // Reserve the trailing slot for the same keyboard/touch handle
+                    // that opened the bar. Its focus survives expansion.
+                    Color.clear.frame(width: 36).allowsHitTesting(false).accessibilityHidden(true)
+                }
             }
         }
         .frame(height: 44)
@@ -402,6 +688,8 @@ struct ContentView: View {
             #endif
         }
     }
+
+    private func togglePageBrowser() { showPageBrowser.toggle() }
 
     private func pageDot(_ sheet: NoteNode) -> some View {
         let selected = store.sheetID == sheet.id

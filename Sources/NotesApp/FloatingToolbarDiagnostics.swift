@@ -229,6 +229,121 @@ enum FloatingToolbarDiagnostics {
             !presentation.nativeFullScreen && visible("page.history.undo") && !visible("floating.overlay")
         }
         try checkPage("Leaving native fullscreen")
+
+        // Use the same content-bearing window, with its native Pen input owner and undo history.
+        let handleID = "page-navigation-handle", pinID = "page-navigation-pin"
+        let dotID = "page-carousel-\(pageID.uuidString)"
+        func hoverNavigation(_ type: NSEvent.EventType, bottomOffset: CGFloat, windowX: CGFloat? = nil) throws {
+            let content = window.contentLayoutRect
+            let location = NSPoint(x: windowX ?? content.midX, y: content.minY + bottomOffset)
+            guard let tracker = find(PageNavigationHoverRegion.TrackingView.self, in: host.view),
+                  let event = NSEvent.enterExitEvent(with: type, location: location, modifierFlags: [],
+                    timestamp: ProcessInfo.processInfo.systemUptime, windowNumber: window.windowNumber,
+                    context: nil, eventNumber: 1, trackingNumber: 0, userData: nil) else {
+                throw WorkspaceDiagnostics.Failure(description: "Missing the mounted page-navigation pointer tracker")
+            }
+            if type == .mouseEntered {
+                let rectangles = tracker.trackingAreas.compactMap { area -> NSRect? in
+                    guard (area.owner as? NSView) === tracker, area.options.contains(.mouseEnteredAndExited),
+                          area.options.contains(.activeInKeyWindow) else { return nil }
+                    return tracker.convert(area.rect, to: nil)
+                }
+                func coversBottom(_ height: CGFloat) -> Bool {
+                    rectangles.contains { rect in
+                        abs(rect.minY - content.minY) <= 1 && abs(rect.height - height) <= 1
+                            && rect.contains(NSPoint(x: content.minX + 24, y: content.minY + 3))
+                            && rect.contains(NSPoint(x: content.maxX - 24, y: content.minY + height - 3))
+                    }
+                }
+                try check(coversBottom(16) && coversBottom(50)
+                          && rectangles.allSatisfy { !$0.contains(NSPoint(x: content.midX, y: content.minY + 135)) },
+                          "registered AppKit areas cover the narrow edge and full footer across the window: \(rectangles)")
+                tracker.mouseEntered(with: event)
+            } else {
+                tracker.mouseExited(with: event)
+            }
+        }
+        func navigationViewport() -> CGRect { scroll.convert(scroll.bounds, to: host.view) }
+        func pageTakesInk(at point: CGPoint) -> Bool {
+            let hit = host.view.hitTest(host.view.convert(point, to: host.view.superview))
+            return hit === page.inkView || hit?.isDescendant(of: page.inkView) == true
+        }
+        try check(defaults.object(forKey: "pageNavigationMode") == nil,
+                  "the page-navigation fixture starts without a saved mode")
+        for mode in ["windowed", "Full Page", "native full screen"] {
+            presentation.fullPage = mode == "Full Page"
+            if mode == "native full screen" {
+                NotificationCenter.default.post(name: NSWindow.didEnterFullScreenNotification, object: window)
+            }
+            try wait("\(mode) exposes the collapsed bottom navigation after native transitions") {
+                find(WorkspaceNavigationProbe.self, in: host.view)?.diagnosticsSnapshot().isQuiescent(
+                    expectedFullPage: presentation.fullPage, expectedSheetsVisible: true) == true
+                    && visible(handleID) && !visible("page-carousel")
+            }
+            let base = navigationViewport()
+            // First approach from underneath the visible notebook sidebar, then from the page.
+            try hoverNavigation(.mouseEntered, bottomOffset: 46)
+            try wait("\(mode) entering the upper tracking area alone leaves the page clear") { !visible(dotID) }
+            try hoverNavigation(.mouseEntered, bottomOffset: 3, windowX: mode == "windowed" ? 24 : nil)
+            try wait("\(mode) reveals the current page dot, add and pin on bottom-edge movement") {
+                visible(dotID) && visible("page-carousel-add") && visible(pinID)
+            }
+            guard let bar = frame("page-carousel"), let pin = frame(pinID) else {
+                throw WorkspaceDiagnostics.Failure(description: "Missing mounted page navigation")
+            }
+            try check(abs(navigationViewport().height - base.height) <= 1 && abs(navigationViewport().width - base.width) <= 1,
+                      "\(mode) revealing the footer leaves the native viewport unchanged")
+            let bottomEdge = host.view.isFlipped ? base.maxY : base.minY
+            try check(abs((host.view.isFlipped ? bar.maxY : bar.minY) - bottomEdge) <= 2,
+                      "\(mode) anchors the revealed carousel at the bottom of the page viewport")
+            let nearFooter = CGPoint(x: base.midX, y: host.view.isFlipped ? bar.minY - 6 : bar.maxY + 6)
+            try check(pageTakesInk(at: nearFooter) && !pageTakesInk(at: CGPoint(x: pin.midX, y: pin.midY)),
+                      "\(mode) routes ink immediately above the footer and reserves the pin for navigation")
+            try hoverNavigation(.mouseExited, bottomOffset: bar.height - 3)
+            try wait("\(mode) keeps the controls accessible when moving from the edge into the footer") { visible(dotID) }
+            if mode == "windowed" {
+                try press("page-browser-button")
+                try wait("the hover footer opens the page browser") { button("page-browser-button")?.value == "open" }
+                try hoverNavigation(.mouseExited, bottomOffset: bar.height + 110)
+                try wait("the browser and its footer remain open while using the popover") {
+                    button("page-browser-button")?.value == "open" && visible(dotID)
+                }
+                try press("page-browser-button")
+            }
+            try hoverNavigation(.mouseExited, bottomOffset: bar.height + 110)
+            try wait("\(mode) retracts the footer when the pointer leaves it") { !visible(dotID) && visible(handleID) }
+            try press(handleID)
+            try press(pinID)
+            try wait("\(mode) pins the bar and saves the user's selection") {
+                visible(dotID) && button(pinID)?.value == "pinned" && defaults.string(forKey: "pageNavigationMode") == "pinned"
+            }
+            let pinned = navigationViewport()
+            try check(abs(pinned.width - base.width) <= 1 && abs(base.height - pinned.height - bar.height) <= 2,
+                      "\(mode) reserves exactly the pinned footer's height in the editor")
+            try checkPage("\(mode) bottom navigation")
+            try check(manager.canUndo && editor.string == seed + suffix,
+                      "\(mode) revealing and pinning preserve the native edit and undo")
+            if mode != "native full screen" {
+                try press(pinID)
+                try wait("\(mode) restores the hover preference and its mounted tracker") {
+                    defaults.string(forKey: "pageNavigationMode") == "hover" && visible(handleID)
+                        && find(PageNavigationHoverRegion.TrackingView.self, in: host.view) != nil
+                }
+                try hoverNavigation(.mouseExited, bottomOffset: bar.height + 110)
+            }
+        }
+        try press("page-carousel-add")
+        try wait("the pinned footer adds and selects a new page in native full screen") {
+            presentation.nativeFullScreen && store.selectedSheet?.id != pageID && store.selectedSheet?.title == ""
+        }
+        try press(dotID)
+        try wait("the pinned page dot returns to the original content in native full screen") {
+            store.sheetID == pageID && find(UnifiedMacPageView.self, in: host.view)?.textView.string == seed + suffix
+        }
+        NotificationCenter.default.post(name: NSWindow.didExitFullScreenNotification, object: window)
+        try wait("exiting native full screen preserves pinned navigation and the active page") {
+            !presentation.nativeFullScreen && visible(dotID) && button(pinID)?.value == "pinned"
+        }
         return checks
     }
 }

@@ -525,7 +525,7 @@ struct SheetDetail: View {
     }
 
     private var sheetsButton: some View {
-        let visible = !presentation.fullPage && presentation.sheetsVisible
+        let visible = presentation.sheetsVisible
         return Button { presentation.toggleSheets() } label: {
             Image(systemName: visible ? "ellipsis.rectangle.fill" : "ellipsis.rectangle")
                 .frame(width: 24, height: 28)
@@ -551,7 +551,7 @@ struct SheetDetail: View {
             Image(systemName: presentation.fullPage ? "arrow.down.right.and.arrow.up.left" : "arrow.up.left.and.arrow.down.right")
                 .frame(width: 24, height: 28)
         }.buttonStyle(.plain)
-            .help(presentation.fullPage ? "Exit full page" : "Full page · hide navigation and heading")
+            .help(presentation.fullPage ? "Exit full page" : "Full page · hide the sidebar and heading")
             .accessibilityLabel(presentation.fullPage ? "Exit full page" : "Full page")
             .keyboardShortcut("f", modifiers: [.command, .shift])
     }
@@ -937,7 +937,7 @@ struct SheetDetail: View {
             }.disabled(readOnly)
             Divider()
             Button("Notebook defaults…", action: openNotebookDefaults)
-            AppearanceMenu()
+            AppearanceMenu(showPageNavigation: { presentation.sheetsVisible = true })
         } label: { Image(systemName: "slider.horizontal.3").floatingHitArea(floating) }
         .help("Nib width, line style, paper templates, and appearance").accessibilityLabel("Paper and appearance")
     }
@@ -1113,9 +1113,10 @@ extension SheetDetail {
                 attachmentButton(sheet, inMenu: true)
             }.disabled(readOnly)
             Divider()
-            Button(!presentation.fullPage && presentation.sheetsVisible ? "Hide page navigation" : "Show page navigation") {
+            Button(presentation.sheetsVisible ? "Hide page navigation" : "Show page navigation") {
                 presentation.toggleSheets()
             }
+            PageNavigationModeMenu(showPageNavigation: { presentation.sheetsVisible = true })
             Button(!presentation.fullPage && presentation.headingVisible ? "Hide heading" : "Show heading") {
                 presentation.toggleHeading()
             }

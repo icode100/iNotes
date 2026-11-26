@@ -252,6 +252,8 @@ enum WorkspaceDiagnostics {
             throw Failure(description: "Cannot create isolated workspace preferences")
         }
         preferences.set("text", forKey: "inkTool")
+        // These retained geometry fixtures measure the space reserved by the pinned carousel.
+        preferences.set("pinned", forKey: "pageNavigationMode")
         preferences.set("classic", forKey: "workspaceTheme")
         preferences.set("system", forKey: "pageColorScheme")
         let store = NotesStore(directory: directory, preferences: preferences)
@@ -863,11 +865,12 @@ enum WorkspaceDiagnostics {
             presentation.headingVisible = false
             presentation.fullPage = true
         }
-        try navigatePassively("restore only sheets from full page") { presentation.toggleSheets() }
+        try navigatePassively("restore only sheets from full page", preservesSidebar: true) { presentation.toggleSheets() }
         try checkEditorSurvives("restoring only sheets from full page")
-        try check(!presentation.fullPage && presentation.sheetsVisible
-                  && !presentation.headingVisible,
-                  "page-navigation restore exits full page without reopening the hidden heading")
+        try check(presentation.fullPage && presentation.sheetsVisible && sidebarItem.isCollapsed
+                  && !presentation.headingVisible && diagnosticControls.control("page-carousel") != nil,
+                  "pinned page navigation appears in full page with sidebar and heading still hidden")
+        try navigatePassively("leave full page with restored page navigation") { presentation.fullPage = false }
         presentation.headingVisible = true
         settle()
 
@@ -1073,8 +1076,9 @@ enum WorkspaceDiagnostics {
         try press("Hide heading again in Trash", key: "h", keyCode: 4, expecting: { !presentation.headingVisible })
         try press("Full page before restoring Trash sheets", key: "f", keyCode: 3, expecting: { presentation.fullPage })
         try press("Restore sheets from full-page Trash", key: "2", keyCode: 19,
-                  expecting: { !presentation.fullPage && presentation.sheetsVisible && !presentation.headingVisible })
-        try press("Restore heading in Trash", key: "h", keyCode: 4, expecting: { presentation.headingVisible })
+                  expecting: { presentation.fullPage && presentation.sheetsVisible && !presentation.headingVisible })
+        try press("Restore heading in Trash", key: "h", keyCode: 4,
+                  expecting: { !presentation.fullPage && presentation.sheetsVisible && presentation.headingVisible })
         try check(store.selectedSheet?.pageContent == trashedContent && findPage(host.view) === page,
                   "all independent Trash chrome controls remain enabled without editing read-only note content")
         try press("Full page", key: "f", keyCode: 3, expecting: { presentation.fullPage })

@@ -14,19 +14,47 @@ final class EditorPresentation: ObservableObject {
     @Published var nativeFullScreen = false
     var isFullScreenWorkspace: Bool { fullPage || nativeFullScreen }
     @Published var toolsVisible = true
-    // Retain the window-local setting and shortcut while its UI moves from a
-    // native sheet column to the bottom page carousel.
+    // Visibility is window-local; the bottom bar's hover/pin preference is shared.
     @Published var sheetsVisible = true
     @Published var headingVisible = true
 
     func toggleSheets() {
-        if fullPage { fullPage = false; sheetsVisible = true }
-        else { sheetsVisible.toggle() }
+        sheetsVisible.toggle()
     }
 
     func toggleHeading() {
         if fullPage { fullPage = false; headingVisible = true }
         else { headingVisible.toggle() }
+    }
+}
+
+enum PageNavigationMode: String, CaseIterable {
+    case hover, pinned
+
+    var title: String {
+        switch self {
+        case .hover: return "Show on hover"
+        case .pinned: return "Pin to bottom"
+        }
+    }
+}
+
+struct PageNavigationModeMenu: View {
+    @AppStorage("pageNavigationMode") private var mode = PageNavigationMode.hover
+    let showPageNavigation: () -> Void
+
+    var body: some View {
+        Menu {
+            ForEach(PageNavigationMode.allCases, id: \.self) { choice in
+                // Selecting the checked choice also restores an explicitly hidden bar.
+                Toggle(choice.title, isOn: Binding(get: { mode == choice }, set: { _ in
+                    mode = choice
+                    showPageNavigation()
+                }))
+                .accessibilityValue(mode == choice ? "Selected" : "Not selected")
+            }
+        } label: { Label("Page navigation", systemImage: "ellipsis.rectangle") }
+        .accessibilityValue(mode.title)
     }
 }
 
@@ -881,6 +909,7 @@ struct AppearanceMenu: View {
     @AppStorage("appearance") private var appearance = "system"
     @AppStorage("pageColorScheme") private var pageColorScheme = "system"
     @AppStorage("workspaceTheme") private var workspaceTheme = "classic"
+    let showPageNavigation: () -> Void
     var body: some View {
         Menu {
             Menu("Light and dark") {
@@ -902,9 +931,10 @@ struct AppearanceMenu: View {
                 }
             }
             Divider()
+            PageNavigationModeMenu(showPageNavigation: showPageNavigation)
             FullScreenToolbarModeMenu()
             Button("Notebook defaults…", action: openNotebookDefaults)
         } label: { Label("Appearance", systemImage: "paintpalette") }
-        .help("Application scenery and page colors for all pages")
+        .help("Workspace appearance, page navigation and notebook defaults")
     }
 }

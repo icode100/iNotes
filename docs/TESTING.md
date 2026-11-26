@@ -1,5 +1,46 @@
 # Validation
 
+## Bottom-edge page navigation — local QA, 26 November 2026
+
+The 1.4.1 QA build uses the separate bundle ID
+`io.inotes.qa.notebook.navigation.20261126`, build 1, a disposable copy of
+the previous QA notebook and a disconnected updater.
+The user approved pushing the source after this QA build. The packaging
+candidate uses version 1.4.1 and build 2023.
+
+The native fixture opened the page bar from the bottom edge of the window,
+including below the visible sidebar. It checked the tracking area, footer
+position and hit routing in an ordinary window, Full Page and the owning
+window's native full-screen notification state. Hover kept the editor at its
+original size; pinning reserved exactly one footer. The checks also covered
+the page browser staying open after pointer exit, adding and revisiting a page,
+and preservation of the native editor, zoom and undo history across
+presentation changes. The persistent menu choices were checked in a separate
+native menu fixture.
+
+An initial native run passed the new navigation checks. Later in the existing
+Trash fixture it reached the five-second native sidebar completion limit with
+one callback still pending for generation 12. The window had explicitly hidden
+page navigation. The same run retained the pre-transition sidebar inset and
+stable owner throughout the timeout. Both the timeout and the geometry checks
+remain in place. A separate offscreen pointer fixture found a first-mount issue
+with the edge tracking area and its visible rectangle. The corrected tracker
+registers two explicit areas at first layout and updates both during a resize.
+The same fixture passed 12 checks, including native button clicks, click-through
+to the page and synthetic enter/exit events carrying each registered area.
+
+The final optimized ARM64 QA bundle passed strict ad hoc signature verification.
+Its executable SHA-256 is
+`26f3f0dbd07f8538c124244f1191689a199825fce7f813acfbf225dfc5940f1a`.
+The full native run exited successfully on macOS 27.2.1. It passed 1,301 editor,
+31 equation, 9 shortcut, 12 ruled-text, 2,158 workspace and 13 notebook PDF/ZIP
+checks, plus store and backup checks. The earlier Trash transition completed in
+0.280 seconds in this run. All 142 core tests passed with a writable temporary
+directory. The shared sources passed iPad-target syntax checking; full iPad
+compilation needs the iPad SDK. The Mac fixture exercised full-screen
+notifications and registered tracking areas, with physical pointer use and
+macOS Space transitions left to manual QA.
+
 ## v1.4.0 / build 2022 published and independently verified — 26 November 2026
 
 The [GitHub release](https://github.com/icode100/iNotes/releases/tag/v1.4.0)
