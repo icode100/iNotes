@@ -29,6 +29,20 @@ enum FloatingToolbarDiagnostics {
         }
     }
 
+    private struct ViewportReference {
+        let viewport: CGRect
+        let host: CGRect
+
+        // AppKit can grow the hosting window to fit its content. Reapply the
+        // original editor insets to the actual available rectangle.
+        func available(in bounds: CGRect) -> CGRect {
+            CGRect(x: bounds.minX + (viewport.minX - host.minX),
+                   y: bounds.minY + (viewport.minY - host.minY),
+                   width: viewport.width + (bounds.width - host.width),
+                   height: viewport.height + (bounds.height - host.height))
+        }
+    }
+
     static func run() throws -> Int {
         var checks = 0
         func check(_ condition: @autoclosure () -> Bool, _ message: String) throws {
@@ -310,8 +324,36 @@ enum FloatingToolbarDiagnostics {
         }
         func sameViewport(_ lhs: CGRect, _ rhs: CGRect) -> Bool {
             abs(lhs.minX - rhs.minX) <= 1 && abs(lhs.minY - rhs.minY) <= 1 &&
+            abs(lhs.maxX - rhs.maxX) <= 1 && abs(lhs.maxY - rhs.maxY) <= 1 &&
             abs(lhs.width - rhs.width) <= 1 && abs(lhs.height - rhs.height) <= 1
         }
+        func reference() -> ViewportReference {
+            ViewportReference(viewport: navigationViewport(), host: host.view.bounds)
+        }
+        func pinFits(_ pinned: CGRect, available: CGRect, footer: CGRect, reservation: CGRect,
+                     height: CGFloat, flipped: Bool) -> Bool {
+            let topInsetChange = flipped ? pinned.minY - available.minY : pinned.maxY - available.maxY
+            let gap = flipped ? footer.minY - pinned.maxY : pinned.minY - footer.maxY
+            let bottomInsetChange = flipped ? footer.maxY - available.maxY : footer.minY - available.minY
+            return abs(pinned.minX - available.minX) <= 1 && abs(pinned.maxX - available.maxX) <= 1 &&
+                abs(pinned.width - available.width) <= 1 && abs(topInsetChange) <= 1 &&
+                abs(available.height - pinned.height - height) <= 2 &&
+                abs(footer.minX - available.minX) <= 1 && abs(footer.maxX - available.maxX) <= 1 &&
+                abs(footer.height - height) <= 1 && abs(gap) <= 2 && abs(bottomInsetChange) <= 2 &&
+                sameViewport(footer, reservation)
+        }
+        // Native run 54 grew the host by 14 points while reserving 50.
+        let recorded = ViewportReference(viewport: CGRect(x: 228, y: 240, width: 922, height: 382),
+                                         host: CGRect(x: 0, y: 0, width: 1150, height: 622))
+        let available = recorded.available(in: CGRect(x: 0, y: 0, width: 1150, height: 636))
+        let recordedPin = CGRect(x: 228, y: 240, width: 922, height: 346)
+        let recordedFooter = CGRect(x: 228, y: 586, width: 922, height: 50)
+        func fitsRecording(_ viewport: CGRect) -> Bool {
+            pinFits(viewport, available: available, footer: recordedFooter,
+                    reservation: recordedFooter, height: 50, flipped: true)
+        }
+        try check(fitsRecording(recordedPin) && !fitsRecording(recordedPin.offsetBy(dx: 0, dy: -7)) &&
+                  !fitsRecording(available), "host growth allows only the measured footer reservation and original top inset")
         func pageTakesInk(at point: CGPoint) -> Bool {
             let hit = host.view.hitTest(host.view.convert(point, to: host.view.superview))
             return hit === page.inkView || hit?.isDescendant(of: page.inkView) == true
@@ -326,7 +368,7 @@ enum FloatingToolbarDiagnostics {
             try wait("\(mode) exposes the collapsed bottom navigation after native transitions") {
                 navigationSettled() && visible(handleID) && !visible("page-carousel") && !visible(reservationID)
             }
-            let base = navigationViewport()
+            let base = reference()
             // First approach from underneath the visible notebook sidebar, then from the page.
             try hoverNavigation(.mouseEntered, bottomOffset: 46)
             try wait("\(mode) entering the upper tracking area alone leaves the page clear") { !visible(dotID) }
@@ -337,38 +379,39 @@ enum FloatingToolbarDiagnostics {
             guard let bar = frame("page-carousel"), let pin = frame(pinID) else {
                 throw WorkspaceDiagnostics.Failure(description: "Missing mounted page navigation")
             }
-            try check(abs(navigationViewport().height - base.height) <= 1 && abs(navigationViewport().width - base.width) <= 1,
-                      "\(mode) revealing the footer leaves the native viewport unchanged")
-            let bottomEdge = host.view.isFlipped ? base.maxY : base.minY
+            let revealed = navigationViewport()
+            try check(sameViewport(base.available(in: host.view.bounds), revealed),
+                      "\(mode) revealing the footer preserves the available viewport: before=\(base) \(layoutContext())")
+            let bottomEdge = host.view.isFlipped ? revealed.maxY : revealed.minY
             try check(abs((host.view.isFlipped ? bar.maxY : bar.minY) - bottomEdge) <= 2,
                       "\(mode) anchors the revealed carousel at the bottom of the page viewport")
-            let nearFooter = CGPoint(x: base.midX, y: host.view.isFlipped ? bar.minY - 6 : bar.maxY + 6)
+            let nearFooter = CGPoint(x: revealed.midX, y: host.view.isFlipped ? bar.minY - 6 : bar.maxY + 6)
             try check(pageTakesInk(at: nearFooter) && !pageTakesInk(at: CGPoint(x: pin.midX, y: pin.midY)),
                       "\(mode) routes ink immediately above the footer and reserves the pin for navigation")
             try hoverNavigation(.mouseExited, bottomOffset: bar.height - 3)
             try wait("\(mode) keeps the controls accessible when moving from the edge into the footer") { visible(dotID) }
             if mode == "windowed" {
-                let beforeBrowse = navigationViewport()
+                let beforeBrowse = reference()
                 try press("page-browser-button")
                 try wait("the hover footer opens the page browser") { button("page-browser-button")?.value == "open" }
                 try hoverNavigation(.mouseExited, bottomOffset: bar.height + 110)
                 try wait("the browser and its footer remain open while using the popover") {
                     button("page-browser-button")?.value == "open" && visible(dotID)
                 }
-                try check(sameViewport(beforeBrowse, navigationViewport()),
+                try check(sameViewport(beforeBrowse.available(in: host.view.bounds), navigationViewport()),
                           "opening the page browser preserves the viewport: before=\(beforeBrowse) \(layoutContext())")
                 try press("page-browser-button")
                 try wait("closing the page browser retracts the hover footer") { !visible(dotID) && visible(handleID) }
-                try check(sameViewport(beforeBrowse, navigationViewport()),
+                try check(sameViewport(beforeBrowse.available(in: host.view.bounds), navigationViewport()),
                           "closing the page browser preserves the viewport: before=\(beforeBrowse) \(layoutContext())")
             }
             try hoverNavigation(.mouseExited, bottomOffset: bar.height + 110)
             try wait("\(mode) retracts the footer when the pointer leaves it") { !visible(dotID) && visible(handleID) }
             try press(handleID)
             try wait("\(mode) reopens the hover footer before pinning") { visible(pinID) && navigationSettled() }
-            let beforePin = navigationViewport()
-            let rootBeforePin = host.view.bounds
-            try check(sameViewport(base, beforePin), "\(mode) preserves the viewport through hover and handle actions: baseline=\(base) \(layoutContext())")
+            let beforePin = reference()
+            try check(sameViewport(base.available(in: beforePin.host), beforePin.viewport),
+                      "\(mode) preserves the viewport through hover and handle actions: baseline=\(base) \(layoutContext())")
             try press(pinID, beforeAction: trace.reset)
             // A saved preference can precede the native allocation. Observe the
             // spacer's mount and this scroll view's first frame change after the
@@ -381,15 +424,9 @@ enum FloatingToolbarDiagnostics {
             guard let pinnedBar = frame("page-carousel"), let reservation = frame(reservationID) else {
                 throw WorkspaceDiagnostics.Failure(description: "Missing mounted pinned footer: \(layoutContext())")
             }
-            let pinnedBottom = host.view.isFlipped ? pinned.maxY : pinned.minY
-            let footerTop = host.view.isFlipped ? pinnedBar.minY : pinnedBar.maxY
-            let pinnedTop = host.view.isFlipped ? pinned.minY : pinned.maxY
-            let beforeTop = host.view.isFlipped ? beforePin.minY : beforePin.maxY
-            try check(host.view.bounds == rootBeforePin && abs(pinned.minX - beforePin.minX) <= 1 &&
-                      abs(pinned.width - beforePin.width) <= 1 && abs(pinnedTop - beforeTop) <= 1 &&
-                      abs(beforePin.height - pinned.height - bar.height) <= 2 &&
-                      sameViewport(pinnedBar, reservation) && abs(pinnedBottom - footerTop) <= 2,
-                      "\(mode) reserves exactly the pinned footer's height in the editor: before=\(beforePin) rootBefore=\(rootBeforePin) hoverBar=\(bar) \(layoutContext())")
+            try check(pinFits(pinned, available: beforePin.available(in: host.view.bounds),
+                              footer: pinnedBar, reservation: reservation, height: bar.height, flipped: host.view.isFlipped),
+                      "\(mode) reserves exactly the pinned footer's height in the editor: before=\(beforePin) hoverBar=\(bar) \(layoutContext())")
             try checkPage("\(mode) bottom navigation")
             try check(manager.canUndo && editor.string == seed + suffix,
                       "\(mode) revealing and pinning preserve the native edit and undo")
@@ -400,7 +437,7 @@ enum FloatingToolbarDiagnostics {
                     defaults.string(forKey: "pageNavigationMode") == "hover" && visible(handleID)
                         && find(PageNavigationHoverRegion.TrackingView.self, in: host.view) != nil
                 }
-                try check(sameViewport(beforePin, navigationViewport()),
+                try check(sameViewport(beforePin.available(in: host.view.bounds), navigationViewport()),
                           "\(mode) unpinning restores the entire viewport: before=\(beforePin) \(layoutContext())")
                 try hoverNavigation(.mouseExited, bottomOffset: bar.height + 110)
             }

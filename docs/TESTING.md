@@ -16,6 +16,26 @@ callbacks before it compares the geometry. It keeps the five-second bound
 and footer tolerance, checks that unpinning restores the viewport, and
 records the first changed frame and the relevant rectangles on failure.
 
+[Native run 54](https://github.com/icode100/iNotes/actions/runs/45806342738)
+at `14c1480e02b1616670765c2b9c26346b7db15d4b` then recorded the windowed
+host growing from 622 to 636 points during the check. The editor's top
+remained at 240. After pinning, its bottom met the top of the reserved
+50-point footer at 586. Its height fell by 36 points because the host had
+gained 14. The check failed its fixed-host assumption before iPad
+compilation. No release tag or build was allocated for this Native run.
+The follow-up checks the original editor insets against the current host
+bounds and requires the editor, reserved spacer and visible footer to meet.
+A regression uses the hosted measurements, including rejection of the
+transient displaced editor frame and a missing reservation.
+
+A preliminary local diagnostic revision passed the footer checks and later
+timed out at the existing five-second native callback boundary when
+establishing an earlier Full Page session (generation 28). The callback
+deadline and original regression remain in place.
+The subsequent local run from `14c1480` completed 1,301 editor, 2,169
+workspace and 13 notebook PDF/ZIP checks on macOS 27.2.1. The 142 core
+tests also passed.
+
 ## Unpublished 1.4.1 / build 2023 — 26 November 2026
 
 [Native run 53](https://github.com/icode100/iNotes/actions/runs/45794540819)
