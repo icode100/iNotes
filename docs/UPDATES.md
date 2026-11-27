@@ -43,7 +43,17 @@ does not publish a release.
 
 ## Build and sign a local update
 
-The public **1.5.0 / build 2025** update adds per-page zoom, direct Full Page
+**1.5.0 / build 2026** is the same-version rebuild for the zoom slider fix.
+Its source is `dbc5704e008dd051484076c34565157bb10d56cc`. The user approved
+the rebuild after testing isolated Zoom Slider QA build 1. The release page
+lists the new build-numbered DMG alongside the original build 2025 installer.
+Signed release run 24 published the rebuild. Both public feed URLs served the
+verified build 2026 enclosure on the first read.
+[Build 2026 installer](https://github.com/icode100/iNotes/releases/download/v1.5.0/iNotes-1.5.0-build2026-arm64.dmg) ·
+[Signed release run 24](https://github.com/icode100/iNotes/actions/runs/45969254520) ·
+[Validation](TESTING.md)
+
+The original **1.5.0 / build 2025** update adds per-page zoom, direct Full Page
 controls and single-PDF workbook export. The user approved the isolated QA
 app on 27 November 2026. Native run 57 passed the Mac checks and iPad
 simulator build on `795513689e7d759a56dc141ddbdd87368461bdab`. Signed
@@ -133,7 +143,7 @@ identity, QA build 1, temporary library, and disconnected updater. Recheck the
 public feed and workflow counter before any later publication.
 
 ```sh
-VERSION=1.5.0 BUILD_NUMBER=2025 bash scripts/build-macos.sh
+VERSION=1.5.0 BUILD_NUMBER=2026 bash scripts/build-macos.sh
 VERSION=1.5.0 bash scripts/verify-macos.sh
 VERSION=1.5.0 bash scripts/generate-appcast.sh
 VERSION=1.5.0 bash scripts/test-update-signatures.sh
@@ -145,7 +155,7 @@ using Apple CryptoKit and the committed public key. It does not upload anything.
 For v1.0.3, the security rebuild 2011 exceeds the initial public build 2010 and
 shared local builds 1010–1012. Check both published and shared `CFBundleVersion`
 values and use a larger number for every update, including same-version rebuilds.
-Defaults (`1.5.0`, build 2025) identify the workbook PDF and zoom update. They remain
+Defaults (`1.5.0`, build 2026) identify the zoom slider rebuild. They remain
 separate from the release workflow's
 `2002 + GITHUB_RUN_NUMBER`. Run 11 published v1.0.4 build 2012; isolated backup QA
 used build 2013. Run 12 built 2014 but stopped at native diagnostic verification before publication.
@@ -153,8 +163,8 @@ Runs 13, 14 and 15 published 2015, 2016 and 2017. Runs 16 and 17 built 2018 and
 2019 but failed before publication. Run 18 published 2020 and run 19 published
 2021. Run 20 published 2022. Run 21 stopped before publication at the pinned footer
 viewport-height assertion and reserved v1.4.1/build 2023.
-Run 22 published 2024 and run 23 published 2025. The next new run, 24, should
-produce **2026**.
+Run 22 published 2024 and run 23 published 2025. Run 24 published build 2026.
+The next new run, 25, should produce **2027**.
 Recheck the public feed and workflow counter before tagging. Failed builds
 2014, 2018, 2019 and 2023 remain reserved alongside
 original installers and QA slots.
@@ -188,7 +198,7 @@ changed source or reuse builds 2018/2019. Published `v1.2.2` identifies
 build 2021. Published `v1.4.0` identifies `d2f3a180` and build 2022.
 Keep unpublished `v1.4.1` at `164868ff` with build 2023 reserved. Published
 `v1.4.2` identifies `f21afe8d` and build 2024. The `v1.5.0` tag identifies
-`79551368` and build 2025. Preserve
+`79551368` and build 2025. Build 2026 uses rebuild source `dbc5704e`. Preserve
 each release tag and installer, and use a higher build number for a new binary.
 `.github/workflows/release.yml` runs unit/integration tests, builds the
 ARM64 DMG, verifies the mounted bundle, signs and independently verifies the

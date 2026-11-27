@@ -1,11 +1,13 @@
 # iNotes
 
-**iNotes 1.5.0, build 2025**, remembers each page’s zoom. Type a percentage in
-the bottom page bar or choose **Fit Page** or **Fit Width**. On Mac you can
+**iNotes 1.5.0, build 2026** removes the white line below the zoom sliders in
+the bottom page bar and **Notebook defaults**. Drag in whole percentages or
+type a value such as 87.5%. Each page remembers its zoom, including
+**Fit Page** and **Fit Width**. On Mac you can
 export an entire workbook as one bookmarked PDF with a cover, chapter dividers
 and topic headings. The floating toolbar also has a direct **Exit Full Page**
 button, and the window controls stay visible in windowed Full Page.
-[Download the Apple silicon Mac installer](https://github.com/icode100/iNotes/releases/download/v1.5.0/iNotes-1.5.0-arm64.dmg)
+[Download the Apple silicon Mac installer](https://github.com/icode100/iNotes/releases/download/v1.5.0/iNotes-1.5.0-build2026-arm64.dmg)
 or [read the release notes](https://github.com/icode100/iNotes/releases/tag/v1.5.0).
 
 **iNotes 1.4.2, build 2024**, introduced hover and pinned modes for the page
@@ -172,7 +174,7 @@ Requires an Apple silicon Mac and macOS 14+. Building the installer requires ful
 open dist/iNotes.app
 ```
 
-The public installer and packaging defaults use version 1.5.0, build 2025. Unpublished versions 1.2.0/build 2018, 1.2.1/build 2019 and 1.4.1/build 2023 stay reserved. Downloaded public builds use ad hoc signing without Apple notarization, so macOS may report that Apple could not verify iNotes is free of malware.
+The public installer and packaging defaults use version 1.5.0, build 2026. The original [build 2025 installer](https://github.com/icode100/iNotes/releases/download/v1.5.0/iNotes-1.5.0-arm64.dmg) is also available. Unpublished versions 1.2.0/build 2018, 1.2.1/build 2019 and 1.4.1/build 2023 stay reserved. Downloaded public builds use ad hoc signing without Apple notarization, so macOS may report that Apple could not verify iNotes is free of malware.
 
 If you trust the download from the [official releases](https://github.com/icode100/iNotes/releases), follow Apple's [per-app first-open procedure](https://support.apple.com/en-us/102445):
 

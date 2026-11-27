@@ -1,11 +1,45 @@
 # Validation
 
+## iNotes 1.5.0 / build 2026 published and verified — 27 November 2026
+
+The same-version rebuild uses source
+`dbc5704e008dd051484076c34565157bb10d56cc` and the build-specific installer
+`iNotes-1.5.0-build2026-arm64.dmg`. The original version tag identifies
+build 2025 at `795513689e7d759a56dc141ddbdd87368461bdab`.
+
+The hosted run compiled the iPad simulator target and passed 144 core tests,
+1,304 Mac editor checks (429 diagram), 31 equation, 12 ruled-text, 9 shortcut,
+2,241 workspace and 25 PDF/ZIP checks on the rebuild source.
+[Native run 59](https://github.com/icode100/iNotes/actions/runs/45965423493)
+
+Signed release run 24 repeated the core and Mac suites with the same counts,
+published the build-numbered installer and checksum, then updated the signed
+Sparkle feed. Independent downloads confirmed the original build 2025 installer
+and checksum retained their GitHub asset IDs and SHA-256 digests. Release ID
+`460279787` and the original annotated tag were also preserved.
+[Signed release run 24](https://github.com/icode100/iNotes/actions/runs/45969254520) ·
+[GitHub release](https://github.com/icode100/iNotes/releases/tag/v1.5.0)
+
+| Build 2026 public asset | Bytes | SHA-256 |
+| --- | ---: | --- |
+| Apple silicon DMG | 35,932,820 | `7d76d0c21a43576c3a768250497b2c0d72549e786633150201aaddf7a176683b` |
+| DMG checksum file | 99 | `f883d561fb0c14ae7098e0aa9dd400e2d6db3880b2d6d82ffb7556ea1c99e4ea` |
+| Signed Sparkle feed | 1,278 | `97f9da68555c0eb154127348c01022d77e0aec725ebed5f8722b256768e1ab10` |
+
+The installer matched the published checksum. The latest and versioned feeds
+matched on the first read and pointed to the build 2026 DMG. Ed25519 checks
+verified the feed and archive and rejected all four tampering probes. The
+read-only mounted ARM64 app passed the production bundle checks and a smoke
+test with temporary notes. The ad hoc signed bundle `io.inotes.app` contained
+106 regular files totalling 46,280,651 bytes. Its 11,313,632-byte executable
+had SHA-256 `49ccdc10fd73e0d1310e7dd1bed57988e1b98bb623df8708a1b2be66aa4bfc5b`.
+
 ## Zoom slider tick marks — local QA, 27 November 2026
 
 The user tried the isolated slider QA build and approved publishing the fix
 as a new build of version 1.5.0 on 27 November 2026.
 
-The 1.5.0 page bar and Notebook defaults each requested 376 native slider
+In build 2025 the page bar and Notebook defaults each requested 376 native slider
 positions from 25% through 400%. Offscreen Mac renders reproduced the dense
 row of tick marks below the track. The updated shared zoom control matched a
 continuous native slider pixel for pixel at 120 and 260 points wide in both

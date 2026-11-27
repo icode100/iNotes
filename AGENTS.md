@@ -127,6 +127,14 @@ assets. Independently downloaded assets passed checksum, Ed25519 and mounted
 app checks. The local QA executable passed 1,306 editor checks. See
 `docs/TESTING.md` for the individual build records.
 
+The user approved **v1.5.0 / build 2026** after testing isolated Zoom Slider
+QA build 1 on **27 November 2026**. Rebuild source
+`dbc5704e008dd051484076c34565157bb10d56cc` removes the dense tick marks
+under both zoom tracks. Native run 59 passed the Mac checks and compiled the
+iPad simulator target. Signed release run 24 published the rebuild on the
+existing release. Independent public checks verified the DMG, checksum,
+signed feed and mounted app. The original `v1.5.0` tag identifies build 2025.
+
 ## Priorities
 
 - Version 1.5 starts pages at 100% unless the user chooses another
@@ -641,14 +649,16 @@ Run 20 published v1.4.0/build 2022 from `d2f3a180`. Native run 53 passed at
 approving the source push for isolated 1.4.1 QA build 1. Signed release run 21
 then failed the pinned footer viewport-height check before publication.
 Reserve tag v1.4.1 and build 2023. Run 22 published v1.4.2/build 2024 from
-`f21afe8d`. Run 23 published v1.5.0/build 2025 from `79551368`. Prior tags and release assets remain
-unchanged, including the failed 1.2.0/1.2.1 reservations.
+`f21afe8d`. Run 23 published v1.5.0/build 2025 from `79551368`. Run 24
+published the same-version rebuild 2026 from `dbc5704e`.
+Preserve original installers and tag reservations, including the failed
+1.2.0/1.2.1 reservations.
 Initial v1.2.0 user QA and publication authorization were recorded on
 5 November 2026; they do not establish
 later-source or public-build results. The v1.1.0 local QA identities use separate
 QA builds 1 and 2 (final Pen correction). The 1.3 QA apps use separate identities
 and temporary libraries, QA builds 1 and 2, with no updater. The next new
-signed-release run (24) should produce build 2026. Recheck the feed and counter before publishing.
+signed-release run (25) should produce build 2027. Recheck the feed and counter before publishing.
 A workflow rerun does not
 advance `GITHUB_RUN_NUMBER`. Never reuse its build number for an updated binary.
 The release workflow supports an explicit `workflow_dispatch` for the current

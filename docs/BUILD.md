@@ -48,7 +48,18 @@ The build script validates the property list, architecture, app signature, and D
 before publishing outputs. The verification script mounts it read-only and checks
 the packaged app and Applications shortcut.
 
-The packaging defaults match **v1.5.0 / build 2025**, from source
+The packaging defaults are **v1.5.0 / build 2026**. The release workflow
+gives the public rebuild a build-specific filename so the original build 2025
+installer keeps its address. Rebuild source is
+`dbc5704e008dd051484076c34565157bb10d56cc`. Native run 59 passed the
+Mac checks and compiled the iPad simulator target. Signed release run 24
+published the rebuild, and its public DMG passed checksum, Ed25519 and
+mounted app verification.
+[Download build 2026](https://github.com/icode100/iNotes/releases/download/v1.5.0/iNotes-1.5.0-build2026-arm64.dmg) ·
+[Native run 59](https://github.com/icode100/iNotes/actions/runs/45965423493) ·
+[Signed release run 24](https://github.com/icode100/iNotes/actions/runs/45969254520)
+
+The original **v1.5.0 / build 2025** was built from source
 `795513689e7d759a56dc141ddbdd87368461bdab`. The Mac app adds per-page zoom,
 Full Page controls and single-PDF workbook export. Native run 57 passed the
 Mac checks and compiled the iPad simulator target. Signed release run 23
@@ -148,8 +159,8 @@ The release workflow uses `2002 + GITHUB_RUN_NUMBER`: run 12 built 2014 but fail
 before publishing; runs 13/14/15 published 2015/2016/2017. Runs 16 and 17 built
 2018 and 2019 but failed before publication; run 18 published 2020 and run 19
 published 2021. Run 20 published 2022. Run 21 reserved 2023 before publication. Run 22
-published 2024, and run 23 published 2025. The next new run, 24, should produce
-**2026**. Recheck the public feed and workflow counter before tagging. A rerun does not
+published 2024, and run 23 published 2025. Run 24 published build 2026. The next
+new run, 25, should produce **2027**. Recheck the public feed and workflow counter before tagging. A rerun does not
 increase its build number. The local v1.1.0 QA apps use separate
 identities, QA builds 1 and 2, temporary libraries and
 disconnected updaters. User QA passed the initial candidate; the final Pen-only
