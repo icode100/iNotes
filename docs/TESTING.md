@@ -1,5 +1,49 @@
 # Validation
 
+## iNotes 1.5.1 / build 2028 published and verified — 27 November 2026
+
+The user requested publication as 1.5.1. The release tag identifies
+`f40ed27b4463c06c11494f7332c2ac8777a56fb8`. Native run 65 passed 146 core tests,
+1,333 editor checks (429 diagram), 32 equation, 9 shortcut, 12 ruled-text, 2,355
+workspace and 33 PDF/ZIP checks and compiled the iPad simulator target. Signed
+release run 26 repeated the core and Mac suites with the same counts and published
+the Apple silicon disk image, checksum and signed update feed.
+[Native run 65](https://github.com/icode100/iNotes/actions/runs/46033541976) ·
+[Signed release run 26](https://github.com/icode100/iNotes/actions/runs/46036254033) ·
+[GitHub release](https://github.com/icode100/iNotes/releases/tag/v1.5.1)
+
+The isolated Mac candidate before the native formatting rejection checks passed
+1,333 editor, 32 equation, 2,355 workspace and 33 PDF/ZIP checks. The first run on
+the release source passed 1,335 editor checks, including formatting rejection and
+retryable Mac undo. It then reached the five-second limit entering Full Page with
+the heading and page navigation hidden. The native navigation owner stayed the
+same and generation 2 still had a pending completion. A second run of the
+identical binary passed the editor checks and stopped while waiting for the
+initial Docked Full Page transition to settle. Neither exact-source local run
+completed the workspace suite. A subsequent workspace-only run also stopped at the
+initial Docked transition.
+
+The standalone suite passed 146 tests. All 25 Swift sources in the iPad target
+passed separate local Debug and Release type-checks against Mac Catalyst UIKit and
+PencilKit for iOS 17. No manual acceptance run on 1.5.1 or physical iPad, Pencil
+or IME result was recorded.
+
+| Build 2028 public asset | Bytes | SHA-256 |
+| --- | ---: | --- |
+| Apple silicon DMG | 36,149,301 | `f1f73249c0fc7b32de16080d5592a72d1a3e1038b1e98fb037ec954ce3093c15` |
+| DMG checksum file | 89 | `c438b805bebaefdd9802121c9026b24cd500e5e0f1a312276c5103111a89968b` |
+| Signed Sparkle feed | 1,268 | `047b6e56173215760b4b90e4272771b431f0adca3910d49dc99e13bc40308006` |
+
+Independent public downloads matched the published checksum and GitHub asset
+digests. The versioned and latest feeds matched on the first read and advertised
+the verified enclosure. The Ed25519 checks accepted the feed and installer and rejected four
+tampering cases. The read-only mounted ARM64 app passed its smoke test and all 33
+PDF/ZIP checks with temporary notes. The executable contained the floating toolbar
+customization, text size and selection appearance labels. Its ad hoc signed
+`io.inotes.app` bundle contained 106 regular files totaling 47,118,139 bytes. The
+12,151,120-byte executable had SHA-256
+`d92d2342a3a87447821ac1b2d753c6c0044c4fbf528a0a9c815ea464f81c8208`.
+
 ## iNotes 1.5.1 formatting and floating toolbar candidate — 27 November 2026
 
 The local standalone suite passed 146 tests with disposable files. It exercised

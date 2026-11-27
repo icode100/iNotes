@@ -52,6 +52,14 @@ The packaging defaults are **v1.5.1 / build 2028**. The release workflow
 gives each same-version rebuild a build-specific filename so earlier
 installers keep their addresses.
 
+The v1.5.1 tag identifies build 2028 at `f40ed27b4463c06c11494f7332c2ac8777a56fb8`.
+Native run 65 passed the Mac checks and compiled the iPad simulator app.
+Signed release run 26 published the Apple silicon installer. Independent
+verification covered the public disk image, signed update feed and mounted app.
+[Download build 2028](https://github.com/icode100/iNotes/releases/download/v1.5.1/iNotes-1.5.1-arm64.dmg) ·
+[Native run 65](https://github.com/icode100/iNotes/actions/runs/46033541976) ·
+[Signed release run 26](https://github.com/icode100/iNotes/actions/runs/46036254033)
+
 Build 2027 was published from `af0e168d6af21cfc692ff3aa626924b08858cea3`.
 Native run 63 compiled the iPad simulator app and verified the Mac build.
 Signed release run 25 published the ARM64 installer. Independent downloads
@@ -170,7 +178,7 @@ before publishing; runs 13/14/15 published 2015/2016/2017. Runs 16 and 17 built
 2018 and 2019 but failed before publication; run 18 published 2020 and run 19
 published 2021. Run 20 published 2022. Run 21 reserved 2023 before publication. Run 22
 published 2024, and run 23 published 2025. Run 24 published build 2026 and run 25 published build 2027.
-The next new run, 26, should produce **2028**. Recheck the public feed and workflow counter before tagging. A rerun does not
+Run 26 published v1.5.1/build 2028. The next new run, 27, should produce **2029**. Recheck the public feed and workflow counter before tagging. A rerun does not
 increase its build number. The local v1.1.0 QA apps use separate
 identities, QA builds 1 and 2, temporary libraries and
 disconnected updaters. User QA passed the initial candidate; the final Pen-only

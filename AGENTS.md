@@ -145,6 +145,16 @@ Signed release run 25 published the rebuild. Independent public downloads
 passed checksum, Ed25519, mounted app and PDF/ZIP checks. See `docs/TESTING.md`
 for the separate local, hosted and public verification results.
 
+**v1.5.1 / build 2028** was published on **27 November 2026** from source
+`f40ed27b4463c06c11494f7332c2ac8777a56fb8`. The release adds a customizable
+floating toolbar, text color and point size in the page body and text boxes,
+and undoable color changes to mixed selections. Image tints, equation colors,
+diagram label styles and intentionally near-white text use archive format 6.
+Native run 65 verified the Mac app and compiled the iPad simulator target.
+Signed release run 26 published the installer and Sparkle feed. The public
+downloads passed independent checksum, signature and mounted-app checks.
+See `docs/TESTING.md` for separate local, hosted and public results.
+
 ## Priorities
 
 - In 1.5.1 the floating toolbar has a device-local button list. Keep customization
@@ -684,7 +694,7 @@ then failed the pinned footer viewport-height check before publication.
 Reserve tag v1.4.1 and build 2023. Run 22 published v1.4.2/build 2024 from
 `f21afe8d`. Run 23 published v1.5.0/build 2025 from `79551368`. Run 24
 published the same-version rebuild 2026 from `dbc5704e`. Run 25 published
-build 2027 from `af0e168d`.
+build 2027 from `af0e168d`. Run 26 published v1.5.1/build 2028 from `f40ed27b`.
 Preserve original installers and tag reservations, including the failed
 1.2.0/1.2.1 reservations.
 Initial v1.2.0 user QA and publication authorization were recorded on
@@ -692,7 +702,7 @@ Initial v1.2.0 user QA and publication authorization were recorded on
 later-source or public-build results. The v1.1.0 local QA identities use separate
 QA builds 1 and 2 (final Pen correction). The 1.3 QA apps use separate identities
 and temporary libraries, QA builds 1 and 2, with no updater. The next new
-signed-release run (26) should produce build 2028. Recheck the feed and counter before publishing.
+signed-release run (27) should produce build 2029. Recheck the feed and counter before publishing.
 A workflow rerun does not
 advance `GITHUB_RUN_NUMBER`. Never reuse its build number for an updated binary.
 The release workflow supports an explicit `workflow_dispatch` for the current
