@@ -1,11 +1,16 @@
 # iNotes
 
-**iNotes 1.4.2, build 2024**, released on 26 November 2026, lets you reveal
-page navigation by moving the pointer to the bottom of the window or pin the
-bar to keep it visible. Both modes work in a regular Mac window, in Full Page
-and in macOS full screen. On iPad, tap the bottom handle to reveal the bar.
-[Download the Apple silicon Mac installer](https://github.com/icode100/iNotes/releases/download/v1.4.2/iNotes-1.4.2-arm64.dmg)
-or [read the release notes](https://github.com/icode100/iNotes/releases/tag/v1.4.2).
+**iNotes 1.5.0, build 2025**, remembers each page’s zoom. Type a percentage in
+the bottom page bar or choose **Fit Page** or **Fit Width**. On Mac you can
+export an entire workbook as one bookmarked PDF with a cover, chapter dividers
+and topic headings. The floating toolbar also has a direct **Exit Full Page**
+button, and the window controls stay visible in windowed Full Page.
+[Download the Apple silicon Mac installer](https://github.com/icode100/iNotes/releases/download/v1.5.0/iNotes-1.5.0-arm64.dmg)
+or [read the release notes](https://github.com/icode100/iNotes/releases/tag/v1.5.0).
+
+**iNotes 1.4.2, build 2024**, introduced hover and pinned modes for the page
+bar in a regular window, Full Page and macOS full screen. On iPad, tap the
+bottom handle to reveal the bar. [1.4.2 release notes](docs/releases/1.4.2.md)
 
 **iNotes 1.4.0, build 2022**, introduced numbered page navigation, topic
 PDFs, workbook ZIP exports and a movable circular toolbar. It also added
@@ -64,7 +69,7 @@ the whole page from every tool.
 
 A small, native, open-source notebook for Apple silicon Macs, with a shared iPad app target. Built with SwiftUI, AppKit/UIKit, and PencilKit, with Sparkle for signed Mac updates and SwiftMath for offline equations. No Electron, cloud SDK, account, or telemetry.
 
-## Editing in iNotes 1.4
+## Editing in iNotes
 
 - **Float the toolbar.** Open **Appearance → Full-screen toolbar** and choose **Floating · always visible** or **Floating · show on hover**. Enter **Full Page** (⇧⌘F on Mac) or use the Mac window’s full-screen button. Drag the bubble to park it, then click it to open a circle of tools. In hover mode, move over the small **⋯** handle to reveal the bubble. Tap the handle on iPad. Click the center again to close the tools. The **More page tools** menu includes attachments and workspace controls.
 - **Connect objects on Mac.** Hover over a shape, table, image, positioned text box, equation, or arrow and click the small **+**. Choose a shape or table to place it nearby with an attached arrow. Drag it below its parent and the arrow switches from the side edges to the parent’s bottom and the child’s top. On an existing arrow, **+** continues from its destination or connects its free end to the new object. Undo reverses the insertion in one step.
@@ -73,7 +78,7 @@ A small, native, open-source notebook for Apple silicon Macs, with a shared iPad
 - **Recolor handwriting on Mac or iPad.** Select the strokes with **Select** or **Lasso**. Choose a toolbar swatch, or open **Recolor ink** for more swatches and a custom color. Click **Apply** for a custom color. Recoloring edits just the selected ink, including when the selection also contains other objects. Undo restores the previous colors.
 - **Set your defaults.** Open **Notebook defaults…** from **Appearance**. Set a preset or custom nib width and an optional starting color per drawing tool, including Shapes and arrows on Mac. Choose the paper, template, and template line for newly created pages. These preferences apply across workbooks on this device.
 
-### Page navigation in 1.4.2
+### Page navigation
 
 Move the pointer to the bottom edge of the notebook to reveal the page numbers,
 page browser and **+** button. Click the pin on the bar to keep it in view, or
@@ -81,7 +86,7 @@ choose **Appearance → Page navigation → Pin to bottom**. Choose **Show on
 hover** to return to the edge handle. The same setting applies in a regular
 window, in Full Page and in macOS full screen. With touch, tap the handle.
 
-### Per-page zoom in 1.5.0
+### Per-page zoom
 
 Pages start at **100%**. In the bottom page bar, drag the slider or type
 a percentage from **25% to 400%** and press Return. Choose **Fit Page** to see
@@ -92,7 +97,7 @@ iNotes remembers the zoom you choose for each page on this device, including
 after reopening the app. Open **Appearance → Notebook defaults… → Default
 zoom** and choose **Percentage** to type a starting value for pages without a saved zoom.
 
-### Export a workbook as one PDF in 1.5.0
+### Export a workbook as one PDF
 
 On Mac, right-click a workbook in the sidebar and choose **Export workbook as
 single PDF…**, then choose where to save it. The PDF opens with the workbook
@@ -100,7 +105,7 @@ title, followed by a numbered divider for each chapter. Each topic and subtopic
 gets a heading above its first note. PDF bookmarks follow the notebook hierarchy.
 Choose **Export workbook as PDF bundle (ZIP)…** to save the separate folder PDFs.
 
-### Full Page window controls in 1.5.0
+### Full Page window controls
 
 When using Full Page in a regular Mac window, the red, yellow, and green
 window buttons stay available. Open the floating toolbar and click its
@@ -167,7 +172,7 @@ Requires an Apple silicon Mac and macOS 14+. Building the installer requires ful
 open dist/iNotes.app
 ```
 
-The public installer uses version 1.4.2, build 2024. The packaging defaults for this checkout use 1.5.0, build 2025. Unpublished versions 1.2.0/build 2018, 1.2.1/build 2019 and 1.4.1/build 2023 stay reserved. Downloaded public builds use ad hoc signing without Apple notarization, so macOS may report that Apple could not verify iNotes is free of malware.
+The public installer and packaging defaults use version 1.5.0, build 2025. Unpublished versions 1.2.0/build 2018, 1.2.1/build 2019 and 1.4.1/build 2023 stay reserved. Downloaded public builds use ad hoc signing without Apple notarization, so macOS may report that Apple could not verify iNotes is free of malware.
 
 If you trust the download from the [official releases](https://github.com/icode100/iNotes/releases), follow Apple's [per-app first-open procedure](https://support.apple.com/en-us/102445):
 

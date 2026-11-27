@@ -1,9 +1,42 @@
 # Validation
 
+## iNotes 1.5.0 / build 2025 published and verified — 27 November 2026
+
+[Native run 57](https://github.com/icode100/iNotes/actions/runs/45955599647)
+passed on `795513689e7d759a56dc141ddbdd87368461bdab`. It compiled the
+iPad simulator target and passed 144 core tests, 1,304 native Mac editor
+checks (429 diagram), 31 equation, 12 ruled-text, 9 shortcut, 2,241 workspace
+and 25 notebook PDF/ZIP checks. The local records below describe the
+separately built QA apps and their manual and automated coverage.
+
+[Signed release run 23](https://github.com/icode100/iNotes/actions/runs/45957266875)
+repeated the Mac and core suites on the tagged source with the same check
+counts. It verified the mounted installer, signed the update and published
+the Apple silicon DMG, its SHA-256 checksum and the Sparkle appcast.
+[GitHub release](https://github.com/icode100/iNotes/releases/tag/v1.5.0)
+
+Independent downloads matched the sizes and SHA-256 digests reported by
+GitHub. The downloaded installer matched its published checksum. The latest
+Sparkle feed matched the versioned feed on the first read. The Ed25519 checks
+verified the feed and installer and rejected a modified feed, an unsigned
+feed, a modified installer, and a signature checked against a different key.
+
+| Public asset | Bytes | SHA-256 |
+| --- | ---: | --- |
+| Apple silicon DMG | 35,925,649 | `7e51933cd2a61dedc971bc68beeaee18616abdabd2c5e21deb0b3a9e6e0da66d` |
+| DMG checksum file | 89 | `f8101340ec0d36cef7121d8ccc2af8f4380fef3ceda6e9989179c3142801e003` |
+| Signed Sparkle feed | 1,268 | `8463d0e35d91d01de8c5b22d4e710644816df7d26803d4bc183f7ef27bddd4b9` |
+
+The read-only mounted installer passed the production bundle checks and
+a smoke test using temporary notes. The ad hoc signed ARM64 app has bundle
+ID `io.inotes.app`, version 1.5.0 and build 2025. Its 106 regular files
+totalled 46,266,715 bytes. The executable was 11,299,696 bytes with SHA-256
+`688c3ce882b65aa4a6a63f8ef7f630b34a6adad2d21cf660ef11bcb2fe03728b`.
+
 ## Typed zoom and single-PDF workbook export — local QA, 27 November 2026
 
 The user tried isolated QA build 2, reported that it worked, and approved
-publication on 27 November 2026. The production release candidate is 1.5.0.
+publication of version 1.5.0 on 27 November 2026.
 
 The isolated ARM64 Mac app is QA build 2, `io.inotes.qa.workbookpdf.20261127`,
 with temporary notes and a disconnected updater. On macOS 27.2.1 this bundle

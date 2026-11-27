@@ -48,10 +48,19 @@ The build script validates the property list, architecture, app signature, and D
 before publishing outputs. The verification script mounts it read-only and checks
 the packaged app and Applications shortcut.
 
-The packaging defaults target **v1.5.0 / build 2025** for per-page zoom,
-Full Page controls and single-PDF workbook export.
+The packaging defaults match **v1.5.0 / build 2025**, from source
+`795513689e7d759a56dc141ddbdd87368461bdab`. The Mac app adds per-page zoom,
+Full Page controls and single-PDF workbook export. Native run 57 passed the
+Mac checks and compiled the iPad simulator target. Signed release run 23
+published the installer, checksum and update feed on 27 November 2026.
+The independently downloaded 35,925,649-byte installer passed checksum,
+signature and mounted-app checks.
+[GitHub release](https://github.com/icode100/iNotes/releases/tag/v1.5.0) ·
+[Native run 57](https://github.com/icode100/iNotes/actions/runs/45955599647) ·
+[Signed release run 23](https://github.com/icode100/iNotes/actions/runs/45957266875) ·
+[Validation](TESTING.md)
 
-The current public release is **v1.4.2 / build 2024**, published on 26 November
+The preceding release was **v1.4.2 / build 2024**, published on 26 November
 2026 from `f21afe8db77b4df8ee3e3aaabd19afebaf0c8a93`. Native run 55 passed the
 Mac checks and iPad simulator build. Signed release run 22 published the Mac
 installer and update feed. Independent downloads passed checksum, signature and
@@ -139,7 +148,8 @@ The release workflow uses `2002 + GITHUB_RUN_NUMBER`: run 12 built 2014 but fail
 before publishing; runs 13/14/15 published 2015/2016/2017. Runs 16 and 17 built
 2018 and 2019 but failed before publication; run 18 published 2020 and run 19
 published 2021. Run 20 published 2022. Run 21 reserved 2023 before publication. Run 22
-published 2024. The next new run, 23, should produce **2025**. Recheck the public feed and workflow counter before tagging. A rerun does not
+published 2024, and run 23 published 2025. The next new run, 24, should produce
+**2026**. Recheck the public feed and workflow counter before tagging. A rerun does not
 increase its build number. The local v1.1.0 QA apps use separate
 identities, QA builds 1 and 2, temporary libraries and
 disconnected updaters. User QA passed the initial candidate; the final Pen-only

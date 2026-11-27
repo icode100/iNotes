@@ -43,7 +43,19 @@ does not publish a release.
 
 ## Build and sign a local update
 
-The current public release is **1.4.2 / build 2024**, published on 26 November
+The public **1.5.0 / build 2025** update adds per-page zoom, direct Full Page
+controls and single-PDF workbook export. The user approved the isolated QA
+app on 27 November 2026. Native run 57 passed the Mac checks and iPad
+simulator build on `795513689e7d759a56dc141ddbdd87368461bdab`. Signed
+release run 23 published the installer, checksum and signed update feed.
+Independent downloads passed checksum and Ed25519 verification. The latest
+feed served the versioned feed’s signed bytes on the first read.
+[GitHub release](https://github.com/icode100/iNotes/releases/tag/v1.5.0) ·
+[Native run 57](https://github.com/icode100/iNotes/actions/runs/45955599647) ·
+[Signed release run 23](https://github.com/icode100/iNotes/actions/runs/45957266875) ·
+[Validation](TESTING.md)
+
+The preceding public release was **1.4.2 / build 2024**, published on 26 November
 2026 from `f21afe8db77b4df8ee3e3aaabd19afebaf0c8a93`. Signed release run 22 published the
 installer, checksum and update feed. The downloaded installer and feed passed
 independent Ed25519 verification.
@@ -141,7 +153,8 @@ Runs 13, 14 and 15 published 2015, 2016 and 2017. Runs 16 and 17 built 2018 and
 2019 but failed before publication. Run 18 published 2020 and run 19 published
 2021. Run 20 published 2022. Run 21 stopped before publication at the pinned footer
 viewport-height assertion and reserved v1.4.1/build 2023.
-Run 22 published 2024. The next new run, 23, should produce **2025**.
+Run 22 published 2024 and run 23 published 2025. The next new run, 24, should
+produce **2026**.
 Recheck the public feed and workflow counter before tagging. Failed builds
 2014, 2018, 2019 and 2023 remain reserved alongside
 original installers and QA slots.
@@ -174,7 +187,8 @@ changed source or reuse builds 2018/2019. Published `v1.2.2` identifies
 `aa392994`; preserve its build 2020. Published `v1.3.0` identifies `4c9ea4fc` and
 build 2021. Published `v1.4.0` identifies `d2f3a180` and build 2022.
 Keep unpublished `v1.4.1` at `164868ff` with build 2023 reserved. Published
-`v1.4.2` identifies `f21afe8d` and build 2024. Preserve
+`v1.4.2` identifies `f21afe8d` and build 2024. The `v1.5.0` tag identifies
+`79551368` and build 2025. Preserve
 each release tag and installer, and use a higher build number for a new binary.
 `.github/workflows/release.yml` runs unit/integration tests, builds the
 ARM64 DMG, verifies the mounted bundle, signs and independently verifies the
