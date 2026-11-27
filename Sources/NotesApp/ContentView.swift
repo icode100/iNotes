@@ -211,6 +211,9 @@ struct ContentView: View {
     @ViewState private var previousColumns: NavigationSplitViewVisibility = .all
     @ViewState private var navigationLeadingInset: CGFloat = 0
     @ViewState private var showPageBrowser = false
+    @ViewState private var showZoomPopover = false
+    @ViewState private var draggingZoomSlider = false
+    @ViewState private var editingZoomPercentage = false
     @ViewState private var navigationHovered = false
     @ViewState private var navigationOpened = false
     @FocusState private var searchFocused: Bool
@@ -221,16 +224,21 @@ struct ContentView: View {
     }
 
     var body: some View {
-        NavigationSplitView(columnVisibility: $columnVisibility) {
+        let sheet = store.selectedSheet
+        let zoom = sheet.map { presentation.zoomSession(for: $0.id, in: store) }
+        return NavigationSplitView(columnVisibility: $columnVisibility) {
             sidebar.navigationSplitViewColumnWidth(min: 190, ideal: 220, max: 310)
+                #if os(macOS)
+                .toolbar(removing: presentation.fullPage ? .sidebarToggle : nil)
+                #endif
         } detail: {
             // A real, stable container owns navigation chrome. Group forwards
             // its modifiers into the sheet-keyed child and would dismantle the
             // native split observer every time selection changes.
             VStack(spacing: 0) {
                 ZStack {
-                    if let sheet = store.selectedSheet {
-                        SheetDetail(sheetID: sheet.id).id(sheet.id)
+                    if let sheet, let zoom {
+                        SheetDetail(sheetID: sheet.id, zoomSession: zoom).id(sheet.id)
                     } else {
                         ContentUnavailableView {
                             Label(emptyPageTitle, systemImage: store.filter == .trash ? "trash" : "square.and.pencil")
@@ -252,7 +260,7 @@ struct ContentView: View {
                         .allowsHitTesting(false).accessibilityHidden(true)
                 }
             }
-            .overlay(alignment: .bottom) { bottomPageNavigation }
+            .overlay(alignment: .bottom) { bottomPageNavigation(zoom: zoom) }
             #if os(macOS)
             .padding(.leading, navigationLeadingInset)
             .background {
@@ -294,53 +302,63 @@ struct ContentView: View {
         }
         #endif
         .onChange(of: store.selectedSheet?.id) { _, selectedID in
-            if selectedID == nil { presentation.fullPage = false }
+            showZoomPopover = false
+            draggingZoomSlider = false
+            editingZoomPercentage = false
+            if selectedID == nil {
+                presentation.fullPage = false
+                presentation.closePageZoom()
+            }
         }
         .onChange(of: store.search) { _, _ in reconcilePageSelection() }
         .onChange(of: store.visibleSheets.map(\.id)) { _, _ in reconcilePageSelection() }
         #if os(macOS)
-        .toolbar(presentation.fullPage ? .hidden : .visible, for: .windowToolbar)
+        // The unified title bar owns the native Close, Minimize and Zoom buttons.
+        // Full Page hides notebook actions while keeping that title bar in a window.
+        .toolbar(presentation.fullPage && !presentation.nativeFullScreen ? .visible : .automatic, for: .windowToolbar)
         #else
         .toolbar(presentation.fullPage ? .hidden : .visible, for: .navigationBar)
         #endif
         .toolbar {
-            ToolbarItemGroup(placement: .primaryAction) {
-                Button { presentation.toggleSheets() } label: {
-                    Label(presentation.sheetsVisible ? "Hide page navigation" : "Show page navigation", systemImage: "ellipsis.rectangle")
-                }.help(presentation.sheetsVisible ? "Hide page navigation" : "Show page navigation")
-                AppearanceMenu(showPageNavigation: { presentation.sheetsVisible = true })
-                Menu {
-                    Button("New workbook", systemImage: "books.vertical") { nameRequest = NameRequest(kind: .workbook) }
-                    if let folder = store.folders.first(where: { $0.id == store.folderID }) {
-                        Button(folder.kind == .workbook ? "New chapter" : "New topic", systemImage: "folder.badge.plus") {
-                            nameRequest = NameRequest(kind: folder.kind == .workbook ? .chapter : .topic, parent: folder.id)
-                        }
-                    }
-                } label: { Label("Create folder", systemImage: "folder.badge.plus") }
-                .help("Create a workbook, chapter or topic")
-                Menu {
-                    ForEach([BackupDestination.iCloudDrive, .googleDrive]) { destination in
-                        Menu {
-                            Button(store.backupFolder(for: destination) == nil ? "Connect folder…" : "Change folder…") { chooseBackupFolder(destination) }
-                            if store.backupFolder(for: destination) != nil {
-                                Button("Back up now") { store.backupNow(to: destination) }
-                                Button("Review older backups…") { backupCleanupDestination = destination }
-                                Button("Disconnect folder") { store.disconnectBackup(destination) }
+            if !presentation.fullPage {
+                ToolbarItemGroup(placement: .primaryAction) {
+                    Button { presentation.toggleSheets() } label: {
+                        Label(presentation.sheetsVisible ? "Hide page navigation" : "Show page navigation", systemImage: "ellipsis.rectangle")
+                    }.help(presentation.sheetsVisible ? "Hide page navigation" : "Show page navigation")
+                    AppearanceMenu(showPageNavigation: { presentation.sheetsVisible = true })
+                    Menu {
+                        Button("New workbook", systemImage: "books.vertical") { nameRequest = NameRequest(kind: .workbook) }
+                        if let folder = store.folders.first(where: { $0.id == store.folderID }) {
+                            Button(folder.kind == .workbook ? "New chapter" : "New topic", systemImage: "folder.badge.plus") {
+                                nameRequest = NameRequest(kind: folder.kind == .workbook ? .chapter : .topic, parent: folder.id)
                             }
-                        } label: { Label(destination.title, systemImage: destination.symbol) }
+                        }
+                    } label: { Label("Create folder", systemImage: "folder.badge.plus") }
+                    .help("Create a workbook, chapter or topic")
+                    Menu {
+                        ForEach([BackupDestination.iCloudDrive, .googleDrive]) { destination in
+                            Menu {
+                                Button(store.backupFolder(for: destination) == nil ? "Connect folder…" : "Change folder…") { chooseBackupFolder(destination) }
+                                if store.backupFolder(for: destination) != nil {
+                                    Button("Back up now") { store.backupNow(to: destination) }
+                                    Button("Review older backups…") { backupCleanupDestination = destination }
+                                    Button("Disconnect folder") { store.disconnectBackup(destination) }
+                                }
+                            } label: { Label(destination.title, systemImage: destination.symbol) }
+                        }
+                        Divider()
+                        Button("Export library backup…") { exportLibrary() }
+                        Button("Import library backup…") { backupFolderDestination = nil; showImporter = true }
+                        Divider()
+                        if store.recoveryAvailable {
+                            Button("Recover previous local version…") { showRecovery = true }
+                        }
+                        Button("About storage & backups") { showSettings = true }
+                    } label: {
+                        Label("Automatic backups", systemImage: BackupDestination.allCases.contains(where: { store.backupFolder(for: $0) != nil }) ? "externaldrive.badge.checkmark" : "externaldrive")
                     }
-                    Divider()
-                    Button("Export library backup…") { exportLibrary() }
-                    Button("Import library backup…") { backupFolderDestination = nil; showImporter = true }
-                    Divider()
-                    if store.recoveryAvailable {
-                        Button("Recover previous local version…") { showRecovery = true }
-                    }
-                    Button("About storage & backups") { showSettings = true }
-                } label: {
-                    Label("Automatic backups", systemImage: BackupDestination.allCases.contains(where: { store.backupFolder(for: $0) != nil }) ? "externaldrive.badge.checkmark" : "externaldrive")
+                    .help("Library backups and Google Drive")
                 }
-                .help("Library backups and Google Drive")
             }
         }
         .sheet(item: $nameRequest) { request in
@@ -528,7 +546,7 @@ struct ContentView: View {
     }
 
     private var navigationIsRevealed: Bool {
-        navigationHovered || navigationOpened || showPageBrowser
+        navigationHovered || navigationOpened || showPageBrowser || showZoomPopover || draggingZoomSlider || editingZoomPercentage
     }
 
     private func navigationHoverChanged(_ inside: Bool) {
@@ -541,6 +559,8 @@ struct ContentView: View {
             navigationHovered = false
             navigationOpened = false
             showPageBrowser = false
+            showZoomPopover = false
+            editingZoomPercentage = false
         } else {
             navigationOpened = true
         }
@@ -553,10 +573,10 @@ struct ContentView: View {
 
     /// Keep the browser button's popover anchor in the same subtree when a
     /// search inside the popover changes the selection to or from an empty page.
-    private var bottomPageNavigation: some View {
+    private func bottomPageNavigation(zoom: PageZoomSession?) -> some View {
         ZStack(alignment: .bottom) {
             if reservesNavigationSpace || (usesHoverNavigation && navigationIsRevealed) {
-                pageCarousel
+                pageCarousel(zoom: zoom)
             }
             if usesHoverNavigation {
                 Button(action: toggleNavigationHandle) {
@@ -593,11 +613,18 @@ struct ContentView: View {
         }
     }
 
-    private var pageCarousel: some View {
+    private func pageCarousel(zoom: PageZoomSession?) -> some View {
         let sheets = carouselSheets
         let addPage = { newSheet() }
         let canAddPage = pageCreationParent != nil
         return GeometryReader { geometry in
+            #if os(iOS)
+            let compactZoom = geometry.size.width < (usesHoverNavigation ? 500 : 462)
+            let zoomWidth: CGFloat = zoom == nil ? 0 : compactZoom ? 72 : 254
+            #else
+            let compactZoom = geometry.size.width < (usesHoverNavigation ? 452 : 414)
+            let zoomWidth: CGFloat = zoom == nil ? 0 : compactZoom ? 72 : min(254, max(200, geometry.size.width * 0.26))
+            #endif
             HStack(spacing: 4) {
                 Button(action: togglePageBrowser) {
                     Image(systemName: "square.grid.2x2").frame(width: 36, height: 44)
@@ -637,7 +664,7 @@ struct ContentView: View {
                         }
                 }
                 .frame(width: sheets.isEmpty ? 0 : min(CGFloat(sheets.count) * 46 + 4,
-                    max(0, geometry.size.width - (usesHoverNavigation ? 168 : 128))))
+                    max(0, geometry.size.width - (usesHoverNavigation ? 168 : 128) - zoomWidth - (zoom == nil ? 0 : 4))))
                 if sheets.isEmpty {
                     Text(store.filter == .trash ? "Trash is empty" : !store.search.isEmpty ? "No matching pages" : store.filter == .favorites ? "No favorite pages" : "No pages here")
                         .font(.caption).foregroundStyle(.secondary).lineLimit(1)
@@ -656,6 +683,13 @@ struct ContentView: View {
                         #endif
                     }
                 Spacer(minLength: 0)
+                if let zoom {
+                    PageZoomControls(session: zoom, compact: compactZoom,
+                                     showsPopover: $showZoomPopover, draggingSlider: $draggingZoomSlider,
+                                     editingPercentage: $editingZoomPercentage)
+                        .id(zoom.pageID)
+                        .frame(width: zoomWidth)
+                }
                 Button(action: toggleNavigationPin) {
                     Image(systemName: pageNavigationMode == .pinned ? "pin.fill" : "pin")
                         .frame(width: 36, height: 44)

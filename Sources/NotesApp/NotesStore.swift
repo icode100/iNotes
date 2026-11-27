@@ -85,6 +85,19 @@ final class NotesStore: ObservableObject {
     }
 
     var selectedSheet: NoteNode? { library.nodes.first { $0.id == sheetID } }
+
+    private func zoomKey(for pageID: UUID) -> String {
+        "pageZoom.v1.\(backupOwnerID.uuidString).\(pageID.uuidString)"
+    }
+
+    func makeZoomSession(for pageID: UUID) -> PageZoomSession {
+        let key = zoomKey(for: pageID)
+        let saved = preferences.data(forKey: key).flatMap { try? JSONDecoder().decode(PageZoomSetting.self, from: $0) }
+        let initial = saved.flatMap { $0.isValid ? $0 : nil } ?? notebookDefaults.zoom
+        return PageZoomSession(pageID: pageID, setting: initial) { [preferences] choice in
+            if let data = try? JSONEncoder().encode(choice) { preferences.set(data, forKey: key) }
+        }
+    }
     var canReorderSheets: Bool {
         canSave && filter == .all && folderID != nil
             && search.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
@@ -461,7 +474,12 @@ final class NotesStore: ObservableObject {
         return true
     }
 
-    func emptyTrash() { mutate { $0.emptyTrash() }; sheetID = nil }
+    func emptyTrash() {
+        let removed = library.nodes.filter { $0.isTrashed && $0.kind == .sheet }.map(\.id)
+        guard mutate({ $0.emptyTrash() }) else { return }
+        for pageID in removed { preferences.removeObject(forKey: zoomKey(for: pageID)) }
+        sheetID = nil
+    }
 
     func rememberDriveFolder(_ url: URL) { rememberBackupFolder(url, for: .googleDrive) }
 

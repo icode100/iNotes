@@ -117,7 +117,28 @@ Signed release run 22 published the installer and feed. Independent public
 downloads passed verification. See `docs/TESTING.md` for the fixture corrections
 and evidence for each build.
 
+The user approved publication of the **1.5.0** feature update on **27 November
+2026** after trying the isolated workbook PDF and zoom QA build 2. The local
+suite passed 144 core, 1,306 editor, 2,241 workspace and 25 PDF/ZIP checks.
+See `docs/TESTING.md` for the QA identity, source coverage and limits.
+
 ## Priorities
+
+- Version 1.5 starts pages at 100% unless the user chooses another
+  Notebook default or the page has its own saved zoom. Manual zoom (25–400%),
+  Fit Page and Fit Width are device-local viewing preferences, keyed by library
+  and page ID. Restore the chosen mode when returning or relaunching. Calculate
+  fit using the visible editor and the current paper extent, including long
+  pages. Keep zoom, including slider and pinch changes, outside note edits,
+  archive versions and undo. Preserve the stable native editor while zooming.
+  Both the bottom bar and Notebook defaults accept typed percentages and show
+  the manual range (25%–400%). Keep partial edits local and preserve automatic
+  fit when the field is left untouched.
+
+- In windowed Full Page, preserve the native close, minimize and zoom controls.
+  Let macOS manage them in a native full-screen Space. The floating palette's
+  direct exit returns its own window to the regular workspace, including when
+  both Full Page and native full screen are active.
 
 - Use **Page** and **Pages** throughout the product, including the numbered
   badge, blank-title fallback, menus, accessibility labels and exports. Older
@@ -147,6 +168,12 @@ and evidence for each build.
   and assigns each folder’s direct sheets to its own PDF. Keep safe distinct
   archive paths, ask for a destination, and preserve existing files on cancel
   or failure. See the dated validation record in `docs/TESTING.md`.
+- A single workbook PDF begins with its title, then a numbered title page per
+  active chapter in notebook order. Print topic and subtopic names above their
+  first note, including the first descendant when a topic has no direct pages.
+  Reserve room above the original paper and retain its searchable text and
+  drawing coordinates. Bookmark destinations, export progress and read-back
+  page counts include generated pages. The ZIP retains folder PDFs.
 - Mac selected-shape fill changes only the selected shapes and tables in one
   validated, undoable edit. Keep the creation default independent. Resolve an
   attached arrow against the same live page snapshot as its moving or resizing
@@ -608,7 +635,7 @@ Run 20 published v1.4.0/build 2022 from `d2f3a180`. Native run 53 passed at
 approving the source push for isolated 1.4.1 QA build 1. Signed release run 21
 then failed the pinned footer viewport-height check before publication.
 Reserve tag v1.4.1 and build 2023. Run 22 published v1.4.2/build 2024 from
-`f21afe8d`. Packaging defaults match v1.4.2. Prior tags and release assets remain
+`f21afe8d`. Packaging defaults target v1.5.0/build 2025. Prior tags and release assets remain
 unchanged, including the failed 1.2.0/1.2.1 reservations.
 Initial v1.2.0 user QA and publication authorization were recorded on
 5 November 2026; they do not establish

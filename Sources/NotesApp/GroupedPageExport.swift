@@ -9,8 +9,8 @@ import NotesCore
 @MainActor
 enum GroupedPageExport {
     struct Progress {
-        let completedSheets: Int
-        let totalSheets: Int
+        let completedPages: Int
+        let totalPages: Int
         let currentTitle: String
     }
     struct Summary {
@@ -33,18 +33,13 @@ enum GroupedPageExport {
                       theme: PageTheme = .light, shouldCancel: () -> Bool = { false },
                       progress: (Progress) -> Void = { _ in }) async throws -> Summary {
         try checkCancellation(shouldCancel)
-        let totalSheets = plan.sheetCount
-        guard destination.isFileURL, totalSheets > 0, !plan.documents.isEmpty,
+        let totalPages = plan.outputPageCount
+        guard destination.isFileURL, totalPages > 0, !plan.documents.isEmpty,
               plan.format != .pdf || plan.documents.count == 1 else { throw ExportError.invalidPlan }
         try library.validate()
         let scopedAccess = destination.startAccessingSecurityScopedResource()
         defer { if scopedAccess { destination.stopAccessingSecurityScopedResource() } }
         let lookup = Dictionary(uniqueKeysWithValues: library.nodes.map { ($0.id, $0) })
-        for document in plan.documents {
-            guard !document.sheetIDs.isEmpty, document.sheetIDs.allSatisfy({ lookup[$0]?.kind == .sheet && lookup[$0]?.isTrashed == false }) else {
-                throw ExportError.invalidPlan
-            }
-        }
         let manager = FileManager.default
         let staging = manager.temporaryDirectory.appendingPathComponent("iNotes-export-\(UUID())", isDirectory: true)
         try manager.createDirectory(at: staging, withIntermediateDirectories: false,
@@ -52,7 +47,7 @@ enum GroupedPageExport {
         defer { try? manager.removeItem(at: staging) }
         var completed = 0
         var files: [(GroupedExportPlan.Document, URL)] = []
-        progress(Progress(completedSheets: 0, totalSheets: totalSheets, currentTitle: "Preparing export"))
+        progress(Progress(completedPages: 0, totalPages: totalPages, currentTitle: "Preparing export"))
         for (index, document) in plan.documents.enumerated() {
             try checkCancellation(shouldCancel)
             // Only short generated names touch the native filesystem. The ZIP
@@ -63,28 +58,26 @@ enum GroupedPageExport {
             guard let context = CGContext(url as CFURL, mediaBox: nil, info) else { throw ExportError.renderingFailed }
             var closed = false
             defer { if !closed { context.closePDF() } }
-            for id in document.sheetIDs {
+            for plannedPage in document.pages {
                 try checkCancellation(shouldCancel)
-                guard let sheet = lookup[id] else { throw ExportError.invalidPlan }
-                try autoreleasepool {
-                    let data = UnifiedPageExport.pdf(text: sheet.body, rtfData: sheet.richTextRTF, strokes: sheet.strokes,
-                        paper: InkPaper(rawValue: sheet.paperStyle.rawValue) ?? .dotted, theme: theme,
-                        pageTemplate: sheet.pageTemplate, templateLinePattern: sheet.templateLinePattern,
-                        textBoxes: sheet.textBoxes, equations: sheet.equations, images: sheet.images, diagrams: sheet.diagrams)
-                    guard let provider = CGDataProvider(data: data as CFData), let source = CGPDFDocument(provider),
-                          source.numberOfPages == 1, let page = source.page(at: 1) else { throw ExportError.renderingFailed }
-                    var box = page.getBoxRect(.mediaBox)
-                    guard !box.isNull, !box.isInfinite, box.width > 0, box.height > 0,
-                          [box.minX, box.minY, box.width, box.height].allSatisfy(\.isFinite),
-                          box.width <= InkGeometryLimits.maximumPageDimension,
-                          box.height <= InkGeometryLimits.maximumPageDimension else { throw ExportError.renderingFailed }
-                    let boxData = withUnsafeBytes(of: &box) { Data($0) }
-                    context.beginPDFPage([kCGPDFContextMediaBox as String: boxData] as CFDictionary)
-                    context.drawPDFPage(page)
-                    context.endPDFPage()
+                let title = try autoreleasepool {
+                    switch plannedPage {
+                    case let .cover(title):
+                        try WorkbookPDFPage.drawTitle(title, chapterNumber: nil, into: context)
+                        return title
+                    case let .chapter(number, title):
+                        try WorkbookPDFPage.drawTitle(title, chapterNumber: number, into: context)
+                        return title
+                    case let .sheet(id, topicHeadings):
+                        guard let sheet = lookup[id], sheet.kind == .sheet, !sheet.isTrashed else {
+                            throw ExportError.invalidPlan
+                        }
+                        try drawNote(sheet, topicHeadings: topicHeadings, theme: theme, into: context)
+                        return sheet.displayTitle
+                    }
                 }
                 completed += 1
-                progress(Progress(completedSheets: completed, totalSheets: totalSheets, currentTitle: sheet.displayTitle))
+                progress(Progress(completedPages: completed, totalPages: totalPages, currentTitle: title))
                 // Permit native progress/cancel controls between bounded pages.
                 try await Task.sleep(nanoseconds: 1_000_000)
             }
@@ -99,7 +92,7 @@ enum GroupedPageExport {
             // Core Graphics' URL consumer does not throw write errors. Check
             // the completed file before it can enter a ZIP or replace a target.
             let readbackValid = autoreleasepool {
-                CGPDFDocument(url as CFURL)?.numberOfPages == document.sheetIDs.count
+                CGPDFDocument(url as CFURL)?.numberOfPages == document.pages.count
             }
             guard readbackValid else { throw ExportError.renderingFailed }
             files.append((document, url))
@@ -116,7 +109,33 @@ enum GroupedPageExport {
         let size = try artifact.resourceValues(forKeys: [.fileSizeKey]).fileSize ?? 0
         guard size > 0 else { throw ExportError.renderingFailed }
         try await installAtomically(artifact, at: destination, shouldCancel: shouldCancel)
-        return Summary(documentCount: files.count, sheetCount: completed, bytesWritten: Int64(size))
+        return Summary(documentCount: files.count, sheetCount: plan.sheetCount, bytesWritten: Int64(size))
+    }
+
+    private static func drawNote(_ sheet: NoteNode, topicHeadings: [String], theme: PageTheme,
+                                 into context: CGContext) throws {
+        let data = UnifiedPageExport.pdf(text: sheet.body, rtfData: sheet.richTextRTF, strokes: sheet.strokes,
+            paper: InkPaper(rawValue: sheet.paperStyle.rawValue) ?? .dotted, theme: theme,
+            pageTemplate: sheet.pageTemplate, templateLinePattern: sheet.templateLinePattern,
+            textBoxes: sheet.textBoxes, equations: sheet.equations, images: sheet.images, diagrams: sheet.diagrams)
+        guard let provider = CGDataProvider(data: data as CFData), let source = CGPDFDocument(provider),
+              source.numberOfPages == 1, let page = source.page(at: 1) else { throw ExportError.renderingFailed }
+        let box = page.getBoxRect(.mediaBox)
+        guard !box.isNull, !box.isInfinite, box.width > 0, box.height > 0,
+              [box.minX, box.minY, box.width, box.height].allSatisfy(\.isFinite),
+              box.width <= InkGeometryLimits.maximumPageDimension,
+              box.height <= InkGeometryLimits.maximumPageDimension else { throw ExportError.renderingFailed }
+
+        let header = try WorkbookPDFPage.TopicHeader(titles: topicHeadings, paperWidth: box.width)
+        var output = box
+        output.size.height += header?.height ?? 0
+        WorkbookPDFPage.begin(in: context, bounds: output)
+        header?.draw(above: box, into: context)
+        context.saveGState()
+        context.clip(to: box)
+        context.drawPDFPage(page)
+        context.restoreGState()
+        context.endPDFPage()
     }
 
     private static func checkCancellation(_ shouldCancel: () -> Bool) throws {

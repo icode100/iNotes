@@ -87,6 +87,8 @@ struct StandaloneTestRunner {
         let diagrams = PageDiagramTests()
         let exports = GroupedExportTests()
         let tests: [(String, XCTestCase, () throws -> Void)] = [
+            ("workbook PDF cover, chapters and first-page topic headings", exports, exports.testWorkbookPDFOrdersSectionsAndPlacesEachTopicHeadingOnce),
+            ("empty workbook cover and chapter PDF", exports, exports.testEmptyWorkbookPDFHasCoverWhileEmptyTopicAndBundleRemainUnavailable),
             ("ordered topic PDF and nested bookmarks", exports, exports.testTopicPDFIncludesOrderedPagesAndNestedBookmarks),
             ("bundle hierarchy and filename collisions", exports, exports.testBundleKeepsDuplicateAndUnsafeFolderTitlesDistinct),
             ("diagram archive persistence import search snapshots", diagrams, diagrams.testDiagramArchivePersistenceDuplicateImportSearchAndSnapshots),

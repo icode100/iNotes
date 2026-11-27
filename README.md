@@ -33,8 +33,8 @@ The **v1.2 update (1.2.2, build 2020)** adds paper, ink, title and zoom changes:
 scenery-matched paper, Vintage Black, Pitch Black/White, five pastel papers,
 sixteen ink presets and a native custom color picker. New pages open blank
 immediately; type in the underlined title at the top to name them, or leave it
-empty. Mac pages initially fit the visible page width; Command-Plus/Minus zoom
-manually and View → Fit Page Width restores fitting.
+empty. In v1.2, Mac pages opened fitted to the visible width. Command-Plus/Minus
+zoom manually and View → Fit Page Width restores fitting.
 
 The preceding Mac release was **1.2.2, build 2020**, published on 5 November 2026.
 Exact-source Native checks passed on both branch and main, including iPad
@@ -80,6 +80,32 @@ page browser and **+** button. Click the pin on the bar to keep it in view, or
 choose **Appearance → Page navigation → Pin to bottom**. Choose **Show on
 hover** to return to the edge handle. The same setting applies in a regular
 window, in Full Page and in macOS full screen. With touch, tap the handle.
+
+### Per-page zoom in 1.5.0
+
+Pages start at **100%**. In the bottom page bar, drag the slider or type
+a percentage from **25% to 400%** and press Return. Choose **Fit Page** to see
+the entire page or **Fit Width** to fill the available width. In a narrow window, click the percentage to open
+the controls. Fitting adapts as the viewport changes.
+
+iNotes remembers the zoom you choose for each page on this device, including
+after reopening the app. Open **Appearance → Notebook defaults… → Default
+zoom** and choose **Percentage** to type a starting value for pages without a saved zoom.
+
+### Export a workbook as one PDF in 1.5.0
+
+On Mac, right-click a workbook in the sidebar and choose **Export workbook as
+single PDF…**, then choose where to save it. The PDF opens with the workbook
+title, followed by a numbered divider for each chapter. Each topic and subtopic
+gets a heading above its first note. PDF bookmarks follow the notebook hierarchy.
+Choose **Export workbook as PDF bundle (ZIP)…** to save the separate folder PDFs.
+
+### Full Page window controls in 1.5.0
+
+When using Full Page in a regular Mac window, the red, yellow, and green
+window buttons stay available. Open the floating toolbar and click its
+inward-pointing arrows to return to the regular workspace. This also exits
+macOS full screen when the window is in a full-screen Space.
 
 ## What works
 
@@ -141,7 +167,7 @@ Requires an Apple silicon Mac and macOS 14+. Building the installer requires ful
 open dist/iNotes.app
 ```
 
-The public installer and the packaging defaults both use version 1.4.2, build 2024. Unpublished versions 1.2.0/build 2018, 1.2.1/build 2019 and 1.4.1/build 2023 stay reserved. Downloaded public builds are ad hoc signed: **they are not Apple notarized**, so macOS may report that Apple could not verify iNotes is free of malware.
+The public installer uses version 1.4.2, build 2024. The packaging defaults for this checkout use 1.5.0, build 2025. Unpublished versions 1.2.0/build 2018, 1.2.1/build 2019 and 1.4.1/build 2023 stay reserved. Downloaded public builds use ad hoc signing without Apple notarization, so macOS may report that Apple could not verify iNotes is free of malware.
 
 If you trust the download from the [official releases](https://github.com/icode100/iNotes/releases), follow Apple's [per-app first-open procedure](https://support.apple.com/en-us/102445):
 

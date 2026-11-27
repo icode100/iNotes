@@ -13,10 +13,33 @@ final class EditorPresentation: ObservableObject {
     @Published var fullPage = false
     @Published var nativeFullScreen = false
     var isFullScreenWorkspace: Bool { fullPage || nativeFullScreen }
+    #if os(macOS)
+    fileprivate weak var fullScreenObserver: FullScreenWindowObserver.Observer?
+    #endif
     @Published var toolsVisible = true
     // Visibility is window-local; the bottom bar's hover/pin preference is shared.
     @Published var sheetsVisible = true
     @Published var headingVisible = true
+    private var currentZoom: PageZoomSession?
+
+    func zoomSession(for pageID: UUID, in store: NotesStore) -> PageZoomSession {
+        if let currentZoom, currentZoom.pageID == pageID { return currentZoom }
+        let session = store.makeZoomSession(for: pageID)
+        currentZoom = session
+        return session
+    }
+
+    func closePageZoom() { currentZoom = nil }
+
+    func exitFullScreenWorkspace() {
+        if fullPage { fullPage = false }
+        #if os(macOS)
+        // A delayed notification must never turn an exit action into an entry.
+        if let window = fullScreenObserver?.window, window.styleMask.contains(.fullScreen) {
+            window.toggleFullScreen(nil)
+        }
+        #endif
+    }
 
     func toggleSheets() {
         sheetsVisible.toggle()
@@ -142,7 +165,11 @@ struct FullScreenWindowObserver: NSViewRepresentable {
             let center = NotificationCenter.default
             center.removeObserver(self, name: NSWindow.didEnterFullScreenNotification, object: nil)
             center.removeObserver(self, name: NSWindow.didExitFullScreenNotification, object: nil)
-            guard let window else { return }
+            guard let window else {
+                if presentation?.fullScreenObserver === self { presentation?.fullScreenObserver = nil }
+                return
+            }
+            presentation?.fullScreenObserver = self
             center.addObserver(self, selector: #selector(fullScreenChanged(_:)), name: NSWindow.didEnterFullScreenNotification, object: window)
             center.addObserver(self, selector: #selector(fullScreenChanged(_:)), name: NSWindow.didExitFullScreenNotification, object: window)
             DispatchQueue.main.async { [weak self, weak window] in
@@ -157,7 +184,8 @@ struct FullScreenWindowObserver: NSViewRepresentable {
         }
 
         private func setFullScreen(_ value: Bool) {
-            if presentation?.nativeFullScreen != value { presentation?.nativeFullScreen = value }
+            guard let presentation, presentation.fullScreenObserver === self else { return }
+            if presentation.nativeFullScreen != value { presentation.nativeFullScreen = value }
         }
     }
 }

@@ -5,6 +5,25 @@ import NotesCore
 
 @MainActor
 enum FloatingToolbarDiagnostics {
+    // Exercise the owning window's native command without moving the user's
+    // desktop to a different macOS Space.
+    private final class FixtureWindow: NSWindow {
+        var simulateFullScreenStyle = false
+        private(set) var toggleRequests = 0
+
+        override var styleMask: NSWindow.StyleMask {
+            get { simulateFullScreenStyle ? super.styleMask.union(.fullScreen) : super.styleMask }
+            set { super.styleMask = simulateFullScreenStyle ? newValue.subtracting(.fullScreen) : newValue }
+        }
+
+        override func toggleFullScreen(_ sender: Any?) {
+            toggleRequests += 1
+            guard simulateFullScreenStyle else { return }
+            simulateFullScreenStyle = false
+            NotificationCenter.default.post(name: NSWindow.didExitFullScreenNotification, object: self)
+        }
+    }
+
     @MainActor
     private final class ViewportFrameTrace: NSObject {
         let scroll: NSScrollView
@@ -80,7 +99,7 @@ enum FloatingToolbarDiagnostics {
             .environmentObject(store).environmentObject(InputDeviceMonitor())
             .environment(\.workspaceDiagnosticControls, controls).defaultAppStorage(defaults))
         let rect = NSRect(x: -6400, y: -6200, width: 1150, height: 800)
-        let window = NSWindow(contentRect: rect, styleMask: [.titled, .resizable], backing: .buffered, defer: false)
+        let window = FixtureWindow(contentRect: rect, styleMask: [.titled, .resizable], backing: .buffered, defer: false)
         window.isReleasedWhenClosed = false
         window.contentViewController = host
         window.makeKeyAndOrderFront(nil)
@@ -446,6 +465,56 @@ enum FloatingToolbarDiagnostics {
         try wait("the pinned footer adds and selects a new page in native full screen") {
             presentation.nativeFullScreen && store.selectedSheet?.id != pageID && store.selectedSheet?.title == ""
         }
+        guard let secondID = store.sheetID else { throw WorkspaceDiagnostics.Failure(description: "Missing new zoom fixture page") }
+        let secondDot = "page-carousel-\(secondID.uuidString)"
+        func currentScroll() -> PageZoomScrollView? { find(UnifiedMacPageView.self, in: host.view)?.enclosingScrollView as? PageZoomScrollView }
+        try wait("the new page mounts its own native editor at 100 percent") {
+            guard let native = currentScroll(), native !== scroll else { return false }
+            return native.zoomSetting == .scale(1) && abs(native.magnification - 1) < 0.000001
+        }
+        func zoomField(in view: NSView) -> NSTextField? {
+            if let field = view as? NSTextField, field.placeholderString == "Page zoom percentage",
+               field.window === window, !field.isHiddenOrHasHiddenAncestor { return field }
+            return view.subviews.lazy.compactMap { zoomField(in: $0) }.first
+        }
+        func enterZoomText(_ value: String) throws -> NSTextView {
+            guard let field = zoomField(in: host.view), window.makeFirstResponder(field),
+                  let editor = field.currentEditor() as? NSTextView else {
+                throw WorkspaceDiagnostics.Failure(description: "Missing editable footer zoom percentage")
+            }
+            editor.selectAll(nil)
+            editor.insertText(value, replacementRange: editor.selectedRange())
+            try wait("the native zoom field keeps the pending percentage at the caret") {
+                field.currentEditor() === editor && editor.string == value
+            }
+            return editor
+        }
+        let typedZoom = try enterZoomText("127.5%")
+        try check(currentScroll()?.zoomSetting == .scale(1), "typing keeps the page at its current zoom during editing")
+        typedZoom.doCommand(by: #selector(NSResponder.insertNewline(_:)))
+        try wait("Return applies the typed zoom to the active page") { currentScroll()?.zoomSetting == .scale(1.275) }
+        let cancelled = try enterZoomText("82")
+        cancelled.doCommand(by: #selector(NSResponder.cancelOperation(_:)))
+        try wait("Escape discards the typed percentage") {
+            currentScroll()?.zoomSetting == .scale(1.275) && zoomField(in: host.view)?.stringValue == ZoomPercentage.display(1.275)
+        }
+        _ = try enterZoomText("401")
+        window.makeFirstResponder(nil)
+        try wait("an out-of-range percentage restores the prior zoom on blur") {
+            currentScroll()?.zoomSetting == .scale(1.275) && zoomField(in: host.view)?.stringValue == ZoomPercentage.display(1.275)
+        }
+        _ = try enterZoomText("75")
+        window.makeFirstResponder(nil)
+        try wait("losing focus commits a valid percentage without a percent sign") { currentScroll()?.zoomSetting == .scale(0.75) }
+        try press("page-zoom-fit-width")
+        try wait("Fit Width on the footer fits the new page and marks the button selected") {
+            currentScroll()?.fitsPageWidth == true && button("page-zoom-fit-width")?.value == "Selected"
+        }
+        try press("page-zoom-fit-page")
+        try wait("Fit Page selects the whole-page fit and clears the width indicator") {
+            currentScroll()?.zoomSetting == .fitPage && button("page-zoom-fit-page")?.value == "Selected"
+                && button("page-zoom-fit-width")?.value == "Not selected"
+        }
         try press(dotID)
         try wait("the pinned page dot returns to the original content in native full screen") {
             store.sheetID == pageID && find(UnifiedMacPageView.self, in: host.view)?.textView.string == seed + suffix
@@ -453,6 +522,68 @@ enum FloatingToolbarDiagnostics {
         NotificationCenter.default.post(name: NSWindow.didExitFullScreenNotification, object: window)
         try wait("exiting native full screen preserves pinned navigation and the active page") {
             !presentation.nativeFullScreen && visible(dotID) && button(pinID)?.value == "pinned"
+        }
+        func matchesOriginalZoom() -> Bool {
+            guard let native = currentScroll(), case .scale(let scale) = native.zoomSetting else { return false }
+            return abs(scale - 1.18) < 0.000001 && abs(native.magnification - 1.18) < 0.000001
+        }
+        try check(matchesOriginalZoom(), "returning through the page dot restores the original page's 118 percent zoom")
+        var preferences = store.notebookDefaults
+        preferences.zoom = .scale(1.5)
+        store.saveNotebookDefaults(preferences)
+        try press(secondDot)
+        try wait("the second page reopens with its own remembered Fit Page setting") {
+            store.sheetID == secondID && currentScroll()?.zoomSetting == .fitPage
+        }
+        try press(dotID)
+        try wait("the original page retains 118 percent after changing the notebook default") {
+            store.sheetID == pageID && matchesOriginalZoom()
+        }
+        try press("page-carousel-add")
+        try wait("a new page uses the revised 150 percent default") {
+            guard let id = store.sheetID, id != pageID, id != secondID, let native = currentScroll() else { return false }
+            return native.zoomSetting == .scale(1.5) && abs(native.magnification - 1.5) < 0.000001
+        }
+        try check(store.flush(), "the zoom fixture can reopen its temporary library")
+        let reopenedStore = NotesStore(directory: directory, preferences: defaults)
+        let reopenedWindow = EditorPresentation()
+        let restored = reopenedWindow.zoomSession(for: pageID, in: reopenedStore)
+        let restoredSecond = reopenedWindow.zoomSession(for: secondID, in: reopenedStore)
+        if case .scale(let scale) = restored.setting {
+            try check(abs(scale - 1.18) < 0.000001 && restoredSecond.setting == .fitPage &&
+                      reopenedStore.notebookDefaults.zoom == .scale(1.5),
+                      "a reopened store restores both page choices separately from its default")
+        } else {
+            throw WorkspaceDiagnostics.Failure(description: "Missing original percentage after reopening the zoom fixture")
+        }
+        try press(dotID)
+        try wait("the original page is mounted for the direct Exit action") { store.sheetID == pageID && matchesOriginalZoom() }
+        guard let exitPage = find(UnifiedMacPageView.self, in: host.view),
+              let exitUndo = exitPage.textView.undoManager else { throw WorkspaceDiagnostics.Failure(description: "Missing direct Exit fixture editor") }
+        let exitSetting = defaults.string(forKey: "fullScreenToolbarMode")
+        let exitSelection = exitPage.textView.selectedRange()
+        for (fullPage, native) in [(true, false), (false, true), (true, true)] {
+            let label = native ? "Exit Full Screen" : "Exit Full Page"
+            let before = window.toggleRequests
+            presentation.fullPage = fullPage
+            if native { NotificationCenter.default.post(name: NSWindow.didEnterFullScreenNotification, object: window) }
+            try wait("the floating toolbar appears before \(label)") {
+                navigationSettled() && visible("floating.bubble") && !visible("floating.exitWorkspace")
+            }
+            try press("floating.bubble")
+            try wait("\(label) is directly accessible on the first tools ring") {
+                visible("floating.exitWorkspace") && button("floating.exitWorkspace")?.value == label
+            }
+            try press("floating.exitWorkspace") { window.simulateFullScreenStyle = native }
+            try wait("\(label) returns to the ordinary window and docked controls with one press") {
+                !presentation.isFullScreenWorkspace && navigationSettled() && visible("page.history.undo") && !visible("floating.overlay")
+            }
+            try check(window.toggleRequests == before + (native ? 1 : 0) &&
+                      find(UnifiedMacPageView.self, in: host.view) === exitPage &&
+                      exitPage.textView.undoManager === exitUndo && exitPage.textView.selectedRange() == exitSelection &&
+                      exitPage.textView.string == seed + suffix && matchesOriginalZoom() &&
+                      defaults.string(forKey: "fullScreenToolbarMode") == exitSetting,
+                      "\(label) sends the correct native command and preserves page, caret, undo, zoom, and toolbar preference")
         }
         return checks
     }

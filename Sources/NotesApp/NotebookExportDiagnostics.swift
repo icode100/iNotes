@@ -94,12 +94,84 @@ enum NotebookExportDiagnostics {
             try require(part?.pageCount == 1 && part?.string?.contains(content) == true, "Incorrect PDF in ZIP at \(path)")
         }
 
+        try library.rename(id: book, title: "Compiler Design")
+        try library.rename(id: chapter, title: "Syntax Analysis")
+        let parentTopic = try library.create(kind: .topic, title: "Top-down Parsing", parentID: nested)
+        let subtopic = try library.create(kind: .topic, title: "Predictive Parsing", parentID: parentTopic)
+        func addNote(_ title: String, body: String, in folder: UUID) throws {
+            let id = try library.create(kind: .sheet, title: title, parentID: folder)
+            var node = library.node(id: id)!
+            node.body = body
+            try library.update(node)
+        }
+        try addNote("Lookahead", body: "Choose a production with one lookahead token.", in: subtopic)
+        try addNote("Follow sets", body: "A follow set describes what may come next.", in: subtopic)
+        let chapterTwo = try library.create(kind: .chapter, title: "Optimization", parentID: book)
+        try addNote("Constants", body: "Fold constant expressions before code generation.", in: chapterTwo)
+        _ = try library.create(kind: .chapter, title: "Code Generation", parentID: book)
+
+        let workbookPlan = try GroupedExportPlan.make(library: library, rootID: book, format: .pdf)
+        let workbookURL = temporary.appendingPathComponent(workbookPlan.suggestedFilename)
+        var completedPages: [Int] = []
+        let workbookSummary = try await GroupedPageExport.write(plan: workbookPlan, library: library, to: workbookURL, progress: {
+            completedPages.append($0.completedPages)
+        })
+        guard let workbookPDF = PDFDocument(url: workbookURL) else { throw GroupedPageExport.ExportError.renderingFailed }
+        try require(workbookPlan.suggestedFilename == "Compiler Design.pdf" && workbookPDF.pageCount == 9
+                    && workbookSummary.documentCount == 1 && workbookSummary.sheetCount == 5,
+                    "Expected a workbook cover, three chapter dividers and five original pages")
+        try require(completedPages == Array(0...9), "Workbook progress should include each generated PDF page")
+        func contains(_ index: Int, _ value: String) -> Bool {
+            workbookPDF.page(at: index)?.string?.localizedCaseInsensitiveContains(value) == true
+        }
+        try require(contains(0, "Compiler Design") && !contains(0, "Chapter 1"), "The cover must carry the workbook title")
+        for (index, sequence, title) in [(1, 1, "Syntax Analysis"), (6, 2, "Optimization"), (8, 3, "Code Generation")] {
+            try require(contains(index, "Chapter \(sequence)") && contains(index, title),
+                        "Expected numbered chapter divider for \(title)")
+        }
+        try require(contains(2, "Chapter introduction") && contains(3, "Nested page") && contains(3, "Syntax tree")
+                    && contains(4, "one lookahead token") && contains(5, "what may come next")
+                    && contains(7, "Fold constant expressions"), "Workbook notes lost searchable content or changed order")
+        func textBounds(_ text: String, on page: PDFPage) -> CGRect? {
+            workbookPDF.findString(text, withOptions: [.caseInsensitive])
+                .first(where: { $0.pages.first === page })?.bounds(for: page)
+        }
+        guard let firstTopicPage = workbookPDF.page(at: 3), let firstSubtopicPage = workbookPDF.page(at: 4),
+              let header = textBounds("Parsing", on: firstTopicPage), let body = textBounds("Nested page", on: firstTopicPage),
+              let ancestorHeader = textBounds("Top-down Parsing", on: firstSubtopicPage),
+              let subHeader = textBounds("Predictive Parsing", on: firstSubtopicPage),
+              let subBody = textBounds("Choose a production", on: firstSubtopicPage) else {
+            throw NSError(domain: "iNotes.ExportChecks", code: 2, userInfo: [NSLocalizedDescriptionKey: "Missing workbook topic headings or page text"])
+        }
+        try require(header.minY >= body.maxY && min(ancestorHeader.minY, subHeader.minY) >= subBody.maxY,
+                    "Topic headings must sit above the original note content")
+        try require(!contains(5, "Predictive Parsing") && !contains(5, "Top-down Parsing"),
+                    "A topic heading belongs only on the topic's first note")
+        let annotatedBounds = firstTopicPage.bounds(for: .mediaBox)
+        try require(annotatedBounds.width == page2?.bounds(for: .mediaBox).width
+                    && annotatedBounds.height > (page2?.bounds(for: .mediaBox).height ?? .infinity),
+                    "Adding a topic heading must preserve note width and provide extra vertical space")
+        let workbookMarks = workbookPDF.outlineRoot
+        try require(bookmark("Compiler Design", in: workbookMarks)?.destination?.page === workbookPDF.page(at: 0)
+                    && bookmark("Optimization", in: workbookMarks)?.destination?.page === workbookPDF.page(at: 6)
+                    && bookmark("Predictive Parsing", in: workbookMarks)?.destination?.page === firstSubtopicPage
+                    && bookmark("Follow sets", in: workbookMarks)?.destination?.page === workbookPDF.page(at: 5),
+                    "Workbook bookmarks must land on their cover, divider or original page")
+        let savedBook = try Data(contentsOf: workbookURL)
+        var stopAfterCover = false
+        do {
+            _ = try await GroupedPageExport.write(plan: workbookPlan, library: library, to: workbookURL,
+                                                  shouldCancel: { stopAfterCover }, progress: { stopAfterCover = $0.completedPages == 1 })
+            try require(false, "Workbook cancellation after the cover did not stop export")
+        } catch is CancellationError {}
+        try require(try Data(contentsOf: workbookURL) == savedBook, "Canceling a workbook PDF export must preserve the existing file")
+
         let original = try Data(contentsOf: zipURL)
         let originalEntries = try fm.contentsOfDirectory(atPath: temporary.path).sorted()
         var cancel = false
         do {
             _ = try await GroupedPageExport.write(plan: zip, library: library, to: zipURL,
-                                                  shouldCancel: { cancel }, progress: { cancel = $0.completedSheets >= 1 })
+                                                  shouldCancel: { cancel }, progress: { cancel = $0.completedPages >= 1 })
             try require(false, "A canceled export replaced the output")
         } catch is CancellationError {}
         try require(try Data(contentsOf: zipURL) == original, "Cancellation must preserve an existing destination")

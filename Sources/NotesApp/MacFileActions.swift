@@ -21,6 +21,7 @@ struct NotebookExportButtons: View {
 
     var body: some View {
         if folder.kind == .workbook {
+            Button("Export workbook as single PDF…") { export(folder.id, .pdf) }
             Button("Export workbook as PDF bundle (ZIP)…") { export(folder.id, .zip) }
         } else {
             let kind = folder.kind == .chapter ? "chapter" : "topic"
@@ -45,13 +46,13 @@ struct NotebookExportPresenter: ViewModifier {
             .sheet(isPresented: Binding(get: { progress != nil }, set: { _ in })) {
                 if let progress {
                     VStack(alignment: .leading, spacing: 14) {
-                        Text(progress.completedSheets == progress.totalSheets ? "Saving export…" : "Exporting pages").font(.headline)
-                        ProgressView(value: Double(progress.completedSheets), total: Double(max(1, progress.totalSheets)))
-                        if progress.completedSheets > 0 && progress.completedSheets < progress.totalSheets {
+                        Text(progress.completedPages == progress.totalPages ? "Saving export…" : "Exporting pages").font(.headline)
+                        ProgressView(value: Double(progress.completedPages), total: Double(max(1, progress.totalPages)))
+                        if progress.completedPages > 0 && progress.completedPages < progress.totalPages {
                             Text(progress.currentTitle).lineLimit(1).foregroundStyle(.secondary)
                         }
                         HStack {
-                            Text("\(progress.completedSheets) of \(progress.totalSheets) pages").monospacedDigit()
+                            Text("\(progress.completedPages) of \(progress.totalPages) pages").monospacedDigit()
                             Spacer()
                             Button("Cancel") { task?.cancel() }.keyboardShortcut(.cancelAction)
                         }
@@ -73,7 +74,7 @@ struct NotebookExportPresenter: ViewModifier {
             panel.canCreateDirectories = true
             guard panel.runModal() == .OK, let destination = panel.url else { return }
             let theme = (PageColorScheme(rawValue: paper) ?? .system).resolved(isDark: colorScheme == .dark, scenery: scenery)
-            progress = .init(completedSheets: 0, totalSheets: plan.sheetCount, currentTitle: plan.suggestedFilename)
+            progress = .init(completedPages: 0, totalPages: plan.outputPageCount, currentTitle: plan.suggestedFilename)
             task = Task { @MainActor in
                 defer { progress = nil; task = nil }
                 do {
@@ -220,7 +221,8 @@ struct NotesCommands: Commands {
                 .keyboardShortcut("+", modifiers: .command)
             Button("Zoom Out") { PageZoomActions.perform(.zoomOut) }
                 .keyboardShortcut("-", modifiers: .command)
-            Button("Fit Page Width") { PageZoomActions.fitWidth() }
+            Button("Fit Page") { PageZoomActions.fit(.fitPage) }
+            Button("Fit Page Width") { PageZoomActions.fit(.fitWidth) }
         }
         CommandMenu("Format") {
             Button("Bold") { RichTextEditor.perform(.bold) }.keyboardShortcut("b")

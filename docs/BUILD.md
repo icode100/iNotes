@@ -38,9 +38,9 @@ bash scripts/verify-macos.sh
 The build creates:
 
 - `dist/iNotes.app`: native ARM64 app bundle.
-- `dist/iNotes-1.4.2-arm64.dmg`: compressed disk image containing the app, an
+- `dist/iNotes-1.5.0-arm64.dmg`: compressed disk image containing the app, an
   Applications shortcut, and installation instructions.
-- `dist/iNotes-1.4.2-arm64.dmg.sha256`: SHA-256 checksum.
+- `dist/iNotes-1.5.0-arm64.dmg.sha256`: SHA-256 checksum.
 
 Open the disk image and drag iNotes to Applications. The DMG does not install
 background services, kernel extensions, browser runtimes, or privileged helpers.
@@ -48,7 +48,10 @@ The build script validates the property list, architecture, app signature, and D
 before publishing outputs. The verification script mounts it read-only and checks
 the packaged app and Applications shortcut.
 
-The packaging defaults match **v1.4.2 / build 2024**, published on 26 November
+The packaging defaults target **v1.5.0 / build 2025** for per-page zoom,
+Full Page controls and single-PDF workbook export.
+
+The current public release is **v1.4.2 / build 2024**, published on 26 November
 2026 from `f21afe8db77b4df8ee3e3aaabd19afebaf0c8a93`. Native run 55 passed the
 Mac checks and iPad simulator build. Signed release run 22 published the Mac
 installer and update feed. Independent downloads passed checksum, signature and

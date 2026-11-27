@@ -219,6 +219,7 @@ struct SheetDetail: View {
     @AppStorage("pageColorScheme") private var pageColorScheme = "system"
     @AppStorage("linePattern") private var linePattern = "solid"
     let sheetID: UUID
+    let zoomSession: PageZoomSession
     @StateObject private var pageHistory = PageToolbarHistory()
     @StateObject private var selectedInkStyle = PageInkSelectionStyle()
     #if os(macOS)
@@ -404,7 +405,7 @@ struct SheetDetail: View {
                                   onPageValidate: { store.validatePageChange(sheet.id, content: $0) },
                                   onPageError: { store.errorMessage = $0 },
                                   onObjectPlacement: { selectedTool = InkTool.select.rawValue },
-                                  toolbarHistory: pageHistory)
+                                  toolbarHistory: pageHistory, zoomSession: zoomSession)
                     .observingInkSelection(selectedInkStyle)
                     #if os(macOS)
                     .observingDiagramSelection(selectedDiagramStyle)
@@ -1035,7 +1036,7 @@ private extension View {
 }
 
 private enum FloatingPageTool: Hashable {
-    case drawing(InkTool), colors, undo, redo, paper, more
+    case exitWorkspace, drawing(InkTool), colors, undo, redo, paper, more
     #if os(macOS)
     case shapes
     #endif
@@ -1043,7 +1044,8 @@ private enum FloatingPageTool: Hashable {
 
 extension SheetDetail {
     func floatingDrawingToolbar(_ sheet: NoteNode) -> some View {
-        var items = Self.drawingChoices.map { FloatingPageTool.drawing($0.tool) }
+        // Keep Exit on the first group of controls when the ring needs paging.
+        var items = [FloatingPageTool.exitWorkspace] + Self.drawingChoices.map { .drawing($0.tool) }
         #if os(macOS)
         items.append(.shapes)
         #endif
@@ -1060,6 +1062,22 @@ extension SheetDetail {
         let readOnly = sheet.isTrashed || !sheet.images.isEmpty || !sheet.diagrams.isEmpty
         #endif
         switch item {
+        case .exitWorkspace:
+            Button(action: presentation.exitFullScreenWorkspace) {
+                Image(systemName: "arrow.down.right.and.arrow.up.left").floatingHitArea(true)
+            }
+            .buttonStyle(.plain)
+            .help(exitWorkspaceTitle)
+            .accessibilityLabel(exitWorkspaceTitle)
+            .accessibilityIdentifier("floating.exitWorkspace")
+            #if os(macOS)
+            .background {
+                if let diagnosticControls {
+                    WorkspaceDiagnosticControlProbe(controls: diagnosticControls, identifier: "floating.exitWorkspace",
+                        value: exitWorkspaceTitle, action: presentation.exitFullScreenWorkspace)
+                }
+            }
+            #endif
         case .drawing(let tool):
             if let choice = Self.drawingChoices.first(where: { $0.tool == tool }) {
                 toolButton(tool, title: choice.title, symbol: choice.symbol, floating: true)
@@ -1096,6 +1114,8 @@ extension SheetDetail {
         }
     }
 
+    private var exitWorkspaceTitle: String { presentation.nativeFullScreen ? "Exit Full Screen" : "Exit Full Page" }
+
     private func moreFloatingTools(_ sheet: NoteNode, readOnly: Bool) -> some View {
         Menu {
             Group {
@@ -1120,7 +1140,10 @@ extension SheetDetail {
             Button(!presentation.fullPage && presentation.headingVisible ? "Hide heading" : "Show heading") {
                 presentation.toggleHeading()
             }
-            Button(presentation.fullPage ? "Exit full page" : "Full page") { presentation.fullPage.toggle() }
+            if !presentation.fullPage {
+                Button("Full page") { presentation.fullPage = true }
+            }
+            Button(exitWorkspaceTitle, action: presentation.exitFullScreenWorkspace)
             fullScreenToolbarModeMenu
             Button("Hide drawing toolbar") { presentation.toolsVisible.toggle() }
             Divider()

@@ -274,8 +274,11 @@ enum EditorDiagnostics {
             let renderedPaper = page.convert(page.bounds, to: pageScroll).width
             return viewport > 0 && abs(renderedPaper - viewport) < 1
         }
+        try check(fitScroll.zoomSetting == .scale(1) && fitScroll.magnification == 1,
+                  "An unconfigured page opens at exactly 100 percent")
+        fitScroll.applyZoom(.fitWidth)
         try check(fitScroll.fitsPageWidth && pageFitsVisibleWidth(),
-                  "A newly mounted page fits the actual visible clip viewport by default")
+                  "Fit Width uses the actual visible clip viewport")
         let initialFit = pageScroll.magnification
         let originalWindowSize = window.contentView!.frame.size
         window.setContentSize(NSSize(width: originalWindowSize.width + 180, height: originalWindowSize.height))
@@ -283,7 +286,7 @@ enum EditorDiagnostics {
         repeat { RunLoop.main.run(until: Date(timeIntervalSinceNow: 0.016)) }
         while (!pageFitsVisibleWidth() || abs(pageScroll.magnification - initialFit) < 0.000001) && Date() < fitResizeDeadline
         try check(fitScroll.fitsPageWidth && pageFitsVisibleWidth() && pageScroll.magnification > initialFit,
-                  "Default width fitting follows native viewport resizing without forced layout")
+                  "Selected width fitting follows native viewport resizing without forced layout")
         pageScroll.magnification = 1.25
         window.setContentSize(originalWindowSize)
         RunLoop.main.run(until: Date(timeIntervalSinceNow: 0.1))
@@ -306,17 +309,42 @@ enum EditorDiagnostics {
             backing.documentView = clippedPage
             viewport.documentView = backing
             clippedWindow.contentView = viewport
-            backing.fitPageWidth()
+            backing.applyZoom(.fitWidth)
             let deadline = Date(timeIntervalSinceNow: 1)
             func clippedWidthMatches() -> Bool {
-                let visible = backing.contentView.convert(backing.contentView.visibleRect, to: backing).width
-                return visible > 0 && abs(clippedPage.convert(clippedPage.bounds, to: backing).width - visible) < 1
+                let visible = backing.contentView.convert(backing.contentView.visibleRect, to: backing)
+                let paper = clippedPage.convert(clippedPage.bounds, to: backing)
+                return visible.width > 0 && abs(paper.minX - visible.minX) < 1 && abs(paper.maxX - visible.maxX) < 1
             }
             repeat { RunLoop.main.run(until: Date(timeIntervalSinceNow: 0.016)) }
             while !clippedWidthMatches() && Date() < deadline
             let visible = backing.contentView.convert(backing.contentView.visibleRect, to: backing).width
             try check(backing.fitsPageWidth && backing.frame.width > visible + 200 && clippedWidthMatches(),
                       "Width fitting uses the unobscured viewport when a backing scroll view extends beyond its clipping ancestor")
+            backing.applyZoom(.fitPage)
+            let clippedViewport = backing.contentView.convert(backing.contentView.visibleRect, to: backing)
+            try check(clippedViewport.insetBy(dx: -1, dy: -1).contains(clippedPage.convert(clippedPage.bounds, to: backing)),
+                      "Fit Page centers the whole page inside the unobscured part of a wider backing view")
+        }
+        do {
+            let originalInk = page.inkView.strokes
+            fitScroll.applyZoom(.fitPage)
+            func wholePaperVisible() -> Bool {
+                let rendered = page.convert(page.bounds, to: pageScroll)
+                let clip = pageScroll.contentView.convert(pageScroll.contentView.visibleRect, to: pageScroll)
+                return clip.insetBy(dx: -1, dy: -1).contains(rendered)
+                    && (abs(rendered.width - clip.width) < 1 || abs(rendered.height - clip.height) < 1)
+            }
+            try check(fitScroll.zoomSetting == .fitPage && wholePaperVisible(),
+                      "Fit Page shows the whole paper at the largest scale that fits either dimension")
+            page.inkView.strokes.append(InkStroke(points: [InkPoint(x: 85, y: 20_000)]))
+            page.resizePaperToContent()
+            try check(fitScroll.magnification < PageZoomSetting.manualRange.lowerBound && wholePaperVisible(),
+                      "Fit Page includes content far below the manual zoom range as the paper grows")
+            page.inkView.strokes = originalInk
+            page.resizePaperToContent()
+            try check(fitScroll.zoomSetting == .fitPage && wholePaperVisible(),
+                      "Removing far-away ink fits the shortened page again")
         }
         pageScroll.magnification = 0.25
         pageScroll.contentView.scroll(to: .zero)
@@ -528,7 +556,7 @@ enum EditorDiagnostics {
                       && page.textView.string == pageText && page.inkView.strokes == pageStrokes,
                       "Keyboard zoom preserves the native page, focus, caret, undo history and complete page content")
             try check(!zoomScroll.fitsPageWidth, "Keyboard zoom preserves an explicit scale instead of returning to automatic fitting")
-            try check(PageZoomActions.fitWidth(in: window) && zoomScroll.fitsPageWidth && pageFitsVisibleWidth()
+            try check(PageZoomActions.fit(.fitWidth, in: window) && zoomScroll.fitsPageWidth && pageFitsVisibleWidth()
                       && pageScroll.documentView === page && window.firstResponder === beforeResponder
                       && page.textView.selectedRange() == beforeSelection
                       && page.textView.undoManager === beforeUndo && beforeUndo?.canUndo == beforeCanUndo

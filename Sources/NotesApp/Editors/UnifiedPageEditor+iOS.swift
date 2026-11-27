@@ -39,6 +39,7 @@ struct UnifiedPageEditor: UIViewRepresentable {
     var toolbarHistory: PageToolbarHistory?
     var inkSelectionStyle: PageInkSelectionStyle?
     var onEquationEdit: ((NoteEquation) -> Void)? = nil
+    var zoomSession: PageZoomSession?
 
     init(text: Binding<String>, rtfData: Binding<Data?>, strokes: Binding<[InkStroke]>, pencilKitData: Binding<Data?>,
          textBoxes: Binding<[PageTextBox]> = .constant([]), equations: Binding<[NoteEquation]> = .constant([]), images: Binding<[PageImage]> = .constant([]), diagrams: Binding<[PageDiagram]> = .constant([]),
@@ -50,7 +51,8 @@ struct UnifiedPageEditor: UIViewRepresentable {
          onTextChange: ((String, Data?) -> Void)? = nil, onInkChange: (([InkStroke], Data?) -> Void)? = nil,
          onInputChange: ((String) -> Void)? = nil, onPageChange: ((PageContent) -> Void)? = nil,
          onEquationEdit: ((NoteEquation) -> Void)? = nil, onPageValidate: ((PageContent) -> Bool)? = nil, onPageError: ((String) -> Void)? = nil,
-         onObjectPlacement: (() -> Void)? = nil, toolbarHistory: PageToolbarHistory? = nil) {
+         onObjectPlacement: (() -> Void)? = nil, toolbarHistory: PageToolbarHistory? = nil,
+         zoomSession: PageZoomSession? = nil) {
         _text = text; _rtfData = rtfData; _strokes = strokes; _pencilKitData = pencilKitData
         _textBoxes = textBoxes; _equations = equations; _images = images; _diagrams = diagrams; self.tool = tool; self.colorHex = colorHex
         self.lineWidth = lineWidth ?? InkNibPreset.defaultWidth(for: tool); self.paper = paper; self.theme = theme
@@ -61,6 +63,7 @@ struct UnifiedPageEditor: UIViewRepresentable {
         self.onPageChange = onPageChange; self.onEquationEdit = onEquationEdit; self.onPageValidate = onPageValidate; self.onPageError = onPageError
         self.onObjectPlacement = onObjectPlacement
         self.toolbarHistory = toolbarHistory
+        self.zoomSession = zoomSession
     }
 
     func makeCoordinator() -> Coordinator { Coordinator(self) }
@@ -298,6 +301,7 @@ struct UnifiedPageEditor: UIViewRepresentable {
                 view.setInkError(rejectedDrawing ? "This page contains unsupported ink and cannot be edited safely. Its saved drawing has been preserved." : nil)
             }
             view.resizePage()
+            view.connectZoomSession(parent.zoomSession)
             linePreview.frame = view.page.bounds
             if previousTool != parent.tool {
                 previousTool = parent.tool
@@ -431,6 +435,7 @@ struct UnifiedPageEditor: UIViewRepresentable {
         }
 
         func detach(_ view: UnifiedPageScrollView) {
+            view.disconnectZoomSession()
             nativeToolActive = false
             persistInk(view.page.canvas)
             picker.setVisible(false, forFirstResponder: view.page.canvas)
@@ -450,9 +455,30 @@ struct UnifiedPageEditor: UIViewRepresentable {
             lastNativeHistoryOwnerID = nil
         }
 
-        func viewForZooming(in scrollView: UIScrollView) -> UIView? { view?.page }
-        func scrollViewDidZoom(_ scrollView: UIScrollView) { view?.centerPage() }
-        func scrollViewDidScroll(_ scrollView: UIScrollView) { view?.updateVisiblePaper() }
+        func viewForZooming(in scrollView: UIScrollView) -> UIView? {
+            guard scrollView === view else { return nil }
+            return view?.page
+        }
+
+        func scrollViewWillBeginZooming(_ scrollView: UIScrollView, with zoomView: UIView?) {
+            guard let view, scrollView === view, zoomView === view.page else { return }
+            view.beginNativeZoom()
+        }
+
+        func scrollViewDidZoom(_ scrollView: UIScrollView) {
+            guard let view, scrollView === view else { return }
+            view.nativeZoomChanged()
+            view.centerPage()
+        }
+
+        func scrollViewDidEndZooming(_ scrollView: UIScrollView, with zoomView: UIView?, atScale scale: CGFloat) {
+            guard let view, scrollView === view, zoomView === view.page else { return }
+            view.endNativeZoom()
+        }
+
+        func scrollViewDidScroll(_ scrollView: UIScrollView) {
+            if scrollView === view { view?.updateVisiblePaper() }
+        }
 
         func textViewDidChange(_ textView: UITextView) {
             textView.undoManager?.levelsOfUndo = 50
@@ -640,6 +666,7 @@ struct UnifiedPageEditor: UIViewRepresentable {
 
         private func renderObjects(_ content: PageContent, on view: UnifiedPageScrollView, theme: PageTheme, enabled: Bool) {
             let page = view.page
+            view.imageBottom = CGFloat(content.images.lazy.map { $0.y + $0.height }.filter(\.isFinite).max() ?? 0)
             let textIDs = Set(content.textBoxes.map(\.id)), equationIDs = Set(content.equations.map(\.id))
             for id in Array(page.textBoxViews.keys) where !textIDs.contains(id) { page.textBoxViews.removeValue(forKey: id)?.removeFromSuperview() }
             for id in Array(page.equationViews.keys) where !equationIDs.contains(id) { page.equationViews.removeValue(forKey: id)?.removeFromSuperview() }
@@ -862,6 +889,7 @@ struct UnifiedPageEditor: UIViewRepresentable {
                 onPageChange: { _ in writes += 1 })
             let coordinator = Coordinator(parent)
             let fixture = UnifiedPageScrollView(frame: CGRect(x: 0, y: 0, width: 640, height: 480))
+            fixture.delegate = coordinator
             coordinator.attach(fixture)
             defer { coordinator.detach(fixture) }
             coordinator.update(fixture, enabled: true)
@@ -870,6 +898,10 @@ struct UnifiedPageEditor: UIViewRepresentable {
             try require(!fixture.page.isUserInteractionEnabled && !fixture.page.textView.isEditable
                 && !fixture.page.canvas.drawingGestureRecognizer.isEnabled && !fixture.page.selectionInputAllowed,
                 "Diagram pages disable native text, ink and mixed page selection input")
+            fixture.applyZoom(.fitPage)
+            try require(fixture.isUserInteractionEnabled && abs(fixture.zoomScale * fixture.page.bounds.height - 480) < 0.1
+                && coordinator.selection.content == source && writes == 0,
+                "Fit Page shows the whole read-only diagram page without changing its contents")
             try require(fixture.subviews.compactMap { $0 as? UILabel }.contains { $0.text?.contains("Open it on Mac") == true && !$0.isHidden },
                 "The actual page displays the Mac-only editing notice")
             try require(fixture.page.inputHitTest(at: CGPoint(x: 100, y: 100), isPencil: true) == nil,
@@ -898,6 +930,17 @@ struct UnifiedPageEditor: UIViewRepresentable {
             coordinator.update(fixture, enabled: true)
             try require(coordinator.selection.content == source && fixture.page.diagramView.diagrams == diagrams && writes == 0,
                 "Theme projection preserves canonical diagrams without publishing a page edit")
+            let png = UIGraphicsImageRenderer(size: CGSize(width: 1, height: 1)).pngData { context in
+                context.fill(CGRect(x: 0, y: 0, width: 1, height: 1))
+            }
+            let image = PageImage(x: 40, y: 5000, width: 80, height: 120, imageData: png)
+            coordinator.parent = UnifiedPageEditor(text: .constant(source.text), rtfData: .constant(nil),
+                strokes: .constant(source.strokes), pencilKitData: .constant(nil), images: .constant([image]),
+                onPageChange: { _ in writes += 1 })
+            coordinator.update(fixture, enabled: true)
+            try require(fixture.page.bounds.height == 5200 && abs(fixture.zoomScale * 5200 - 480) < 0.1
+                && !fixture.page.isUserInteractionEnabled && writes == 0,
+                "Automatic fit includes the full saved image extent on a read-only page")
             let plain = UnifiedPageEditor(text: .constant("Editable"), rtfData: .constant(nil), strokes: .constant([]),
                 pencilKitData: .constant(nil), tool: .diagram, onPageChange: { _ in writes += 1 })
             coordinator.parent = plain
@@ -986,6 +1029,7 @@ struct UnifiedPageEditor: UIViewRepresentable {
             fixture.delegate = fixtureCoordinator
             fixtureCoordinator.attach(fixture)
             defer { fixtureCoordinator.detach(fixture) }
+            try require(fixture.zoomScale == 1, "The initial iPad page uses 100% zoom")
             fixture.zoomScale = 0.25
             fixture.resizePage()
             fixture.layoutIfNeeded()
@@ -994,6 +1038,38 @@ struct UnifiedPageEditor: UIViewRepresentable {
             fixture.frame.size.width = 1200
             fixture.layoutIfNeeded()
             try require(abs(fixture.page.frame.midX - 600) < 0.1, "Paper must recenter after the workspace changes size")
+
+            var remembered = PageZoomSetting.scale(1)
+            let pageID = UUID()
+            let zoom = PageZoomSession(pageID: pageID, setting: remembered) { remembered = $0 }
+            fixture.connectZoomSession(zoom)
+            zoom.choose(.fitWidth)
+            try require(abs(fixture.page.frame.width - 1200) < 0.1, "Fit Width uses the current iPad viewport")
+            fixture.frame.size.width = 960
+            fixture.layoutIfNeeded()
+            try require(abs(fixture.page.frame.width - 960) < 0.1, "Fit Width follows iPad window resizing")
+            fixture.frame.size.height = 330
+            zoom.choose(.fitPage)
+            try require(fixture.zoomScale < 0.25 && abs(fixture.page.frame.height - 330) < 0.1
+                && fixture.page.frame.width <= fixture.bounds.width, "Fit Page fits even below the manual zoom range")
+            fixture.frame.size.height = 440
+            fixture.layoutIfNeeded()
+            try require(abs(fixture.page.frame.height - 440) < 0.1, "Fit Page follows the available height")
+            fixtureCoordinator.scrollViewWillBeginZooming(fixture, with: fixture.page)
+            fixture.zoomScale = 0.75
+            fixtureCoordinator.scrollViewDidZoom(fixture)
+            fixtureCoordinator.scrollViewDidEndZooming(fixture, with: fixture.page, atScale: 0.75)
+            fixture.frame.size = CGSize(width: 1200, height: 800)
+            fixture.layoutIfNeeded()
+            try require(abs(fixture.zoomScale - 0.75) < 0.000001 && fixture.minimumZoomScale == 0.25
+                && remembered == .scale(0.75),
+                "Explicit native zoom leaves fit mode and keeps its percentage through resize")
+            let next = PageZoomSession(pageID: UUID(), setting: .scale(1)) { _ in }
+            fixture.connectZoomSession(next)
+            try require(fixture.zoomScale == 1, "Navigating to a new page applies its own 100% zoom")
+            let returning = PageZoomSession(pageID: pageID, setting: remembered) { remembered = $0 }
+            fixture.connectZoomSession(returning)
+            try require(fixture.zoomScale == 0.75, "Returning to the first iPad page restores its native pinch scale")
 
             let paper = fixture.page.paper
             paper.theme = .vintage
@@ -1931,17 +2007,23 @@ final class IOSPageDiagramView: UIView {
 }
 
 @MainActor
-final class UnifiedPageScrollView: UIScrollView {
+final class UnifiedPageScrollView: UIScrollView, PageZoomViewport {
     let page = UnifiedPencilPage()
     var onAttachment: (() -> Void)?
+    var imageBottom: CGFloat = 0
     private let inkErrorLabel = UILabel()
+    private weak var zoomSession: PageZoomSession?
+    private var zoomSetting = PageZoomSetting.scale(1)
+    private var zoomRequestPending = false
+    private var applyingZoom = false
+    private var trackingZoomGesture = false
 
     override init(frame: CGRect) {
         super.init(frame: frame)
         backgroundColor = .secondarySystemBackground
         contentInsetAdjustmentBehavior = .never
-        minimumZoomScale = 0.25
-        maximumZoomScale = 4
+        minimumZoomScale = CGFloat(PageZoomSetting.manualRange.lowerBound)
+        maximumZoomScale = CGFloat(PageZoomSetting.manualRange.upperBound)
         alwaysBounceVertical = true
         alwaysBounceHorizontal = true
         keyboardDismissMode = .interactive
@@ -1966,13 +2048,85 @@ final class UnifiedPageScrollView: UIScrollView {
         if window != nil { onAttachment?() }
     }
 
+    func connectZoomSession(_ session: PageZoomSession?) {
+        guard session !== zoomSession else { return }
+        disconnectZoomSession()
+        zoomSession = session
+        if let session { session.attach(self) }
+        else { applyZoom(.scale(1)) }
+    }
+
+    func disconnectZoomSession() {
+        zoomSession?.detach(self)
+        zoomSession = nil
+        trackingZoomGesture = false
+    }
+
+    func applyZoom(_ setting: PageZoomSetting) {
+        guard setting.isValid else { return }
+        trackingZoomGesture = false
+        zoomSetting = setting
+        zoomRequestPending = true
+        updateZoom()
+    }
+
+    private func updateZoom() {
+        if case .scale = zoomSetting, !zoomRequestPending { return }
+        guard !applyingZoom, !trackingZoomGesture, delegate != nil,
+              bounds.width > 0, bounds.height > 0, page.bounds.width > 0, page.bounds.height > 0 else { return }
+        let target: CGFloat
+        switch zoomSetting {
+        case let .scale(scale): target = CGFloat(scale)
+        case .fitWidth: target = bounds.width / page.bounds.width
+        case .fitPage: target = min(bounds.width / page.bounds.width, bounds.height / page.bounds.height)
+        }
+        guard target.isFinite, target > 0 else { return }
+        let factor = min(maximumZoomScale, target)
+        let changed = abs(zoomScale - factor) > 0.000001
+        let requested = zoomRequestPending
+        zoomRequestPending = false
+        applyingZoom = true
+        defer { applyingZoom = false }
+        // A tall page can fit below the smallest manual slider setting.
+        let minimum = min(CGFloat(PageZoomSetting.manualRange.lowerBound), factor)
+        if minimumZoomScale != minimum { minimumZoomScale = minimum }
+        if changed {
+            setZoomScale(factor, animated: false)
+            centerPage()
+        }
+        if changed || requested {
+            zoomSession?.report(zoomSetting, scale: Double(zoomScale), from: self)
+        }
+    }
+
+    func beginNativeZoom() {
+        if !applyingZoom { trackingZoomGesture = true }
+    }
+
+    func nativeZoomChanged() {
+        guard trackingZoomGesture, !applyingZoom else { return }
+        let scale = manualGestureScale
+        zoomSetting = .scale(scale)
+        zoomSession?.report(zoomSetting, scale: Double(zoomScale), from: self)
+    }
+
+    func endNativeZoom() {
+        guard trackingZoomGesture, !applyingZoom else { return }
+        applyZoom(.scale(manualGestureScale))
+    }
+
+    private var manualGestureScale: Double {
+        let range = PageZoomSetting.manualRange
+        return min(range.upperBound, max(range.lowerBound, Double(zoomScale)))
+    }
+
     func resizePage() {
         let width: CGFloat = 1600
         let textHeight = page.textView.sizeThatFits(CGSize(width: width - 80, height: .greatestFiniteMagnitude)).height
         let inkBottom = page.canvas.drawing.bounds.maxY
         let objectBottom = (Array(page.textBoxViews.values).map { $0.frame.maxY } + Array(page.equationViews.values).map { $0.frame.maxY }
             + page.diagramView.diagrams.map { PageDiagramGeometry.bounds(of: $0, in: page.diagramView.diagrams).maxY }).max() ?? 0
-        let desiredHeight = max(2200, textHeight + 80, inkBottom.isFinite ? inkBottom + 80 : 0, objectBottom + 80)
+        let desiredHeight = max(2200, textHeight + 80, inkBottom.isFinite ? inkBottom + 80 : 0, objectBottom + 80, imageBottom + 80)
         let height = min(CGFloat(InkGeometryLimits.maximumPageDimension), desiredHeight.isFinite ? desiredHeight : 2200)
         page.bounds = CGRect(x: 0, y: 0, width: width, height: height)
         page.center = CGPoint(x: width * zoomScale / 2, y: height * zoomScale / 2)
@@ -1982,11 +2136,13 @@ final class UnifiedPageScrollView: UIScrollView {
         page.selectionView.frame = page.bounds
         page.textView.frame = CGRect(x: 40, y: 40, width: width - 80, height: height - 80)
         contentSize = CGSize(width: width * zoomScale, height: height * zoomScale)
+        updateZoom()
         centerPage()
     }
 
     override func layoutSubviews() {
         super.layoutSubviews()
+        updateZoom()
         centerPage()
     }
 

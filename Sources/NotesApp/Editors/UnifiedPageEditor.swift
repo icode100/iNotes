@@ -36,6 +36,7 @@ struct UnifiedPageEditor: NSViewRepresentable {
     var onInputChange: ((String) -> Void)? = nil
     var onObjectPlacement: (() -> Void)? = nil
     var toolbarHistory: PageToolbarHistory?
+    var zoomSession: PageZoomSession?
     var inkSelectionStyle: PageInkSelectionStyle?
     private var diagramSelectionStyle: MacDiagramSelectionStyle?
 
@@ -50,7 +51,8 @@ struct UnifiedPageEditor: NSViewRepresentable {
          onTextChange: ((String, Data?) -> Void)? = nil, onInkChange: (([InkStroke], Data?) -> Void)? = nil,
          onInputChange: ((String) -> Void)? = nil, onPageChange: ((PageContent) -> Void)? = nil,
          onEquationEdit: ((NoteEquation) -> Void)? = nil, onPageValidate: ((PageContent) -> Bool)? = nil, onPageError: ((String) -> Void)? = nil,
-         onObjectPlacement: (() -> Void)? = nil, toolbarHistory: PageToolbarHistory? = nil) {
+         onObjectPlacement: (() -> Void)? = nil, toolbarHistory: PageToolbarHistory? = nil,
+         zoomSession: PageZoomSession? = nil) {
         _text = text; _rtfData = rtfData; _strokes = strokes; _pencilKitData = pencilKitData
         _textBoxes = textBoxes; _equations = equations; _images = images; _diagrams = diagrams
         self.diagramKind = diagramKind; self.connectorRoute = connectorRoute; self.arrowHeads = arrowHeads
@@ -62,6 +64,7 @@ struct UnifiedPageEditor: NSViewRepresentable {
         self.onPageChange = onPageChange; self.onEquationEdit = onEquationEdit; self.onPageValidate = onPageValidate; self.onPageError = onPageError
         self.onObjectPlacement = onObjectPlacement
         self.toolbarHistory = toolbarHistory
+        self.zoomSession = zoomSession
     }
 
     func makeCoordinator() -> Coordinator { Coordinator(self) }
@@ -93,15 +96,20 @@ struct UnifiedPageEditor: NSViewRepresentable {
         page.selectionView.controller = context.coordinator.selection
         context.coordinator.richText.load(text: text, rtf: rtfData, into: page.textView)
         configure(page, coordinator: context.coordinator, isEnabled: context.environment.isEnabled)
-        scroll.fitPageWidth()
+        scroll.connectZoom(to: zoomSession)
         return scroll
     }
 
     func updateNSView(_ scroll: NSScrollView, context: Context) {
         guard let page = scroll.documentView as? UnifiedMacPageView else { return }
+        (scroll as? PageZoomScrollView)?.connectZoom(to: zoomSession)
         context.coordinator.parent = self
         context.coordinator.richText.parent = textEditor
         configure(page, coordinator: context.coordinator, isEnabled: context.environment.isEnabled)
+    }
+
+    static func dismantleNSView(_ scroll: NSScrollView, coordinator: Coordinator) {
+        (scroll as? PageZoomScrollView)?.connectZoom(to: nil)
     }
 
     private var textEditor: RichTextEditor {
@@ -271,11 +279,11 @@ enum PageZoomActions {
     }
 
     @discardableResult
-    static func fitWidth(in window: NSWindow? = NSApp.keyWindow) -> Bool {
+    static func fit(_ setting: PageZoomSetting, in window: NSWindow? = NSApp.keyWindow) -> Bool {
         guard let window, window.isKeyWindow, window.attachedSheet == nil, NSApp.modalWindow == nil,
               let content = window.contentView,
               let scroll = page(in: content)?.enclosingScrollView as? PageZoomScrollView else { return false }
-        scroll.fitPageWidth()
+        scroll.applyZoom(setting)
         return true
     }
 
@@ -286,30 +294,46 @@ enum PageZoomActions {
     }
 }
 
-/// Accept the unshifted equals key as the usual Zoom In alias as well as '+';
-/// ordinary text entry and modified shortcuts continue through AppKit.
+/// Owns native magnification and keeps fitted paper inside the visible editor.
 @MainActor
-final class PageZoomScrollView: NSScrollView {
-    private(set) var fitsPageWidth = true
-    private var applyingFitWidth = false
+final class PageZoomScrollView: NSScrollView, PageZoomViewport {
+    private(set) var zoomSetting: PageZoomSetting = .scale(1)
+    var fitsPageWidth: Bool { zoomSetting == .fitWidth }
+    private weak var zoomSession: PageZoomSession?
+    private var applyingZoom = false
     private var updatingNativeGeometry = false
+
+    func connectZoom(to session: PageZoomSession?) {
+        guard session !== zoomSession else { return }
+        zoomSession?.detach(self)
+        zoomSession = session
+        session?.attach(self)
+    }
 
     override var magnification: CGFloat {
         get { super.magnification }
         set {
-            if !applyingFitWidth && !updatingNativeGeometry { fitsPageWidth = false }
-            super.magnification = newValue
+            guard !applyingZoom && !updatingNativeGeometry else { super.magnification = newValue; return }
+            setManualZoom(newValue) { super.magnification = $0 }
         }
     }
 
     override func setMagnification(_ magnification: CGFloat, centeredAt point: NSPoint) {
-        if !applyingFitWidth && !updatingNativeGeometry { fitsPageWidth = false }
-        super.setMagnification(magnification, centeredAt: point)
+        guard !applyingZoom && !updatingNativeGeometry else {
+            super.setMagnification(magnification, centeredAt: point)
+            return
+        }
+        setManualZoom(magnification) { super.setMagnification($0, centeredAt: point) }
     }
 
     override func magnify(with event: NSEvent) {
-        fitsPageWidth = false
+        // Native gesture magnification can also update the clip view directly.
+        // Read the actual scale after AppKit handles each pinch event.
+        applyingZoom = true
+        if minMagnification != PageZoomSetting.manualRange.lowerBound { minMagnification = PageZoomSetting.manualRange.lowerBound }
         super.magnify(with: event)
+        applyingZoom = false
+        recordManualZoom()
     }
 
     override func viewDidMoveToWindow() {
@@ -322,7 +346,7 @@ final class PageZoomScrollView: NSScrollView {
         updatingNativeGeometry = true
         super.layout()
         updatingNativeGeometry = previous
-        applyFitWidth()
+        updateFittedZoom()
     }
 
     override func tile() {
@@ -330,31 +354,65 @@ final class PageZoomScrollView: NSScrollView {
         updatingNativeGeometry = true
         super.tile()
         updatingNativeGeometry = previous
-        applyFitWidth()
+        updateFittedZoom()
     }
 
-    func fitPageWidth() {
-        fitsPageWidth = true
-        applyFitWidth()
-        needsLayout = true
+    func applyZoom(_ setting: PageZoomSetting) {
+        guard setting.isValid else { return }
+        zoomSetting = setting
+        switch setting {
+        case .scale(let scale):
+            let visible = documentView?.visibleRect ?? .zero
+            setMagnification(scale, centeredAt: CGPoint(x: visible.midX, y: visible.midY))
+        case .fitWidth, .fitPage:
+            updateFittedZoom()
+            needsLayout = true
+        }
     }
 
-    private func applyFitWidth() {
-        guard fitsPageWidth, !applyingFitWidth, !updatingNativeGeometry,
-              window != nil, allowsMagnification, let document = documentView,
-              document.bounds.width.isFinite, document.bounds.width > 0 else { return }
-        // Clip bounds are expressed in magnified document coordinates. Convert
-        // only its unobscured rectangle back to the scroll view's native points;
-        // the backing view can be wider than the visible editor viewport.
-        let viewportWidth = contentView.convert(contentView.visibleRect, to: self).width
-        guard viewportWidth.isFinite, viewportWidth > 0 else { return }
-        let target = min(maxMagnification, max(minMagnification, viewportWidth / document.bounds.width))
-        guard abs(magnification - target) > 0.000001 else { return }
-        applyingFitWidth = true
-        defer { applyingFitWidth = false }
-        let center = NSPoint(x: document.visibleRect.midX, y: document.visibleRect.midY)
-        super.setMagnification(target, centeredAt: center)
-        (document as? UnifiedMacPageView)?.refreshToolCursor()
+    private func setManualZoom(_ value: CGFloat, perform: (CGFloat) -> Void) {
+        guard value.isFinite else { return }
+        applyingZoom = true
+        if minMagnification != PageZoomSetting.manualRange.lowerBound { minMagnification = PageZoomSetting.manualRange.lowerBound }
+        perform(min(maxMagnification, max(minMagnification, value)))
+        applyingZoom = false
+        recordManualZoom()
+    }
+
+    private func recordManualZoom() {
+        let actual = magnification
+        guard actual.isFinite else { return }
+        let range = PageZoomSetting.manualRange
+        // AppKit may briefly overshoot a limit during a trackpad gesture.
+        let bounded = min(range.upperBound, max(range.lowerBound, actual))
+        zoomSetting = .scale(bounded)
+        zoomSession?.report(zoomSetting, scale: bounded, from: self)
+        (documentView as? UnifiedMacPageView)?.refreshToolCursor()
+    }
+
+    func updateFittedZoom() {
+        guard zoomSetting == .fitWidth || zoomSetting == .fitPage,
+              !applyingZoom && !updatingNativeGeometry, window != nil, allowsMagnification,
+              let document = documentView, document.bounds.width > 0, document.bounds.height > 0 else { return }
+        applyingZoom = true
+        defer { applyingZoom = false }
+        // Native scrollers can disappear as the page shrinks. Account for both
+        // axes tiling before reporting the fitted percentage.
+        for _ in 0..<3 {
+            let viewport = contentView.convert(contentView.visibleRect, to: self)
+            let widthScale = viewport.width / document.bounds.width
+            let fitted = zoomSetting == .fitWidth ? widthScale : min(widthScale, viewport.height / document.bounds.height)
+            let target = min(maxMagnification, fitted)
+            guard target.isFinite, target > 0 else { return }
+            // Extended pages can need less than 25% to fit inside the viewport.
+            let minimum = min(PageZoomSetting.manualRange.lowerBound, target)
+            if minMagnification != minimum { minMagnification = minimum }
+            guard abs(magnification - target) > 0.000001 else { break }
+            let anchor = zoomSetting == .fitPage ? document.bounds : document.visibleRect
+            super.setMagnification(target, centeredAt: CGPoint(x: anchor.midX, y: anchor.midY))
+            (document as? UnifiedMacPageView)?.refreshToolCursor()
+        }
+        zoomSession?.report(zoomSetting, scale: magnification, from: self)
     }
 
     override func performKeyEquivalent(with event: NSEvent) -> Bool {
@@ -579,6 +637,7 @@ final class UnifiedMacPageView: NSView {
     @discardableResult
     func zoom(_ direction: PageZoomDirection) -> Bool {
         guard let scroll = enclosingScrollView, scroll.allowsMagnification else { return false }
+        if direction == .zoomOut && scroll.magnification < PageZoomSetting.manualRange.lowerBound { return true }
         let factor: CGFloat = direction == .zoomIn ? 1.2 : 1 / 1.2
         let target = min(scroll.maxMagnification, max(scroll.minMagnification, scroll.magnification * factor))
         let center = NSPoint(x: visibleRect.midX, y: visibleRect.midY)
@@ -638,7 +697,10 @@ final class UnifiedMacPageView: NSView {
         let finiteHeights = [textHeight, inkHeight, objectHeight, imageHeight, diagramHeight].filter(\.isFinite)
         let height = min(CGFloat(InkGeometryLimits.maximumPageDimension),
                          max(InkExport.paperSize.height, finiteHeights.max() ?? 0))
-        if abs(frame.height - height) > 1 { setFrameSize(NSSize(width: InkExport.paperSize.width, height: height)) }
+        if abs(frame.height - height) > 1 {
+            setFrameSize(NSSize(width: InkExport.paperSize.width, height: height))
+            (enclosingScrollView as? PageZoomScrollView)?.updateFittedZoom()
+        }
         positionLayers()
         enclosingScrollView?.contentView.scroll(to: enclosingScrollView?.contentView.bounds.origin ?? .zero)
     }
@@ -667,11 +729,14 @@ final class CenteredPageClipView: NSClipView {
     override func constrainBoundsRect(_ proposedBounds: NSRect) -> NSRect {
         var constrained = super.constrainBoundsRect(proposedBounds)
         guard let document = documentView else { return constrained }
+        let visible = visibleRect
         if document.frame.width < proposedBounds.width {
-            constrained.origin.x = document.frame.midX - proposedBounds.width / 2
+            let center = bounds.width > 0 && !visible.isEmpty ? (visible.midX - bounds.minX) / bounds.width : 0.5
+            constrained.origin.x = document.frame.midX - proposedBounds.width * center
         }
         if document.frame.height < proposedBounds.height {
-            constrained.origin.y = document.frame.midY - proposedBounds.height / 2
+            let center = bounds.height > 0 && !visible.isEmpty ? (visible.midY - bounds.minY) / bounds.height : 0.5
+            constrained.origin.y = document.frame.midY - proposedBounds.height * center
         }
         return constrained
     }

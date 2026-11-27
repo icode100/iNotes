@@ -1,5 +1,78 @@
 # Validation
 
+## Typed zoom and single-PDF workbook export — local QA, 27 November 2026
+
+The user tried isolated QA build 2, reported that it worked, and approved
+publication on 27 November 2026. The production release candidate is 1.5.0.
+
+The isolated ARM64 Mac app is QA build 2, `io.inotes.qa.workbookpdf.20261127`,
+with temporary notes and a disconnected updater. On macOS 27.2.1 this bundle
+passed 1,306 native editor checks (429 diagram), 31 equation, 9 shortcut,
+12 ruled-text, 2,241 workspace and 25 notebook PDF/ZIP checks, plus store,
+updater and backup integration. Its strict ad hoc signature passed verification.
+The executable SHA-256 is
+`b82ef1f5a6c7ff82f871be7bdfa748ee66fe4e18358ed9a71be51dca1d96a209`.
+
+The standalone core suite passed 144 tests. Export planning covers saved page
+order, empty workbooks and chapters, skipped Trash, and nested topics whose
+first note belongs to a descendant. The existing chapter/topic PDF and ZIP
+fixtures also ran against the extended export planner.
+
+The Mac export fixture writes `Compiler Design.pdf` and reopens it with PDFKit.
+Its nine pages comprise a cover, three numbered chapter dividers, and five
+notes. The fixture checks the bookmark destinations, searchable note text,
+room above the original note for the topic and subtopic headings, and the
+absence of a repeated heading on the next page. It cancels a second export
+after the cover and checks the previously saved PDF byte for byte.
+
+The exported fixture was rendered separately with Poppler. The cover and
+first divider showed the workbook and chapter titles. The first topic note
+retained its image, ink and diagram below the heading. On the nested note,
+“Top-down Parsing” appeared above “Predictive Parsing” and the original text
+started below both. PDFKit found both headings by name. PDFium and pdfminer
+extracted both in reading order. The pypdf plain-text extractor added spaces
+within the ancestor heading.
+
+The native footer fixture types `127.5%`, checks that the page holds its scale
+while typing, and commits with Return. It checks Escape, out-of-range input,
+and applying `75` when focus moves away. Both the footer and Notebook defaults
+use the same percentage field. In this checkout the iPad target’s 25 Swift
+sources passed DEBUG and release type-checking against the iOS 17 Mac Catalyst
+UIKit SDK. The iPad simulator SDK is unavailable on this host.
+
+## Per-page zoom and Full Page controls — local QA, 27 November 2026
+
+The isolated Mac app uses bundle ID `io.inotes.qa.pagezoom.20261127`, QA
+build 1, temporary notes and a disconnected updater. The standalone core
+suite passed all 142 tests with temporary-folder access. An earlier restricted
+run reported 25 fixture failures while creating temporary backup and storage
+files. The final QA executable's SHA-256 is
+`6fcb23472df1b6de78f4e49df56756d64ac546de67f4828cb7bb7eb6fb6d9203`.
+Its optimized ARM64 binary and strict ad hoc signature passed verification.
+The complete macOS 27.2.1 run passed 1,306 native editor checks (including
+429 diagram), 31 equation, 9 shortcut, 12 ruled-text, 2,232 workspace and
+13 notebook PDF/ZIP checks, plus store, updater and backup integration.
+
+The zoom fixtures use the native editor and the bottom page bar. They switch
+from a page at 118% to one at the factory 100%, select both fit modes, return
+to the first page, and reopen the temporary library. They also check a new
+150% default, migration of saved pen and paper preferences, and that the fit
+buttons show the selected mode. A separate AppKit fixture fitted a 20,080-point
+page at about 1.99% and checked centering in a clipped viewport.
+
+The window fixture inspects the enabled state, visibility and center hit
+target of each native Close, Minimize and Zoom button before, during and after
+windowed Full Page. The floating exit fixture exercises Full Page, native full
+screen and both together. It records the native toggle request on the owning
+test window and simulates the exit notification without switching macOS Spaces.
+The fixtures check the selected page, content, caret, undo manager and zoom.
+
+All 25 app sources in the iPad target type-checked in DEBUG and release
+configurations against Mac Catalyst UIKit and PencilKit for the iOS 17 target.
+The local Command Line Tools installation lacks the iPad simulator SDK.
+Physical trackpad, Pencil, iPad runtime and interactive macOS Space transitions
+remain manual checks.
+
 ## iNotes 1.4.2 / build 2024 published and verified — 26 November 2026
 
 [Native run 55](https://github.com/icode100/iNotes/actions/runs/45808324178)

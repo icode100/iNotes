@@ -12,6 +12,21 @@ extension EnvironmentValues {
     }
 }
 
+enum PageZoomSetting: Codable, Hashable {
+    case scale(Double)
+    case fitPage
+    case fitWidth
+
+    static let manualRange = 0.25...4.0
+
+    var isValid: Bool {
+        switch self {
+        case .scale(let scale): return scale.isFinite && Self.manualRange.contains(scale)
+        case .fitPage, .fitWidth: return true
+        }
+    }
+}
+
 struct NotebookDefaults: Codable, Equatable {
     static let preferenceKey = "notebook.creationDefaults.v1"
     static let writingTools: [InkTool] = [.pen, .pencil, .marker, .highlighter, .line, .diagram]
@@ -20,6 +35,23 @@ struct NotebookDefaults: Codable, Equatable {
     var paper = PaperStyle.dotted
     var template = PageTemplate.none
     var guideStyle = LinePattern.solid
+    var zoom = PageZoomSetting.scale(1)
+
+    init() {}
+
+    init(from decoder: Decoder) throws {
+        let values = try decoder.container(keyedBy: CodingKeys.self)
+        widths = try values.decode([String: Double].self, forKey: .widths)
+        colors = try values.decode([String: String].self, forKey: .colors)
+        paper = try values.decode(PaperStyle.self, forKey: .paper)
+        template = try values.decode(PageTemplate.self, forKey: .template)
+        guideStyle = try values.decode(LinePattern.self, forKey: .guideStyle)
+        // An older preference has no zoom field. Keep the user's pen and paper
+        // choices when upgrading or when a newer zoom option is unrecognized.
+        if let savedZoom = try? values.decode(PageZoomSetting.self, forKey: .zoom), savedZoom.isValid {
+            zoom = savedZoom
+        }
+    }
 
     func width(for tool: InkTool) -> Double {
         widths[tool.rawValue] ?? InkNibPreset.defaultWidth(for: tool)
@@ -36,7 +68,7 @@ struct NotebookDefaults: Codable, Equatable {
 
     var isValid: Bool {
         let keys = Set(Self.writingTools.map(\.rawValue))
-        return template.isSupported(on: paper)
+        return zoom.isValid && template.isSupported(on: paper)
             && widths.allSatisfy { keys.contains($0.key) && $0.value.isFinite && (0.5...InkGeometryLimits.maximumStrokeWidth).contains($0.value) }
             && colors.allSatisfy { entry in
                 let hex = entry.value.utf8
@@ -57,6 +89,8 @@ struct NotebookDefaultsView: View {
     @ObservedObject var store: NotesStore
     @ViewState private var draft: NotebookDefaults
     @ViewState private var tool = InkTool.pen
+    @ViewState private var zoomText: String?
+    @Environment(\.locale) private var locale
     @Environment(\.dismiss) private var dismiss
 
     init(store: NotesStore) {
@@ -128,16 +162,47 @@ struct NotebookDefaultsView: View {
                         ForEach(LinePattern.allCases, id: \.self) { Text($0.displayName).tag($0) }
                     }
                 }
+                Section("Pages without a saved zoom") {
+                    Picker("Default zoom", selection: Binding(get: {
+                        if case .scale = draft.zoom { return PageZoomSetting.scale(1) }
+                        return draft.zoom
+                    }, set: { selection in
+                        if case .scale = selection, case .scale = draft.zoom { return }
+                        zoomText = nil
+                        draft.zoom = selection
+                    })) {
+                        Text("Percentage").tag(PageZoomSetting.scale(1))
+                        Text("Fit Page").tag(PageZoomSetting.fitPage)
+                        Text("Fit Width").tag(PageZoomSetting.fitWidth)
+                    }
+                    if case .scale(let scale) = draft.zoom {
+                        HStack {
+                            Slider(value: Binding(get: { scale }, set: { zoomText = nil; draft.zoom = .scale($0) }),
+                                   in: PageZoomSetting.manualRange, step: 0.01) {
+                                Text("Default zoom percentage")
+                            }
+                            .labelsHidden()
+                            .accessibilityValue(ZoomPercentage.display(scale, locale: locale))
+                            ZoomPercentageField(scale: scale, draft: $zoomText, label: "Default zoom percentage",
+                                                id: "default-zoom-percentage", commit: { draft.zoom = .scale($0) })
+                        }
+                    }
+                }
             }.formStyle(.grouped)
             if !draft.isValid {
                 Text("Enter a width between \(InkNibPreset.millimeters(width: 0.5, tool: tool), format: .number.precision(.fractionLength(3))) and \(InkNibPreset.millimeters(width: 100, tool: tool), format: .number.precision(.fractionLength(3))) mm.")
                     .font(.caption).foregroundStyle(.secondary)
             }
             HStack {
-                Button("Restore defaults") { draft = NotebookDefaults() }
+                Button("Restore defaults") { zoomText = nil; draft = NotebookDefaults() }
                 Spacer()
                 Button("Cancel") { dismiss() }.keyboardShortcut(.cancelAction)
                 Button("Save") {
+                    // A click on Save can arrive before the field loses focus.
+                    if case .scale = draft.zoom, let zoomText,
+                       let scale = ZoomPercentage.scale(from: zoomText, locale: locale) {
+                        draft.zoom = .scale(scale)
+                    }
                     store.saveNotebookDefaults(draft)
                     dismiss()
                 }.keyboardShortcut(.defaultAction).disabled(!draft.isValid)
@@ -145,7 +210,8 @@ struct NotebookDefaultsView: View {
         }
         .padding(20)
         #if os(macOS)
-        .frame(width: 440, height: 555)
+        .frame(width: 440)
+        .frame(minHeight: 380, idealHeight: 625, maxHeight: 625)
         #endif
     }
 

@@ -12,11 +12,25 @@ public struct GroupedExportPlan: Equatable, Sendable {
         public let children: [Bookmark]
     }
 
+    public enum Page: Equatable, Sendable {
+        case cover(title: String)
+        case chapter(number: Int, title: String)
+        /// Each topic heading appears on its first active note page, which can
+        /// belong to a descendant when the topic has no direct pages.
+        case sheet(id: UUID, topicHeadings: [String])
+    }
+
     public struct Document: Equatable, Sendable {
         public let relativePath: [String]
         public let title: String
-        public let sheetIDs: [UUID]
+        public let pages: [Page]
         public let bookmarks: [Bookmark]
+        public var sheetIDs: [UUID] {
+            pages.compactMap { page in
+                guard case let .sheet(id, _) = page else { return nil }
+                return id
+            }
+        }
     }
 
     public let format: Format
@@ -25,14 +39,14 @@ public struct GroupedExportPlan: Equatable, Sendable {
     /// Includes empty active folders in a ZIP. No entry is an absolute path.
     public let directories: [[String]]
     public var sheetCount: Int { documents.reduce(0) { $0 + $1.sheetIDs.count } }
+    public var outputPageCount: Int { documents.reduce(0) { $0 + $1.pages.count } }
 
     public enum PlanningError: Error, LocalizedError, Equatable {
-        case notAFolder, noSheets, workbookRequiresZIP, invalidHierarchy
+        case notAFolder, noSheets, invalidHierarchy
         public var errorDescription: String? {
             switch self {
             case .notAFolder: return "Choose an active workbook, chapter, or topic to export."
             case .noSheets: return "This selection has no active pages to export."
-            case .workbookRequiresZIP: return "Export a workbook as a ZIP to retain its chapters and topics."
             case .invalidHierarchy: return "The notebook hierarchy could not be exported safely."
             }
         }
@@ -50,7 +64,6 @@ public struct GroupedExportPlan: Equatable, Sendable {
                   let parent = lookup[id], !parent.isTrashed else { throw PlanningError.invalidHierarchy }
             ancestor = parent.parentID
         }
-        guard root.kind != .workbook || format == .zip else { throw PlanningError.workbookRequiresZIP }
         var children: [UUID: [NoteNode]] = [:]
         for node in library.nodes where !node.isTrashed {
             guard node.createdAt.timeIntervalSince1970.isFinite else { throw PlanningError.invalidHierarchy }
@@ -71,23 +84,42 @@ public struct GroupedExportPlan: Equatable, Sendable {
         var documents: [Document] = [], directories: [[String]] = []
 
         if format == .pdf {
-            var sheetIDs: [UUID] = []
-            func collect(_ folder: NoteNode) -> Bookmark? {
-                let first = sheetIDs.count
+            let isWorkbook = root.kind == .workbook
+            var pages: [Page] = []
+            var chapterNumber = 0
+            func collect(_ folder: NoteNode, openingTopics: [String]) -> Bookmark? {
+                let first = pages.count
+                var headings = openingTopics
+                if isWorkbook {
+                    switch folder.kind {
+                    case .workbook:
+                        pages.append(.cover(title: folder.displayTitle))
+                    case .chapter:
+                        chapterNumber += 1
+                        pages.append(.chapter(number: chapterNumber, title: folder.displayTitle))
+                    case .topic:
+                        headings.append(folder.displayTitle)
+                    case .sheet: break
+                    }
+                }
                 var marks: [Bookmark] = []
                 for sheet in children[folder.id] ?? [] where sheet.kind == .sheet {
-                    marks.append(Bookmark(title: sheet.displayTitle, pageIndex: sheetIDs.count, children: []))
-                    sheetIDs.append(sheet.id)
+                    marks.append(Bookmark(title: sheet.displayTitle, pageIndex: pages.count, children: []))
+                    pages.append(.sheet(id: sheet.id, topicHeadings: headings))
+                    headings = []
                 }
                 for child in children[folder.id] ?? [] where child.kind.canContainChildren {
-                    if let mark = collect(child) { marks.append(mark) }
+                    if let mark = collect(child, openingTopics: headings) {
+                        marks.append(mark)
+                        headings = []
+                    }
                 }
-                guard sheetIDs.count > first else { return nil }
+                guard pages.count > first else { return nil }
                 return Bookmark(title: folder.displayTitle, pageIndex: first, children: marks)
             }
-            guard let outline = collect(root) else { throw PlanningError.noSheets }
+            guard let outline = collect(root, openingTopics: []) else { throw PlanningError.noSheets }
             documents = [Document(relativePath: [rootName + ".pdf"], title: root.displayTitle,
-                                  sheetIDs: sheetIDs, bookmarks: [outline])]
+                                  pages: pages, bookmarks: [outline])]
         } else {
             func collect(_ folder: NoteNode, path: [String]) {
                 directories.append(path)
@@ -96,7 +128,7 @@ public struct GroupedExportPlan: Equatable, Sendable {
                 if !sheets.isEmpty {
                     let marks = sheets.enumerated().map { Bookmark(title: $0.element.displayTitle, pageIndex: $0.offset, children: []) }
                     documents.append(Document(relativePath: path + [pdfName], title: folder.displayTitle,
-                        sheetIDs: sheets.map(\.id),
+                        pages: sheets.map { .sheet(id: $0.id, topicHeadings: []) },
                         bookmarks: [Bookmark(title: folder.displayTitle, pageIndex: 0, children: marks)]))
                 }
                 // A topic named "Chapter.pdf" can share a parent with its chapter PDF.

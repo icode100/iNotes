@@ -287,8 +287,9 @@ enum WorkspaceDiagnostics {
             .environment(\.workspaceDiagnosticControls, diagnosticControls)
             .preferredColorScheme(.light))
         let window = NSWindow(contentRect: NSRect(x: -6000, y: -6000, width: 1226, height: 800),
-                              styleMask: [.titled, .resizable], backing: .buffered, defer: false)
+                              styleMask: [.titled, .closable, .miniaturizable, .resizable], backing: .buffered, defer: false)
         window.isReleasedWhenClosed = false
+        window.toolbarStyle = .unified
         window.contentViewController = host
         window.makeKeyAndOrderFront(nil)
         window.setFrame(NSRect(x: -6000, y: -6000, width: 1226, height: 800), display: false)
@@ -367,6 +368,14 @@ enum WorkspaceDiagnostics {
         defaults.widths[InkTool.pen.rawValue] = InkNibPreset.storedWidth(millimeters: 0.93, tool: .pen)
         defaults.colors[InkTool.pen.rawValue] = "#3869B2"
         defaults.paper = .ruled; defaults.template = .leftMargin; defaults.guideStyle = .dashed
+        let legacyDefaults = Data("""
+            {"widths":{"pen":1.75},"colors":{"pen":"#3869B2"},"paper":"ruled","template":"leftMargin","guideStyle":"dashed"}
+            """.utf8)
+        let migrated = try JSONDecoder().decode(NotebookDefaults.self, from: legacyDefaults)
+        try check(migrated.zoom == .scale(1) && migrated.width(for: .pen) == 1.75 && migrated.colors == defaults.colors
+                  && migrated.paper == .ruled && migrated.template == .leftMargin && migrated.guideStyle == .dashed,
+                  "Pre-zoom preferences keep custom pens and paper and default to 100 percent")
+        defaults.zoom = .scale(0.73)
         let oldPage = store.selectedSheet
         store.saveNotebookDefaults(defaults)
         NotificationCenter.default.post(name: .noteToolShortcut, object: InkTool.pen)
@@ -378,7 +387,7 @@ enum WorkspaceDiagnostics {
         do {
             let defaultsDirectory = directory.appendingPathComponent("defaults-relaunch")
             let reopened = NotesStore(directory: defaultsDirectory, preferences: preferences)
-            try check(reopened.notebookDefaults == defaults, "Tool and paper defaults survive a new store instance")
+            try check(reopened.notebookDefaults == defaults, "Tool, paper and custom zoom defaults survive a new store instance")
             reopened.create(.sheet, parent: reopened.selectedSheet?.parentID)
             try check(reopened.selectedSheet?.paperStyle == .ruled && reopened.selectedSheet?.pageTemplate == .leftMargin
                       && reopened.selectedSheet?.templateLinePattern == .dashed && reopened.selectedSheet?.title.isEmpty == true,
@@ -387,6 +396,18 @@ enum WorkspaceDiagnostics {
             invalid.widths["pen"] = -1
             reopened.saveNotebookDefaults(invalid)
             try check(reopened.notebookDefaults == defaults, "Invalid nib widths cannot replace valid settings")
+            for invalidScale in [0.249, 4.001, Double.infinity, Double.nan] {
+                var invalidZoom = defaults
+                invalidZoom.zoom = .scale(invalidScale)
+                reopened.saveNotebookDefaults(invalidZoom)
+                try check(reopened.notebookDefaults == defaults, "A zoom outside the manual range cannot replace saved defaults")
+            }
+            for zoom in [PageZoomSetting.fitPage, .fitWidth] {
+                var fitted = defaults
+                fitted.zoom = zoom
+                reopened.saveNotebookDefaults(fitted)
+                try check(NotebookDefaults.load(from: preferences) == fitted, "Automatic zoom modes survive saving and reloading defaults")
+            }
             _ = reopened.prepareForQuit()
         }
         store.saveNotebookDefaults(NotebookDefaults())
@@ -846,11 +867,26 @@ enum WorkspaceDiagnostics {
             presentation.headingVisible = false
             presentation.sheetsVisible = false
         }
+        func checkWindowButtons(_ context: String) throws {
+            guard let frameView = window.contentView?.superview else { throw Failure(description: context + " missing window frame") }
+            for type: NSWindow.ButtonType in [.closeButton, .miniaturizeButton, .zoomButton] {
+                guard let button = window.standardWindowButton(type) else { throw Failure(description: context + " missing native button \(type.rawValue)") }
+                let center = CGPoint(x: button.bounds.midX, y: button.bounds.midY)
+                let hit = frameView.hitTest(button.convert(center, to: frameView.superview))
+                try check(button.window === window && button.isEnabled && button.action != nil
+                          && !button.isHiddenOrHasHiddenAncestor && button.visibleRect.contains(center)
+                          && (hit === button || hit?.isDescendant(of: button) == true),
+                          "\(context) exposes the enabled native window button \(type.rawValue) at its center")
+            }
+        }
+        try checkWindowButtons("Before Full Page")
         try navigatePassively("enter full page with hidden heading and sheets") { presentation.fullPage = true }
+        try checkWindowButtons("In windowed Full Page")
         try checkEditorSurvives("full page with independently hidden heading and sheets")
         try check(navigation.splitViewItems.dropLast().allSatisfy(\.isCollapsed),
                   "full page still collapses every native navigation pane")
         try navigatePassively("exit full page with hidden heading and sheets") { presentation.fullPage = false }
+        try checkWindowButtons("After leaving Full Page")
         try checkEditorSurvives("leaving full page with independently hidden chrome")
         try check(!presentation.headingVisible && !presentation.sheetsVisible
                   && sidebarItem.isCollapsed == sidebarWasCollapsed,
