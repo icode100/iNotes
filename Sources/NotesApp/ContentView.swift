@@ -260,7 +260,12 @@ struct ContentView: View {
                         .allowsHitTesting(false).accessibilityHidden(true)
                 }
             }
-            .overlay(alignment: .bottom) { bottomPageNavigation(zoom: zoom) }
+            .overlay(alignment: .bottom) {
+                bottomPageNavigation(zoom: zoom)
+                    #if os(macOS)
+                    .padding(.bottom, usesHoverNavigation ? presentation.pageScrollerClearance : 0)
+                    #endif
+            }
             #if os(macOS)
             .padding(.leading, navigationLeadingInset)
             .background {
@@ -280,6 +285,7 @@ struct ContentView: View {
                                           onHover: navigationHoverChanged)
                     .frame(maxWidth: .infinity)
                     .frame(height: Self.carouselHeight)
+                    .padding(.bottom, presentation.pageScrollerClearance)
             }
         }
         #else

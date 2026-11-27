@@ -63,10 +63,10 @@ enum GroupedPageExport {
                 let title = try autoreleasepool {
                     switch plannedPage {
                     case let .cover(title):
-                        try WorkbookPDFPage.drawTitle(title, chapterNumber: nil, into: context)
+                        try WorkbookPDFPage.drawTitle(title, chapterNumber: nil, theme: theme, into: context)
                         return title
                     case let .chapter(number, title):
-                        try WorkbookPDFPage.drawTitle(title, chapterNumber: number, into: context)
+                        try WorkbookPDFPage.drawTitle(title, chapterNumber: number, theme: theme, into: context)
                         return title
                     case let .sheet(id, topicHeadings):
                         guard let sheet = lookup[id], sheet.kind == .sheet, !sheet.isTrashed else {
@@ -126,7 +126,7 @@ enum GroupedPageExport {
               box.width <= InkGeometryLimits.maximumPageDimension,
               box.height <= InkGeometryLimits.maximumPageDimension else { throw ExportError.renderingFailed }
 
-        let header = try WorkbookPDFPage.TopicHeader(titles: topicHeadings, paperWidth: box.width)
+        let header = try WorkbookPDFPage.TopicHeader(titles: topicHeadings, paperWidth: box.width, theme: theme)
         var output = box
         output.size.height += header?.height ?? 0
         WorkbookPDFPage.begin(in: context, bounds: output)

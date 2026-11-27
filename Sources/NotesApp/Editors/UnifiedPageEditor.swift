@@ -308,6 +308,7 @@ final class PageZoomScrollView: NSScrollView, PageZoomViewport {
         zoomSession?.detach(self)
         zoomSession = session
         session?.attach(self)
+        reportHorizontalScrollerClearance()
     }
 
     override var magnification: CGFloat {
@@ -347,6 +348,7 @@ final class PageZoomScrollView: NSScrollView, PageZoomViewport {
         super.layout()
         updatingNativeGeometry = previous
         updateFittedZoom()
+        reportHorizontalScrollerClearance()
     }
 
     override func tile() {
@@ -355,6 +357,33 @@ final class PageZoomScrollView: NSScrollView, PageZoomViewport {
         super.tile()
         updatingNativeGeometry = previous
         updateFittedZoom()
+        reportHorizontalScrollerClearance()
+    }
+
+    override func reflectScrolledClipView(_ clipView: NSClipView) {
+        super.reflectScrolledClipView(clipView)
+        reportHorizontalScrollerClearance()
+    }
+
+    private func reportHorizontalScrollerClearance() {
+        guard let zoomSession, window != nil else { return }
+        var clearance: CGFloat = 0
+        if hasHorizontalScroller, let scroller = horizontalScroller, let document = documentView {
+            let viewport = contentView.convert(contentView.bounds, to: document)
+            if viewport.width > 0, document.bounds.width > viewport.width {
+                // An overlay scroller can fade or expand under the pointer. Keep
+                // its hit lane stable for the whole time the paper overflows.
+                clearance = NSScroller.scrollerWidth(for: scroller.controlSize, scrollerStyle: scrollerStyle)
+                if scroller.isDescendant(of: self) {
+                    let lane = convert(scroller.bounds, from: scroller).intersection(bounds)
+                    if !lane.isEmpty {
+                        let extent = isFlipped ? bounds.maxY - lane.minY : lane.maxY - bounds.minY
+                        clearance = max(clearance, extent)
+                    }
+                }
+            }
+        }
+        zoomSession.reportScrollerClearance(min(bounds.height, clearance), from: self)
     }
 
     func applyZoom(_ setting: PageZoomSetting) {

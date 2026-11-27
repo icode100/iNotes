@@ -291,11 +291,18 @@ enum FloatingToolbarDiagnostics {
         // Use the same content-bearing window, with its native Pen input owner and undo history.
         let handleID = "page-navigation-handle", pinID = "page-navigation-pin"
         let dotID = "page-carousel-\(pageID.uuidString)"
-        func hoverNavigation(_ type: NSEvent.EventType, bottomOffset: CGFloat, windowX: CGFloat? = nil) throws {
+        // Keep a persistent scrollbar in this disposable window even on hosts
+        // that fade their overlay scrollbars when no physical pointer is present.
+        scroll.scrollerStyle = .legacy
+        func hoverNavigation(_ type: NSEvent.EventType, bottomOffset: CGFloat = 0, windowX: CGFloat? = nil,
+                             at windowPoint: CGPoint? = nil) throws {
             let content = window.contentLayoutRect
-            let location = NSPoint(x: windowX ?? content.midX, y: content.minY + bottomOffset)
-            guard let tracker = find(PageNavigationHoverRegion.TrackingView.self, in: host.view),
-                  let event = NSEvent.enterExitEvent(with: type, location: location, modifierFlags: [],
+            guard let tracker = find(PageNavigationHoverRegion.TrackingView.self, in: host.view) else {
+                throw WorkspaceDiagnostics.Failure(description: "Missing the mounted page-navigation pointer tracker")
+            }
+            let bottom = tracker.convert(tracker.bounds, to: nil).minY
+            let location = windowPoint ?? NSPoint(x: windowX ?? content.midX, y: bottom + bottomOffset)
+            guard let event = NSEvent.enterExitEvent(with: type, location: location, modifierFlags: [],
                     timestamp: ProcessInfo.processInfo.systemUptime, windowNumber: window.windowNumber,
                     context: nil, eventNumber: 1, trackingNumber: 0, userData: nil) else {
                 throw WorkspaceDiagnostics.Failure(description: "Missing the mounted page-navigation pointer tracker")
@@ -308,13 +315,13 @@ enum FloatingToolbarDiagnostics {
                 }
                 func coversBottom(_ height: CGFloat) -> Bool {
                     rectangles.contains { rect in
-                        abs(rect.minY - content.minY) <= 1 && abs(rect.height - height) <= 1
-                            && rect.contains(NSPoint(x: content.minX + 24, y: content.minY + 3))
-                            && rect.contains(NSPoint(x: content.maxX - 24, y: content.minY + height - 3))
+                        abs(rect.minY - bottom) <= 1 && abs(rect.height - height) <= 1
+                            && rect.contains(NSPoint(x: content.minX + 24, y: bottom + 3))
+                            && rect.contains(NSPoint(x: content.maxX - 24, y: bottom + height - 3))
                     }
                 }
                 try check(coversBottom(16) && coversBottom(50)
-                          && rectangles.allSatisfy { !$0.contains(NSPoint(x: content.midX, y: content.minY + 135)) },
+                          && rectangles.allSatisfy { !$0.contains(NSPoint(x: content.midX, y: bottom + 135)) },
                           "registered AppKit areas cover the narrow edge and full footer across the window: \(rectangles)")
                 tracker.mouseEntered(with: event)
             } else {
@@ -377,6 +384,45 @@ enum FloatingToolbarDiagnostics {
             let hit = host.view.hitTest(host.view.convert(point, to: host.view.superview))
             return hit === page.inkView || hit?.isDescendant(of: page.inkView) == true
         }
+        func scrollbar(_ context: String) throws -> NSScroller {
+            guard let scroller = scroll.horizontalScroller, scroller.window === window,
+                  !scroller.isHiddenOrHasHiddenAncestor, scroller.knobProportion < 1,
+                  !scroller.rect(for: .knob).isEmpty else {
+                throw WorkspaceDiagnostics.Failure(description: "\(context) needs a horizontally overflowing page with a visible scrollbar")
+            }
+            return scroller
+        }
+        func knobCenter(_ scroller: NSScroller) -> CGPoint {
+            let knob = scroller.rect(for: .knob)
+            return scroller.convert(CGPoint(x: knob.midX, y: knob.midY), to: nil)
+        }
+        func checkScrollbarHit(_ scroller: NSScroller, _ windowPoint: CGPoint, _ context: String) throws {
+            let hit = host.view.hitTest(host.view.superview?.convert(windowPoint, from: nil) ?? windowPoint)
+            try check(hit === scroller || hit?.isDescendant(of: scroller) == true,
+                      "\(context) delivers a scrollbar click to AppKit at \(windowPoint), got \(String(describing: hit))")
+        }
+        func dragScrollbar(_ context: String) throws {
+            let scroller = try scrollbar(context)
+            let start = knobCenter(scroller)
+            try checkScrollbarHit(scroller, start, context)
+            let center = scroller.convert(CGPoint(x: scroller.bounds.midX, y: scroller.bounds.midY), to: nil)
+            try checkScrollbarHit(scroller, center, context)
+            let end = CGPoint(x: start.x + (scroller.doubleValue > 0.5 ? -36 : 36), y: start.y)
+            let before = scroll.documentVisibleRect.minX
+            func event(_ type: NSEvent.EventType, _ location: CGPoint) throws -> NSEvent {
+                guard let event = NSEvent.mouseEvent(with: type, location: location, modifierFlags: [],
+                    timestamp: ProcessInfo.processInfo.systemUptime, windowNumber: window.windowNumber,
+                    context: nil, eventNumber: 1, clickCount: 1, pressure: 1) else {
+                    throw WorkspaceDiagnostics.Failure(description: "Could not create scrollbar drag event")
+                }
+                return event
+            }
+            // AppKit's synchronous knob tracking consumes these window-local events.
+            NSApp.postEvent(try event(.leftMouseUp, end), atStart: true)
+            NSApp.postEvent(try event(.leftMouseDragged, end), atStart: true)
+            window.sendEvent(try event(.leftMouseDown, start))
+            try check(abs(scroll.documentVisibleRect.minX - before) > 1, "\(context) native knob drag pans the visible page")
+        }
         try check(defaults.object(forKey: "pageNavigationMode") == nil,
                   "the page-navigation fixture starts without a saved mode")
         for mode in ["windowed", "Full Page", "native full screen"] {
@@ -388,6 +434,12 @@ enum FloatingToolbarDiagnostics {
                 navigationSettled() && visible(handleID) && !visible("page-carousel") && !visible(reservationID)
             }
             let base = reference()
+            let scroller = try scrollbar(mode)
+            try hoverNavigation(.mouseEntered, at: knobCenter(scroller))
+            try wait("\(mode) approaching the scrollbar knob leaves the navigation handle collapsed") {
+                visible(handleID) && !visible(dotID)
+            }
+            try dragScrollbar("\(mode) collapsed")
             // First approach from underneath the visible notebook sidebar, then from the page.
             try hoverNavigation(.mouseEntered, bottomOffset: 46)
             try wait("\(mode) entering the upper tracking area alone leaves the page clear") { !visible(dotID) }
@@ -401,9 +453,11 @@ enum FloatingToolbarDiagnostics {
             let revealed = navigationViewport()
             try check(sameViewport(base.available(in: host.view.bounds), revealed),
                       "\(mode) revealing the footer preserves the available viewport: before=\(base) \(layoutContext())")
-            let bottomEdge = host.view.isFlipped ? revealed.maxY : revealed.minY
-            try check(abs((host.view.isFlipped ? bar.maxY : bar.minY) - bottomEdge) <= 2,
-                      "\(mode) anchors the revealed carousel at the bottom of the page viewport")
+            let scrollerInWindow = scroller.convert(scroller.bounds, to: nil)
+            let barInWindow = host.view.convert(bar, to: nil)
+            try check(barInWindow.minY >= scrollerInWindow.maxY - 1,
+                      "\(mode) keeps the revealed controls above the native scrollbar: bar=\(barInWindow) scroller=\(scrollerInWindow)")
+            try dragScrollbar("\(mode) revealed")
             let nearFooter = CGPoint(x: revealed.midX, y: host.view.isFlipped ? bar.minY - 6 : bar.maxY + 6)
             try check(pageTakesInk(at: nearFooter) && !pageTakesInk(at: CGPoint(x: pin.midX, y: pin.midY)),
                       "\(mode) routes ink immediately above the footer and reserves the pin for navigation")
@@ -446,6 +500,7 @@ enum FloatingToolbarDiagnostics {
             try check(pinFits(pinned, available: beforePin.available(in: host.view.bounds),
                               footer: pinnedBar, reservation: reservation, height: bar.height, flipped: host.view.isFlipped),
                       "\(mode) reserves exactly the pinned footer's height in the editor: before=\(beforePin) hoverBar=\(bar) \(layoutContext())")
+            try dragScrollbar("\(mode) pinned")
             try checkPage("\(mode) bottom navigation")
             try check(manager.canUndo && editor.string == seed + suffix,
                       "\(mode) revealing and pinning preserve the native edit and undo")

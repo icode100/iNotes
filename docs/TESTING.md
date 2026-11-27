@@ -1,5 +1,44 @@
 # Validation
 
+## Themed workbook PDF and page navigation — earlier isolated QA, 27 November 2026
+
+The user requested a same-version rebuild with the scrollbar and PDF changes.
+The following measurements cover the earlier isolated QA app, which also
+contained an EPUB export prototype withdrawn before publication.
+
+The standalone core suite passed 145 tests. The native export suite passed
+33 PDF/ZIP checks and 28 EPUB checks against disposable notebooks. It sampled
+paper and foreground colors on the workbook cover, chapter divider and topic
+heading in Ruby Hills (dark) and Pastel Mint. Poppler renders of both PDFs
+were also inspected visually.
+
+EPUBCheck 5.4.0 reported zero errors and zero warnings on the workbook,
+chapter and nested-topic EPUBs produced by the app. Native checks covered
+reading order, nested table of contents, packaged resources, escaped Unicode
+text, formatting, and cancellation with an existing destination. A WebKit
+preview of the extracted workbook showed the image, handwriting, diagram
+and formatted text. Apple Books import and physical iPad reading remain
+unverified.
+
+The shared iPad sources type-checked in debug and release against Mac Catalyst
+UIKit. The local host did not have the iPad simulator SDK.
+
+The native Mac fixture dragged the horizontal scrollbar knob and measured the
+change in the visible page's horizontal position with the footer collapsed,
+revealed and pinned. It repeated all three cases in a regular window, in
+Full Page and under window-scoped full-screen notifications. The fixture used
+window-local mouse events and a persistent native scrollbar. A separate
+offscreen check exercised both overlay and persistent scrollbar styles at
+35%, 100%, 220%, Fit Width and Fit Page. On this Mac, the reported clearance
+was 17 points during horizontal overflow and zero when the page fit.
+
+The isolated Apple silicon QA app (`io.inotes.qa.exportnavigation.20261127`)
+passed 1,306 editor checks, 31 equation checks, 12 ruled-text checks, 9
+shortcut checks and 2,274 workspace checks on macOS 27.2.1, followed by
+the store, backup and export suites. Its executable SHA-256 is
+`c2cf303073aa2f0b08a33633073923fb6a721eba285aef8aa33eaa66a87534d7`.
+These results apply to the local QA build.
+
 ## iNotes 1.5.0 / build 2026 published and verified — 27 November 2026
 
 The same-version rebuild uses source

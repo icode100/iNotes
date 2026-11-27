@@ -135,6 +135,11 @@ iPad simulator target. Signed release run 24 published the rebuild on the
 existing release. Independent public checks verified the DMG, checksum,
 signed feed and mounted app. The original `v1.5.0` tag identifies build 2025.
 
+The user authorized another **1.5.0** build on **27 November 2026** for themed
+workbook PDF title pages and scrollbar access with hover navigation. The
+earlier QA app also offered EPUB export. The user requested its removal
+before publication. Its validation record applies to that local app.
+
 ## Priorities
 
 - Version 1.5 starts pages at 100% unless the user chooses another
@@ -168,6 +173,10 @@ signed feed and mounted app. The original `v1.5.0` tag identifies build 2025.
   screen. Keep the window's explicit show/hide choice independent of its
   sidebar, heading and full-screen state. Keep Browse pages open during use
   and keep the first-page action reachable in an empty chapter or topic.
+  When the Mac page overflows horizontally, keep the hover handle, revealed
+  controls and pointer tracking area above the native scrollbar. The knob
+  must receive drags in both hover states and in pinned mode. An empty or
+  fitted page needs no scrollbar clearance.
 - Full Page (and macOS window full screen) can use a docked toolbar, a movable
   floating bubble, or the hover-reveal bubble. Docked is the initial choice.
   Keep the visibility toggle independent of the preferred layout. Store the
@@ -188,6 +197,8 @@ signed feed and mounted app. The original `v1.5.0` tag identifies build 2025.
   Reserve room above the original paper and retain its searchable text and
   drawing coordinates. Bookmark destinations, export progress and read-back
   page counts include generated pages. The ZIP retains folder PDFs.
+  Use the resolved export theme for cover and divider backgrounds, their
+  type, and the topic header band and rule.
 - Mac selected-shape fill changes only the selected shapes and tables in one
   validated, undoable edit. Keep the creation default independent. Resolve an
   attached arrow against the same live page snapshot as its moving or resizing

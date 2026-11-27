@@ -15,6 +15,7 @@ final class EditorPresentation: ObservableObject {
     var isFullScreenWorkspace: Bool { fullPage || nativeFullScreen }
     #if os(macOS)
     fileprivate weak var fullScreenObserver: FullScreenWindowObserver.Observer?
+    var pageScrollerClearance: CGFloat { currentZoom?.scrollerClearance ?? 0 }
     #endif
     @Published var toolsVisible = true
     // Visibility is window-local; the bottom bar's hover/pin preference is shared.
@@ -26,6 +27,12 @@ final class EditorPresentation: ObservableObject {
         if let currentZoom, currentZoom.pageID == pageID { return currentZoom }
         let session = store.makeZoomSession(for: pageID)
         currentZoom = session
+        #if os(macOS)
+        session.onScrollerClearanceChange = { [weak self, weak session] in
+            guard let self, let session, self.currentZoom === session else { return }
+            self.objectWillChange.send()
+        }
+        #endif
         return session
     }
 

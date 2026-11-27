@@ -113,7 +113,7 @@ enum NotebookExportDiagnostics {
         let workbookPlan = try GroupedExportPlan.make(library: library, rootID: book, format: .pdf)
         let workbookURL = temporary.appendingPathComponent(workbookPlan.suggestedFilename)
         var completedPages: [Int] = []
-        let workbookSummary = try await GroupedPageExport.write(plan: workbookPlan, library: library, to: workbookURL, progress: {
+        let workbookSummary = try await GroupedPageExport.write(plan: workbookPlan, library: library, to: workbookURL, theme: .rubyDark, progress: {
             completedPages.append($0.completedPages)
         })
         guard let workbookPDF = PDFDocument(url: workbookURL) else { throw GroupedPageExport.ExportError.renderingFailed }
@@ -157,6 +157,19 @@ enum NotebookExportDiagnostics {
                     && bookmark("Predictive Parsing", in: workbookMarks)?.destination?.page === firstSubtopicPage
                     && bookmark("Follow sets", in: workbookMarks)?.destination?.page === workbookPDF.page(at: 5),
                     "Workbook bookmarks must land on their cover, divider or original page")
+        let mintURL = temporary.appendingPathComponent("Pastel Mint.pdf")
+        _ = try await GroupedPageExport.write(plan: workbookPlan, library: library, to: mintURL, theme: .pastelMint)
+        guard let mintPDF = PDFDocument(url: mintURL) else { throw GroupedPageExport.ExportError.renderingFailed }
+        for (theme, document) in [(PageTheme.rubyDark, workbookPDF), (.pastelMint, mintPDF)] {
+            for (index, title) in [(0, "Compiler Design"), (1, "Syntax Analysis"), (3, "Parsing"), (4, "Predictive Parsing")] {
+                guard let page = document.page(at: index), let surface = page.pageRef,
+                      let text = document.findString(title, withOptions: []).first(where: { $0.pages.first === page }) else {
+                    throw GroupedPageExport.ExportError.renderingFailed
+                }
+                try require(hasPaperAndTextColors(theme, in: text.bounds(for: page), on: surface),
+                            "\(theme.rawValue) paper and text colors must appear around \(title)")
+            }
+        }
         let savedBook = try Data(contentsOf: workbookURL)
         var stopAfterCover = false
         do {
@@ -177,6 +190,31 @@ enum NotebookExportDiagnostics {
         try require(try Data(contentsOf: zipURL) == original, "Cancellation must preserve an existing destination")
         try require(try fm.contentsOfDirectory(atPath: temporary.path).sorted() == originalEntries, "Cancellation left staged files behind")
         return "\(checks) notebook PDF and ZIP checks passed"
+    }
+
+    /// Sample the actual PDF glyphs and surrounding paper, including inside topic bands.
+    private static func hasPaperAndTextColors(_ theme: PageTheme, in bounds: CGRect, on page: CGPDFPage) -> Bool {
+        let area = bounds.insetBy(dx: -4, dy: -4).integral
+        guard area.width > 0, area.height > 0 else { return false }
+        let width = min(512, Int(area.width)), height = min(128, Int(area.height))
+        guard let surface = CGContext(data: nil, width: width, height: height, bitsPerComponent: 8,
+                                      bytesPerRow: width * 4, space: CGColorSpace(name: CGColorSpace.sRGB)!,
+                                      bitmapInfo: CGImageAlphaInfo.premultipliedLast.rawValue | CGBitmapInfo.byteOrder32Big.rawValue),
+              let pixels = surface.data?.assumingMemoryBound(to: UInt8.self) else { return false }
+        surface.scaleBy(x: CGFloat(width) / area.width, y: CGFloat(height) / area.height)
+        surface.translateBy(x: -area.minX, y: -area.minY)
+        surface.drawPDFPage(page)
+        func contains(_ hex: String) -> Bool {
+            let color = InkRenderer.color(hex).usingColorSpace(.sRGB)!
+            let red = Int((color.redComponent * 255).rounded())
+            let green = Int((color.greenComponent * 255).rounded())
+            let blue = Int((color.blueComponent * 255).rounded())
+            return stride(from: 0, to: width * height * 4, by: 4).contains { i in
+                pixels[i + 3] == 255 && abs(Int(pixels[i]) - red) <= 3
+                    && abs(Int(pixels[i + 1]) - green) <= 3 && abs(Int(pixels[i + 2]) - blue) <= 3
+            }
+        }
+        return contains(theme.paperHex) && contains(theme.textHex)
     }
 }
 #endif

@@ -48,9 +48,11 @@ The build script validates the property list, architecture, app signature, and D
 before publishing outputs. The verification script mounts it read-only and checks
 the packaged app and Applications shortcut.
 
-The packaging defaults are **v1.5.0 / build 2026**. The release workflow
-gives the public rebuild a build-specific filename so the original build 2025
-installer keeps its address. Rebuild source is
+The packaging defaults are **v1.5.0 / build 2027**. The release workflow
+gives each same-version rebuild a build-specific filename so earlier
+installers keep their addresses.
+
+Build 2026, the zoom slider rebuild, used source
 `dbc5704e008dd051484076c34565157bb10d56cc`. Native run 59 passed the
 Mac checks and compiled the iPad simulator target. Signed release run 24
 published the rebuild, and its public DMG passed checksum, Ed25519 and

@@ -159,6 +159,18 @@ final class PageZoomSession: ObservableObject {
     private let remember: (PageZoomSetting) -> Void
     private weak var viewport: PageZoomViewport?
     private var refreshPending = false
+    #if os(macOS)
+    var onScrollerClearanceChange: (() -> Void)?
+    private(set) var scrollerClearance: CGFloat = 0
+    private var scrollerClearanceChanged = false
+
+    func reportScrollerClearance(_ height: CGFloat, from viewport: PageZoomViewport) {
+        guard self.viewport === viewport, height != scrollerClearance else { return }
+        scrollerClearance = height
+        scrollerClearanceChanged = true
+        refreshControls()
+    }
+    #endif
 
     init(pageID: UUID, setting: PageZoomSetting, remember: @escaping (PageZoomSetting) -> Void) {
         self.pageID = pageID
@@ -202,6 +214,12 @@ final class PageZoomSession: ObservableObject {
         DispatchQueue.main.async { [weak self] in
             guard let self else { return }
             self.refreshPending = false
+            #if os(macOS)
+            if self.scrollerClearanceChanged {
+                self.scrollerClearanceChanged = false
+                self.onScrollerClearanceChange?()
+            }
+            #endif
             self.objectWillChange.send()
         }
     }

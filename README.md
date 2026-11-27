@@ -87,6 +87,9 @@ page browser and **+** button. Click the pin on the bar to keep it in view, or
 choose **Appearance → Page navigation → Pin to bottom**. Choose **Show on
 hover** to return to the edge handle. The same setting applies in a regular
 window, in Full Page and in macOS full screen. With touch, tap the handle.
+In build 2027, the handle sits just above the horizontal scrollbar when the
+page is wider than the Mac editor. Drag the scrollbar to pan the page, or
+move up to the handle to reveal navigation.
 
 ### Per-page zoom
 
@@ -106,6 +109,9 @@ single PDF…**, then choose where to save it. The PDF opens with the workbook
 title, followed by a numbered divider for each chapter. Each topic and subtopic
 gets a heading above its first note. PDF bookmarks follow the notebook hierarchy.
 Choose **Export workbook as PDF bundle (ZIP)…** to save the separate folder PDFs.
+
+In build 2027, the PDF cover, chapter dividers and topic headings use the
+paper and text colors selected in iNotes when you export.
 
 ### Full Page window controls
 
@@ -174,7 +180,7 @@ Requires an Apple silicon Mac and macOS 14+. Building the installer requires ful
 open dist/iNotes.app
 ```
 
-The public installer and packaging defaults use version 1.5.0, build 2026. The original [build 2025 installer](https://github.com/icode100/iNotes/releases/download/v1.5.0/iNotes-1.5.0-arm64.dmg) is also available. Unpublished versions 1.2.0/build 2018, 1.2.1/build 2019 and 1.4.1/build 2023 stay reserved. Downloaded public builds use ad hoc signing without Apple notarization, so macOS may report that Apple could not verify iNotes is free of malware.
+The packaging defaults use version 1.5.0, build 2027. Earlier installers are available for [build 2026](https://github.com/icode100/iNotes/releases/download/v1.5.0/iNotes-1.5.0-build2026-arm64.dmg) and [build 2025](https://github.com/icode100/iNotes/releases/download/v1.5.0/iNotes-1.5.0-arm64.dmg). Unpublished versions 1.2.0/build 2018, 1.2.1/build 2019 and 1.4.1/build 2023 stay reserved. Downloaded public builds use ad hoc signing without Apple notarization, so macOS may report that Apple could not verify iNotes is free of malware.
 
 If you trust the download from the [official releases](https://github.com/icode100/iNotes/releases), follow Apple's [per-app first-open procedure](https://support.apple.com/en-us/102445):
 

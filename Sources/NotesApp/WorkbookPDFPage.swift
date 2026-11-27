@@ -13,28 +13,29 @@ enum WorkbookPDFPage {
         context.beginPDFPage([kCGPDFContextMediaBox as String: data] as CFDictionary)
     }
 
-    static func drawTitle(_ title: String, chapterNumber: Int?, into context: CGContext) throws {
+    static func drawTitle(_ title: String, chapterNumber: Int?, theme: PageTheme, into context: CGContext) throws {
         let box = CGRect(origin: .zero, size: InkExport.paperSize)
         let inset = box.width * 0.09
         let width = box.width - 2 * inset
+        let ink = InkRenderer.color(theme.textHex)
         let chapter = try chapterNumber.map {
             try TextBlock("Chapter \($0)", font: .systemFont(ofSize: 40, weight: .medium),
-                          gray: 0.32, width: width)
+                          color: ink.withAlphaComponent(0.8), width: width)
         }
         let labelHeight = chapter.map { $0.height + 26 } ?? 0
         var size: CGFloat = 112
-        var name = try TextBlock(title, font: serif(size), gray: 0.12, width: width)
+        var name = try TextBlock(title, font: serif(size), color: ink, width: width)
         // A valid title can be 256 full-width characters or one long word.
         // Wrap it first, then reduce type just enough to fit the title page.
         while name.height + labelHeight > box.height * 0.75 && size > 32 {
             size = max(32, size * 0.85)
-            name = try TextBlock(title, font: serif(size), gray: 0.12, width: width)
+            name = try TextBlock(title, font: serif(size), color: ink, width: width)
         }
         let groupHeight = name.height + labelHeight
         guard groupHeight <= box.height * 0.9 else { throw GroupedPageExport.ExportError.renderingFailed }
         let top = box.maxY - (box.height - groupHeight) * 0.40
         begin(in: context, bounds: box)
-        context.setFillColor(gray: 1, alpha: 1)
+        context.setFillColor(InkRenderer.color(theme.paperHex).cgColor)
         context.fill(box)
         chapter?.draw(x: inset, top: top, into: context)
         name.draw(x: inset, top: top - labelHeight, into: context)
@@ -45,21 +46,24 @@ enum WorkbookPDFPage {
         private let ancestors: TextBlock?
         private let topic: TextBlock
         private let inset: CGFloat
+        private let theme: PageTheme
         let height: CGFloat
 
-        init?(titles: [String], paperWidth: CGFloat) throws {
+        init?(titles: [String], paperWidth: CGFloat, theme: PageTheme) throws {
             guard let current = titles.last else { return nil }
+            self.theme = theme
+            let ink = InkRenderer.color(theme.textHex)
             inset = paperWidth * 0.035
             let textWidth = paperWidth - 2 * inset
             // When a topic has no direct pages, its title shares its first
             // descendant's header. Subsequent pages do not repeat that chain.
             if titles.count > 1 {
                 ancestors = try TextBlock(titles.dropLast().joined(separator: "  ›  "),
-                    font: .systemFont(ofSize: 28, weight: .medium), gray: 0.34, width: textWidth)
+                    font: .systemFont(ofSize: 28, weight: .medium), color: ink.withAlphaComponent(0.8), width: textWidth)
             } else {
                 ancestors = nil
             }
-            topic = try TextBlock(current, font: WorkbookPDFPage.serif(50), gray: 0.12, width: textWidth)
+            topic = try TextBlock(current, font: WorkbookPDFPage.serif(50), color: ink, width: textWidth)
             height = 30 + (ancestors.map { $0.height + 9 } ?? 0) + topic.height + 22
             guard height.isFinite, height <= InkGeometryLimits.maximumPageDimension else {
                 throw GroupedPageExport.ExportError.renderingFailed
@@ -68,13 +72,13 @@ enum WorkbookPDFPage {
 
         func draw(above paper: CGRect, into context: CGContext) {
             let band = CGRect(x: paper.minX, y: paper.maxY, width: paper.width, height: height)
-            context.setFillColor(gray: 1, alpha: 1)
+            context.setFillColor(InkRenderer.color(theme.paperHex).cgColor)
             context.fill(band)
             let x = band.minX + inset
             let top = band.maxY - 30
             ancestors?.draw(x: x, top: top, into: context)
             topic.draw(x: x, top: top - (ancestors.map { $0.height + 9 } ?? 0), into: context)
-            context.setFillColor(gray: 0.76, alpha: 1)
+            context.setFillColor(InkRenderer.color(theme.ruleHex).cgColor)
             context.fill(CGRect(x: x, y: band.minY, width: band.width - 2 * inset, height: 1))
         }
     }
@@ -91,10 +95,10 @@ enum WorkbookPDFPage {
         let frame: CTFrame
         let height: CGFloat
 
-        init(_ title: String, font: NSFont, gray: CGFloat, width: CGFloat) throws {
+        init(_ title: String, font: NSFont, color: NSColor, width: CGFloat) throws {
             let text = title.split(whereSeparator: \.isWhitespace).joined(separator: " ")
             let attributed = NSAttributedString(string: text, attributes: [
-                .font: font, .foregroundColor: NSColor(deviceWhite: gray, alpha: 1)
+                .font: font, .foregroundColor: color
             ])
             let setter = CTFramesetterCreateWithAttributedString(attributed)
             let range = CFRange(location: 0, length: attributed.length)
