@@ -1,13 +1,11 @@
 # iNotes
 
-**iNotes 1.5.0, build 2026** removes the white line below the zoom sliders in
-the bottom page bar and **Notebook defaults**. Drag in whole percentages or
-type a value such as 87.5%. Each page remembers its zoom, including
-**Fit Page** and **Fit Width**. On Mac you can
-export an entire workbook as one bookmarked PDF with a cover, chapter dividers
-and topic headings. The floating toolbar also has a direct **Exit Full Page**
-button, and the window controls stay visible in windowed Full Page.
-[Download the Apple silicon Mac installer](https://github.com/icode100/iNotes/releases/download/v1.5.0/iNotes-1.5.0-build2026-arm64.dmg)
+**iNotes 1.5.0, build 2027** keeps page numbers aligned in long topics.
+Use the chevrons to move between groups of pages, or click **−** and **+**
+beside the zoom slider to change the scale. When navigation appears on hover,
+the Mac editor's horizontal scrollbar stays available. Workbook PDF covers,
+chapter dividers and topic headings use your selected paper and text colors.
+[Download the Apple silicon Mac installer](https://github.com/icode100/iNotes/releases/download/v1.5.0/iNotes-1.5.0-build2027-arm64.dmg)
 or [read the release notes](https://github.com/icode100/iNotes/releases/tag/v1.5.0).
 
 **iNotes 1.4.2, build 2024**, introduced hover and pinned modes for the page
@@ -102,7 +100,7 @@ a percentage from **25% to 400%** and press Return. Choose **Fit Page** to see
 the entire page or **Fit Width** to fill the available width. In a narrow window, click the percentage to open
 the controls. Fitting adapts as the viewport changes.
 
-In the development build, click **−** or **+** beside the slider to zoom one
+Click **−** or **+** beside the slider to zoom one
 step. From 100%, **+** takes you to 120% and **−** takes you back to 100%.
 The same buttons are available in Notebook defaults.
 
@@ -188,7 +186,7 @@ Requires an Apple silicon Mac and macOS 14+. Building the installer requires ful
 open dist/iNotes.app
 ```
 
-The packaging defaults use version 1.5.0, build 2027. Earlier installers are available for [build 2026](https://github.com/icode100/iNotes/releases/download/v1.5.0/iNotes-1.5.0-build2026-arm64.dmg) and [build 2025](https://github.com/icode100/iNotes/releases/download/v1.5.0/iNotes-1.5.0-arm64.dmg). Unpublished versions 1.2.0/build 2018, 1.2.1/build 2019 and 1.4.1/build 2023 stay reserved. Downloaded public builds use ad hoc signing without Apple notarization, so macOS may report that Apple could not verify iNotes is free of malware.
+The public installer and packaging defaults use version 1.5.0, build 2027. Earlier installers are available for [build 2026](https://github.com/icode100/iNotes/releases/download/v1.5.0/iNotes-1.5.0-build2026-arm64.dmg) and [build 2025](https://github.com/icode100/iNotes/releases/download/v1.5.0/iNotes-1.5.0-arm64.dmg). Unpublished versions 1.2.0/build 2018, 1.2.1/build 2019 and 1.4.1/build 2023 stay reserved. Downloaded public builds use ad hoc signing without Apple notarization, so macOS may report that Apple could not verify iNotes is free of malware.
 
 If you trust the download from the [official releases](https://github.com/icode100/iNotes/releases), follow Apple's [per-app first-open procedure](https://support.apple.com/en-us/102445):
 

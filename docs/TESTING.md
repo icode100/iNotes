@@ -1,5 +1,40 @@
 # Validation
 
+## iNotes 1.5.0 / build 2027 published and verified — 27 November 2026
+
+The user approved publishing the isolated Page Strip QA changes as another
+build of 1.5.0. The release source is
+`af0e168d6af21cfc692ff3aa626924b08858cea3`. Native run 63 compiled
+the iPad simulator target and passed 144 core tests, 1,304 Mac editor checks (429 diagram), 31 equation,
+9 shortcut, 12 ruled-text, 2,323 workspace and 33 PDF/ZIP checks.
+[Native run 63](https://github.com/icode100/iNotes/actions/runs/46026018264)
+
+Signed release run 25 repeated the core and Mac suites with the same counts.
+It published the build 2027 DMG, checksum and signed Sparkle feed on the
+existing 1.5.0 release. Independent downloads confirmed that both earlier
+installers and their checksum files retained their GitHub asset IDs and
+digests. The original annotated tag still points to build 2025 at
+`795513689e7d759a56dc141ddbdd87368461bdab`.
+[Signed release run 25](https://github.com/icode100/iNotes/actions/runs/46028849332) ·
+[GitHub release](https://github.com/icode100/iNotes/releases/tag/v1.5.0)
+
+| Build 2027 public asset | Bytes | SHA-256 |
+| --- | ---: | --- |
+| Apple silicon DMG | 35,984,283 | `ffbb2346bf8dc4e82683201fca41634e897faddad5e2f638760d27a3baaf61fe` |
+| DMG checksum file | 99 | `d3246b90d3ed3038d8c54c92cd9ea9341832328b8fc85a0fdec9437906472dd5` |
+| Signed Sparkle feed | 1,278 | `b8956428b947bb1d7e0032ea60464240ac4964bdb44d4b4294615a1bddd8b9c1` |
+
+The installer matched the public checksum. The versioned and latest feeds
+matched each other and advertised the build 2027 DMG. Independent Ed25519
+checks verified the feed and installer and rejected four tampering probes.
+The read-only mounted ARM64 app passed the smoke test and all 33 PDF/ZIP
+checks with disposable notes. The executable contained the workbook PDF and
+ZIP menu labels. The check for withdrawn EPUB menu and renderer markers
+found none. Its ad hoc signed `io.inotes.app` bundle
+contained 106 regular files totaling 46,370,283 bytes. The
+11,403,264-byte executable had SHA-256
+`5ad04c50ef1fe514c7ea04de54483a4faa13a9f3496dd9cf5999e4025d1b7936`.
+
 ## Build 2027 candidate — hosted Native run 62
 
 Native run 62 tested `5db5c27a38de9fb95b7fedcc34ecc7578548a209`.
@@ -17,6 +52,18 @@ with passive probes. It sends mouse-down and mouse-up to its own window and
 checks the resulting zoom, enabled limits and selected page. The probes are
 present only in the fixture environment. The local accessibility checks below
 remain separate evidence.
+
+## Build 2027 corrected fixture — local Full Page observations
+
+On the release source, the mounted zoom and page-group mouse checks passed.
+The full local suite later reached its five-second deadline on Full Page exit
+generation 9. One native completion was pending, the navigation owner was
+stable, and the measured viewport was 16.5 points wider than its prior
+completed width. A fresh run of the same source and a fresh run of the
+previously approved Zoom Buttons QA app both stopped while waiting for the
+initial Docked Full Page transition to reach quiescence. These runs did not
+complete the local suite. The earlier isolated Page Strip QA app passed the
+full local suite on its original source as recorded below.
 
 ## Long-topic page navigation — local development QA, 27 November 2026
 

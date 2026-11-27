@@ -135,12 +135,15 @@ iPad simulator target. Signed release run 24 published the rebuild on the
 existing release. Independent public checks verified the DMG, checksum,
 signed feed and mounted app. The original `v1.5.0` tag identifies build 2025.
 
-The **1.5.0** rebuild in development includes themed workbook PDF title pages
-and scrollbar access with hover navigation. The earlier QA app also offered
-EPUB export, which the user withdrew. On **27 November 2026** the user paused
-publication and requested zoom buttons beside the slider. After testing the
-adaptive navigation in the Page Strip QA app, the user approved publishing
-these changes together as another build of version 1.5.0.
+The user approved **v1.5.0 / build 2027** after testing the isolated Page
+Strip QA app on **27 November 2026**. Source
+`af0e168d6af21cfc692ff3aa626924b08858cea3` adds adaptive page navigation,
+zoom step buttons, scrollbar access with hover navigation and themed workbook
+PDF title pages. The user withdrew the EPUB prototype before publication.
+Native run 63 passed the Mac checks and compiled the iPad simulator app.
+Signed release run 25 published the rebuild. Independent public downloads
+passed checksum, Ed25519, mounted app and PDF/ZIP checks. See `docs/TESTING.md`
+for the separate local, hosted and public verification results.
 
 ## Priorities
 
@@ -668,7 +671,8 @@ approving the source push for isolated 1.4.1 QA build 1. Signed release run 21
 then failed the pinned footer viewport-height check before publication.
 Reserve tag v1.4.1 and build 2023. Run 22 published v1.4.2/build 2024 from
 `f21afe8d`. Run 23 published v1.5.0/build 2025 from `79551368`. Run 24
-published the same-version rebuild 2026 from `dbc5704e`.
+published the same-version rebuild 2026 from `dbc5704e`. Run 25 published
+build 2027 from `af0e168d`.
 Preserve original installers and tag reservations, including the failed
 1.2.0/1.2.1 reservations.
 Initial v1.2.0 user QA and publication authorization were recorded on
@@ -676,7 +680,7 @@ Initial v1.2.0 user QA and publication authorization were recorded on
 later-source or public-build results. The v1.1.0 local QA identities use separate
 QA builds 1 and 2 (final Pen correction). The 1.3 QA apps use separate identities
 and temporary libraries, QA builds 1 and 2, with no updater. The next new
-signed-release run (25) should produce build 2027. Recheck the feed and counter before publishing.
+signed-release run (26) should produce build 2028. Recheck the feed and counter before publishing.
 A workflow rerun does not
 advance `GITHUB_RUN_NUMBER`. Never reuse its build number for an updated binary.
 The release workflow supports an explicit `workflow_dispatch` for the current

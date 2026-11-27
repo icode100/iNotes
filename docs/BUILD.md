@@ -52,6 +52,14 @@ The packaging defaults are **v1.5.0 / build 2027**. The release workflow
 gives each same-version rebuild a build-specific filename so earlier
 installers keep their addresses.
 
+Build 2027 was published from `af0e168d6af21cfc692ff3aa626924b08858cea3`.
+Native run 63 compiled the iPad simulator app and verified the Mac build.
+Signed release run 25 published the ARM64 installer. Independent downloads
+passed checksum, Ed25519, mounted app and PDF/ZIP checks.
+[Download build 2027](https://github.com/icode100/iNotes/releases/download/v1.5.0/iNotes-1.5.0-build2027-arm64.dmg) ·
+[Native run 63](https://github.com/icode100/iNotes/actions/runs/46026018264) ·
+[Signed release run 25](https://github.com/icode100/iNotes/actions/runs/46028849332)
+
 Build 2026, the zoom slider rebuild, used source
 `dbc5704e008dd051484076c34565157bb10d56cc`. Native run 59 passed the
 Mac checks and compiled the iPad simulator target. Signed release run 24
@@ -161,8 +169,8 @@ The release workflow uses `2002 + GITHUB_RUN_NUMBER`: run 12 built 2014 but fail
 before publishing; runs 13/14/15 published 2015/2016/2017. Runs 16 and 17 built
 2018 and 2019 but failed before publication; run 18 published 2020 and run 19
 published 2021. Run 20 published 2022. Run 21 reserved 2023 before publication. Run 22
-published 2024, and run 23 published 2025. Run 24 published build 2026. The next
-new run, 25, should produce **2027**. Recheck the public feed and workflow counter before tagging. A rerun does not
+published 2024, and run 23 published 2025. Run 24 published build 2026 and run 25 published build 2027.
+The next new run, 26, should produce **2028**. Recheck the public feed and workflow counter before tagging. A rerun does not
 increase its build number. The local v1.1.0 QA apps use separate
 identities, QA builds 1 and 2, temporary libraries and
 disconnected updaters. User QA passed the initial candidate; the final Pen-only
