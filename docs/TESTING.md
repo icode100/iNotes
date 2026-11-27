@@ -1,5 +1,23 @@
 # Validation
 
+## Build 2027 candidate — hosted Native run 62
+
+Native run 62 tested `5db5c27a38de9fb95b7fedcc34ecc7578548a209`.
+The Apple silicon app built and 144 core tests, 1,304 editor checks, 31
+equation checks, 9 shortcut checks and 12 ruled-text checks passed. The
+workspace test stopped when it could not find the zoom controls by walking
+the offscreen window's accessibility tree. No zoom button was pressed at
+that point. Installer verification, iPad compilation and publication were
+not reached. The earlier local Page Strip QA app and its accessibility
+measurements are recorded separately below.
+[Native run 62](https://github.com/icode100/iNotes/actions/runs/46023328745)
+
+The follow-up fixture measures the mounted zoom controls and page-group arrows
+with passive probes. It sends mouse-down and mouse-up to its own window and
+checks the resulting zoom, enabled limits and selected page. The probes are
+present only in the fixture environment. The local accessibility checks below
+remain separate evidence.
+
 ## Long-topic page navigation — local development QA, 27 November 2026
 
 At 720 points wide with page 20 of 128 selected, the previous Mac footer

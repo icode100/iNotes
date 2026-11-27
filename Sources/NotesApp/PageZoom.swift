@@ -72,6 +72,9 @@ struct PageZoomSlider: View {
     var onEditingChanged: (Bool) -> Void = { _ in }
     @Environment(\.locale) private var locale
     @Environment(\.layoutDirection) private var layoutDirection
+    #if os(macOS)
+    @Environment(\.workspaceDiagnosticControls) private var diagnosticControls
+    #endif
 
     var body: some View {
         HStack(spacing: Self.spacing) {
@@ -84,6 +87,8 @@ struct PageZoomSlider: View {
     private func stepButton(_ direction: PageZoomDirection) -> some View {
         let increasing = direction == .zoomIn
         let title: LocalizedStringKey = increasing ? "Zoom in" : "Zoom out"
+        let identifier = id + (increasing ? "-in" : "-out")
+        let enabled = direction.nextScale(from: scale) != nil
         return Button {
             if let next = direction.nextScale(from: scale) { scale = next }
         } label: {
@@ -92,10 +97,17 @@ struct PageZoomSlider: View {
                 .contentShape(Rectangle())
         }
         .buttonStyle(.plain)
-        .disabled(direction.nextScale(from: scale) == nil)
+        .disabled(!enabled)
         .help(Text(title))
         .accessibilityLabel(Text(title))
-        .accessibilityIdentifier(id + (increasing ? "-in" : "-out"))
+        .accessibilityIdentifier(identifier)
+        #if os(macOS)
+        .background {
+            if let diagnosticControls {
+                WorkspaceDiagnosticControlProbe(controls: diagnosticControls, identifier: identifier, enabled: enabled)
+            }
+        }
+        #endif
     }
 
     private var track: some View {
@@ -119,6 +131,13 @@ struct PageZoomSlider: View {
                 adjust(increasing: (press.key == .rightArrow) == (layoutDirection == .leftToRight))
                 return .handled
             }
+            #if os(macOS)
+            .background {
+                if let diagnosticControls {
+                    WorkspaceDiagnosticControlProbe(controls: diagnosticControls, identifier: id + "-slider")
+                }
+            }
+            #endif
     }
 
     private func clamped(_ value: Double) -> Double {

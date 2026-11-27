@@ -773,6 +773,7 @@ struct ContentView: View {
 
     private func pageRangeButton(forward: Bool, destination: NoteNode?) -> some View {
         let label = forward ? "Next group of pages" : "Previous group of pages"
+        let identifier = forward ? "page-range-next" : "page-range-previous"
         return Button {
             if let destination { store.sheetID = destination.id; showPageBrowser = false }
         } label: {
@@ -787,7 +788,14 @@ struct ContentView: View {
         .help(destination?.numberedPageTitle.map { "\(label) · \($0)" } ?? label)
         .accessibilityLabel(label)
         .accessibilityValue(destination?.numberedPageTitle ?? "")
-        .accessibilityIdentifier(forward ? "page-range-next" : "page-range-previous")
+        .accessibilityIdentifier(identifier)
+        #if os(macOS)
+        .background {
+            if let diagnosticControls {
+                WorkspaceDiagnosticControlProbe(controls: diagnosticControls, identifier: identifier, enabled: destination != nil)
+            }
+        }
+        #endif
     }
 
     private func pageDot(_ sheet: NoteNode, layout: PageStripLayout) -> some View {
