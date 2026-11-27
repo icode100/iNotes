@@ -137,8 +137,9 @@ app checks. The local QA executable passed 1,306 editor checks. See
   pages. Keep zoom, including slider and pinch changes, outside note edits,
   archive versions and undo. Preserve the stable native editor while zooming.
   Both the bottom bar and Notebook defaults accept typed percentages and show
-  the manual range (25%–400%). Keep partial edits local and preserve automatic
-  fit when the field is left untouched.
+  the manual range (25%–400%). Use a tick-free zoom track in both places. Snap
+  slider input to whole percentages while keeping typed fractional zoom. Keep
+  partial edits local and preserve automatic fit when the field is left untouched.
 
 - In windowed Full Page, preserve the native close, minimize and zoom controls.
   Let macOS manage them in a native full-screen Space. The floating palette's

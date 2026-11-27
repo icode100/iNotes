@@ -40,6 +40,46 @@ enum ZoomPercentage {
     }
 }
 
+struct PageZoomSlider: View {
+    let label: LocalizedStringKey
+    @Binding var scale: Double
+    var onEditingChanged: (Bool) -> Void = { _ in }
+    @Environment(\.locale) private var locale
+    @Environment(\.layoutDirection) private var layoutDirection
+
+    var body: some View {
+        let range = PageZoomSetting.manualRange
+        // A stepped native slider draws 376 tick marks beneath the track.
+        // Snap only slider input so a typed fractional zoom stays exact.
+        Slider(value: Binding(get: { clamped(scale) }, set: { scale = ($0 * 100).rounded() / 100 }),
+               in: range, onEditingChanged: onEditingChanged) { Text(label) }
+            .labelsHidden()
+            .accessibilityValue(ZoomPercentage.display(scale, locale: locale))
+            .accessibilityAdjustableAction { direction in
+                switch direction {
+                case .increment: adjust(increasing: true)
+                case .decrement: adjust(increasing: false)
+                @unknown default: break
+                }
+            }
+            .onKeyPress(keys: [.leftArrow, .rightArrow]) { press in
+                guard press.modifiers.intersection([.command, .control, .option, .shift]).isEmpty else { return .ignored }
+                adjust(increasing: (press.key == .rightArrow) == (layoutDirection == .leftToRight))
+                return .handled
+            }
+    }
+
+    private func clamped(_ value: Double) -> Double {
+        let range = PageZoomSetting.manualRange
+        return min(range.upperBound, max(range.lowerBound, value))
+    }
+
+    private func adjust(increasing: Bool) {
+        let percent = (clamped(scale) * 100).rounded()
+        scale = clamped((percent + (increasing ? 1 : -1)) / 100)
+    }
+}
+
 /// The draft stays local until Return or focus loss. Focusing a fitted scale
 /// and leaving it untouched must preserve its automatic mode.
 struct ZoomPercentageField: View {
@@ -208,16 +248,10 @@ struct PageZoomControls: View {
 
     private var controls: some View {
         HStack(spacing: 3) {
-            Slider(value: Binding(get: {
-                min(PageZoomSetting.manualRange.upperBound, max(PageZoomSetting.manualRange.lowerBound, session.scale))
-            }, set: { choose(.scale($0)) }), in: PageZoomSetting.manualRange, step: 0.01,
-                   onEditingChanged: { draggingSlider = $0 }) {
-                Text("Page zoom")
-            }
-            .labelsHidden()
-            .accessibilityValue(percentage)
-            .accessibilityIdentifier("page-zoom-slider")
-            .onDisappear { draggingSlider = false }
+            PageZoomSlider(label: "Page zoom", scale: Binding(get: { session.scale }, set: { choose(.scale($0)) }),
+                           onEditingChanged: { draggingSlider = $0 })
+                .accessibilityIdentifier("page-zoom-slider")
+                .onDisappear { draggingSlider = false }
             ZoomPercentageField(scale: session.scale, draft: $percentageDraft,
                                 label: "Page zoom percentage", id: "page-zoom-percentage",
                                 commit: { choose(.scale($0)) }, onFocusChange: { editingPercentage = $0 })

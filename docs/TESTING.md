@@ -1,5 +1,25 @@
 # Validation
 
+## Zoom slider tick marks — local QA, 27 November 2026
+
+The user tried the isolated slider QA build and approved publishing the fix
+as a new build of version 1.5.0 on 27 November 2026.
+
+The 1.5.0 page bar and Notebook defaults each requested 376 native slider
+positions from 25% through 400%. Offscreen Mac renders reproduced the dense
+row of tick marks below the track. The updated shared zoom control matched a
+continuous native slider pixel for pixel at 120 and 260 points wide in both
+light and dark appearances. Its native accessibility increment and decrement
+moved from 100% to 101% and back, matching the released stepped control.
+Dragging rounds to whole percentages. The adjacent percentage field still
+accepts fractional values independently. The offscreen accessibility fixture
+could not focus the slider for an arrow-key test.
+
+Isolated QA build 1 (`io.inotes.qa.zoomslider.20261127`) passed the Mac
+suite on macOS 27.2.1, including 1,306 editor, 2,241 workspace and 25 PDF/ZIP
+checks. The shared iPad sources type-checked in debug and release against
+Mac Catalyst UIKit. The iPad simulator SDK was unavailable on this host.
+
 ## iNotes 1.5.0 / build 2025 published and verified — 27 November 2026
 
 [Native run 57](https://github.com/icode100/iNotes/actions/runs/45955599647)

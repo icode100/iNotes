@@ -177,12 +177,10 @@ struct NotebookDefaultsView: View {
                     }
                     if case .scale(let scale) = draft.zoom {
                         HStack {
-                            Slider(value: Binding(get: { scale }, set: { zoomText = nil; draft.zoom = .scale($0) }),
-                                   in: PageZoomSetting.manualRange, step: 0.01) {
-                                Text("Default zoom percentage")
-                            }
-                            .labelsHidden()
-                            .accessibilityValue(ZoomPercentage.display(scale, locale: locale))
+                            PageZoomSlider(label: "Default zoom percentage", scale: Binding(get: { scale }, set: {
+                                zoomText = nil
+                                draft.zoom = .scale($0)
+                            }))
                             ZoomPercentageField(scale: scale, draft: $zoomText, label: "Default zoom percentage",
                                                 id: "default-zoom-percentage", commit: { draft.zoom = .scale($0) })
                         }
