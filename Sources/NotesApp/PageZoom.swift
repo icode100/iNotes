@@ -40,20 +40,72 @@ enum ZoomPercentage {
     }
 }
 
+enum PageZoomDirection: Equatable {
+    case zoomIn, zoomOut
+
+    func nextScale(from scale: Double) -> Double? {
+        let range = PageZoomSetting.manualRange
+        guard scale.isFinite, scale > 0 else { return nil }
+        switch self {
+        case .zoomIn:
+            guard scale < range.upperBound else { return nil }
+            return min(range.upperBound, max(range.lowerBound, scale * 1.2))
+        case .zoomOut:
+            guard scale > range.lowerBound else { return nil }
+            return max(range.lowerBound, min(range.upperBound, scale / 1.2))
+        }
+    }
+}
+
 struct PageZoomSlider: View {
+    #if os(iOS)
+    private static let buttonWidth: CGFloat = 44
+    #else
+    private static let buttonWidth: CGFloat = 24
+    #endif
+    private static let spacing: CGFloat = 2
+    static let stepButtonsWidth = 2 * (buttonWidth + spacing)
+
     let label: LocalizedStringKey
+    let id: String
     @Binding var scale: Double
     var onEditingChanged: (Bool) -> Void = { _ in }
     @Environment(\.locale) private var locale
     @Environment(\.layoutDirection) private var layoutDirection
 
     var body: some View {
+        HStack(spacing: Self.spacing) {
+            stepButton(.zoomOut)
+            track
+            stepButton(.zoomIn)
+        }
+    }
+
+    private func stepButton(_ direction: PageZoomDirection) -> some View {
+        let increasing = direction == .zoomIn
+        let title: LocalizedStringKey = increasing ? "Zoom in" : "Zoom out"
+        return Button {
+            if let next = direction.nextScale(from: scale) { scale = next }
+        } label: {
+            Image(systemName: increasing ? "plus.circle" : "minus.circle")
+                .frame(width: Self.buttonWidth, height: Self.buttonWidth)
+                .contentShape(Rectangle())
+        }
+        .buttonStyle(.plain)
+        .disabled(direction.nextScale(from: scale) == nil)
+        .help(Text(title))
+        .accessibilityLabel(Text(title))
+        .accessibilityIdentifier(id + (increasing ? "-in" : "-out"))
+    }
+
+    private var track: some View {
         let range = PageZoomSetting.manualRange
         // A stepped native slider draws 376 tick marks beneath the track.
         // Snap only slider input so a typed fractional zoom stays exact.
-        Slider(value: Binding(get: { clamped(scale) }, set: { scale = ($0 * 100).rounded() / 100 }),
-               in: range, onEditingChanged: onEditingChanged) { Text(label) }
+        return Slider(value: Binding(get: { clamped(scale) }, set: { scale = ($0 * 100).rounded() / 100 }),
+                      in: range, onEditingChanged: onEditingChanged) { Text(label) }
             .labelsHidden()
+            .accessibilityIdentifier(id + "-slider")
             .accessibilityValue(ZoomPercentage.display(scale, locale: locale))
             .accessibilityAdjustableAction { direction in
                 switch direction {
@@ -256,26 +308,34 @@ struct PageZoomControls: View {
             .accessibilityValue(percentage)
             .help("Adjust page zoom")
             .popover(isPresented: $showsPopover) {
-                controls.frame(width: 260).padding(.horizontal, 12)
-                    .presentationCompactAdaptation(.popover)
+                VStack(spacing: 6) {
+                    slider
+                    HStack(spacing: 8) { percentageAndFit }
+                }
+                .frame(width: 224)
+                .padding(12)
+                .presentationCompactAdaptation(.popover)
             }
         } else {
-            controls
+            HStack(spacing: 3) {
+                slider
+                percentageAndFit
+            }
         }
     }
 
-    private var controls: some View {
-        HStack(spacing: 3) {
-            PageZoomSlider(label: "Page zoom", scale: Binding(get: { session.scale }, set: { choose(.scale($0)) }),
-                           onEditingChanged: { draggingSlider = $0 })
-                .accessibilityIdentifier("page-zoom-slider")
-                .onDisappear { draggingSlider = false }
-            ZoomPercentageField(scale: session.scale, draft: $percentageDraft,
-                                label: "Page zoom percentage", id: "page-zoom-percentage",
-                                commit: { choose(.scale($0)) }, onFocusChange: { editingPercentage = $0 })
-            fitButton(.fitPage, label: "Fit Page", icon: "arrow.up.left.and.arrow.down.right", id: "page-zoom-fit-page")
-            fitButton(.fitWidth, label: "Fit Width", icon: "arrow.left.and.right", id: "page-zoom-fit-width")
-        }
+    private var slider: some View {
+        PageZoomSlider(label: "Page zoom", id: "page-zoom", scale: Binding(get: { session.scale }, set: { choose(.scale($0)) }),
+                       onEditingChanged: { draggingSlider = $0 })
+            .onDisappear { draggingSlider = false }
+    }
+
+    @ViewBuilder private var percentageAndFit: some View {
+        ZoomPercentageField(scale: session.scale, draft: $percentageDraft,
+                            label: "Page zoom percentage", id: "page-zoom-percentage",
+                            commit: { choose(.scale($0)) }, onFocusChange: { editingPercentage = $0 })
+        fitButton(.fitPage, label: "Fit Page", icon: "arrow.up.left.and.arrow.down.right", id: "page-zoom-fit-page")
+        fitButton(.fitWidth, label: "Fit Width", icon: "arrow.left.and.right", id: "page-zoom-fit-width")
     }
 
     private func fitButton(_ choice: PageZoomSetting, label: String, icon: String, id: String) -> some View {

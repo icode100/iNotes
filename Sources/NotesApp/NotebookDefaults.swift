@@ -177,7 +177,7 @@ struct NotebookDefaultsView: View {
                     }
                     if case .scale(let scale) = draft.zoom {
                         HStack {
-                            PageZoomSlider(label: "Default zoom percentage", scale: Binding(get: { scale }, set: {
+                            PageZoomSlider(label: "Default zoom percentage", id: "default-zoom", scale: Binding(get: { scale }, set: {
                                 zoomText = nil
                                 draft.zoom = .scale($0)
                             }))

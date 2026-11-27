@@ -254,8 +254,6 @@ struct UnifiedPageEditor: NSViewRepresentable {
     }
 }
 
-enum PageZoomDirection: Equatable { case zoomIn, zoomOut }
-
 /// Menu actions target only the visible page in the current window, including
 /// when a title or search field owns keyboard focus.
 @MainActor
@@ -666,9 +664,8 @@ final class UnifiedMacPageView: NSView {
     @discardableResult
     func zoom(_ direction: PageZoomDirection) -> Bool {
         guard let scroll = enclosingScrollView, scroll.allowsMagnification else { return false }
-        if direction == .zoomOut && scroll.magnification < PageZoomSetting.manualRange.lowerBound { return true }
-        let factor: CGFloat = direction == .zoomIn ? 1.2 : 1 / 1.2
-        let target = min(scroll.maxMagnification, max(scroll.minMagnification, scroll.magnification * factor))
+        guard let next = direction.nextScale(from: scroll.magnification) else { return true }
+        let target = min(scroll.maxMagnification, max(scroll.minMagnification, next))
         let center = NSPoint(x: visibleRect.midX, y: visibleRect.midY)
         scroll.setMagnification(target, centeredAt: center)
         refreshToolCursor()

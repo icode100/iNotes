@@ -1,5 +1,47 @@
 # Validation
 
+## Long-topic page navigation — local development QA, 27 November 2026
+
+At 720 points wide with page 20 of 128 selected, the previous Mac footer
+clipped the outer page numbers. Seven offscreen renders of the replacement
+covered 320–1,100-point widths in light and dark appearances, with pinned
+and hover navigation. All visible numbered targets fit inside the footer,
+aligned with Add Page and stayed clear of the zoom controls. The page-number
+strip had no horizontal scrollbar. A 49,000-page case showed all five digits
+on page 48,152 and its neighbors.
+
+The local core suite passed 144 tests. All 25 iPad target sources type-checked
+in debug and release against the Mac Catalyst UIKit SDK.
+
+The isolated Page Strip QA app passed 1,306 editor, 2,314 workspace and
+33 PDF/ZIP checks on macOS 27.2.1. The native workspace fixture resized a
+14-page topic, navigated both ways in a 104-page topic, zoomed the selected
+page and added page 105. A separate compact-window accessibility check opened
+Browse pages from the lone current badge and dismissed it while keeping page
+100 selected. The QA notebook for manual testing starts at page 20 of 120.
+
+## Zoom buttons — local development QA, 27 November 2026
+
+Offscreen Mac renders of the page bar at its 252-point minimum expanded zoom
+width and its 306-point maximum showed both step buttons and a continuous
+slider in light and dark appearance. The percentage field, range label and
+both fit buttons fit alongside the track at both widths.
+
+An isolated 320-point Mac window opened the compact zoom popover. Native
+accessibility presses stepped from 100% to 120% and back while the popover
+stayed open. Separate checks pressed the page and defaults controls at
+fractional zoom, at both manual limits and from a fitted 5% scale. The
+slider's accessibility adjustment retained its one-percentage-point step.
+The local core suite passed 144 tests. The 25 iPad target sources type-checked
+in debug and release against Mac Catalyst UIKit.
+
+The isolated Zoom Buttons QA app (`io.inotes.qa.zoombuttons.20261127`)
+passed 1,306 editor, 31 equation, 12 ruled-text, 9 shortcut, 2,285 workspace
+and 33 PDF/ZIP checks on macOS 27.2.1. Mounted page controls preserved
+per-page zoom, stepped from Fit Width, and disabled the outward button at each
+manual limit. In the defaults form, button changes stayed in the draft until
+Save. This was local QA before publication.
+
 ## Themed workbook PDF and page navigation — earlier isolated QA, 27 November 2026
 
 The user requested a same-version rebuild with the scrollbar and PDF changes.

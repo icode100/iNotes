@@ -135,10 +135,12 @@ iPad simulator target. Signed release run 24 published the rebuild on the
 existing release. Independent public checks verified the DMG, checksum,
 signed feed and mounted app. The original `v1.5.0` tag identifies build 2025.
 
-The user authorized another **1.5.0** build on **27 November 2026** for themed
-workbook PDF title pages and scrollbar access with hover navigation. The
-earlier QA app also offered EPUB export. The user requested its removal
-before publication. Its validation record applies to that local app.
+The **1.5.0** rebuild in development includes themed workbook PDF title pages
+and scrollbar access with hover navigation. The earlier QA app also offered
+EPUB export, which the user withdrew. On **27 November 2026** the user paused
+publication and requested zoom buttons beside the slider. After testing the
+adaptive navigation in the Page Strip QA app, the user approved publishing
+these changes together as another build of version 1.5.0.
 
 ## Priorities
 
@@ -153,6 +155,8 @@ before publication. Its validation record applies to that local app.
   the manual range (25%–400%). Use a tick-free zoom track in both places. Snap
   slider input to whole percentages while keeping typed fractional zoom. Keep
   partial edits local and preserve automatic fit when the field is left untouched.
+  Keep Zoom Out and Zoom In on either side of the track in the page bar, compact
+  zoom controls and Notebook defaults. Use the same step as the Mac zoom shortcuts.
 
 - In windowed Full Page, preserve the native close, minimize and zoom controls.
   Let macOS manage them in a native full-screen Space. The floating palette's
@@ -173,6 +177,9 @@ before publication. Its validation record applies to that local app.
   screen. Keep the window's explicit show/hide choice independent of its
   sidebar, heading and full-screen state. Keep Browse pages open during use
   and keep the first-page action reachable in an empty chapter or topic.
+  For long topics, fit whole numbered buttons around the selected page and
+  keep their targets vertically centered alongside Add and Zoom. The footer
+  must stay within its existing height without a separate page-number scrollbar.
   When the Mac page overflows horizontally, keep the hover handle, revealed
   controls and pointer tracking area above the native scrollbar. The knob
   must receive drags in both hover states and in pinned mode. An empty or

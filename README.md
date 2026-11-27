@@ -90,6 +90,10 @@ window, in Full Page and in macOS full screen. With touch, tap the handle.
 In build 2027, the handle sits just above the horizontal scrollbar when the
 page is wider than the Mac editor. Drag the scrollbar to pan the page, or
 move up to the handle to reveal navigation.
+Long topics show a group of numbered buttons around the current page. Use the
+chevrons to move through the topic by group, or **Browse and organize pages**
+to jump directly to a page. The group adjusts as you resize the window. When
+only the current number fits, clicking it opens the page browser.
 
 ### Per-page zoom
 
@@ -97,6 +101,10 @@ Pages start at **100%**. In the bottom page bar, drag the slider or type
 a percentage from **25% to 400%** and press Return. Choose **Fit Page** to see
 the entire page or **Fit Width** to fill the available width. In a narrow window, click the percentage to open
 the controls. Fitting adapts as the viewport changes.
+
+In the development build, click **−** or **+** beside the slider to zoom one
+step. From 100%, **+** takes you to 120% and **−** takes you back to 100%.
+The same buttons are available in Notebook defaults.
 
 iNotes remembers the zoom you choose for each page on this device, including
 after reopening the app. Open **Appearance → Notebook defaults… → Default

@@ -97,6 +97,7 @@ enum FloatingToolbarDiagnostics {
         let presentation = EditorPresentation()
         let host = NSHostingController(rootView: ContentView(presentation: presentation)
             .environmentObject(store).environmentObject(InputDeviceMonitor())
+            .environment(\.accessibilityEnabled, true)
             .environment(\.workspaceDiagnosticControls, controls).defaultAppStorage(defaults))
         let rect = NSRect(x: -6400, y: -6200, width: 1150, height: 800)
         let window = FixtureWindow(contentRect: rect, styleMask: [.titled, .resizable], backing: .buffered, defer: false)
@@ -527,6 +528,40 @@ enum FloatingToolbarDiagnostics {
             guard let native = currentScroll(), native !== scroll else { return false }
             return native.zoomSetting == .scale(1) && abs(native.magnification - 1) < 0.000001
         }
+        // Query and press the actual SwiftUI accessibility buttons in this window.
+        // SwiftUI's virtual elements implement the AppKit accessibility selectors.
+        func accessibleElement(_ id: String) -> AnyObject? {
+            var visited = Set<ObjectIdentifier>()
+            func search(_ node: AnyObject) -> AnyObject? {
+                guard visited.insert(ObjectIdentifier(node)).inserted else { return nil }
+                if node.accessibilityIdentifier?() == id { return node }
+                for child in node.accessibilityChildren?() ?? [] {
+                    if let found = search(child as AnyObject) { return found }
+                }
+                return nil
+            }
+            return search(window)
+        }
+        func pressAccessibleButton(_ id: String) throws {
+            guard let element = accessibleElement(id) else { throw WorkspaceDiagnostics.Failure(description: "Missing accessible button \(id)") }
+            try check(element.isAccessibilityEnabled?() == true && element.accessibilityPerformPress?() == true,
+                      "\(id) accepts a native accessibility press")
+        }
+        let zoomIn = "page-zoom-in", zoomOut = "page-zoom-out"
+        guard let minus = accessibleElement(zoomOut)?.accessibilityFrame?(),
+              let track = accessibleElement("page-zoom-slider")?.accessibilityFrame?(),
+              let plus = accessibleElement(zoomIn)?.accessibilityFrame?() else {
+            throw WorkspaceDiagnostics.Failure(description: "Missing zoom controls in the accessibility tree")
+        }
+        try check(!minus.isEmpty && !plus.isEmpty && !track.isEmpty &&
+                  minus.maxX <= track.minX + 1 && track.maxX <= plus.minX + 1,
+                  "the zoom buttons flank the native slider without covering its track")
+        try pressAccessibleButton(zoomIn)
+        try wait("Zoom in magnifies the new page to 120 percent and remembers the choice") {
+            currentScroll()?.zoomSetting == .scale(1.2) && store.makeZoomSession(for: secondID).setting == .scale(1.2)
+        }
+        try pressAccessibleButton(zoomOut)
+        try wait("Zoom out reverses the increment on the same page") { currentScroll()?.zoomSetting == .scale(1) }
         func zoomField(in view: NSView) -> NSTextField? {
             if let field = view as? NSTextField, field.placeholderString == "Page zoom percentage",
                field.window === window, !field.isHiddenOrHasHiddenAncestor { return field }
@@ -558,12 +593,27 @@ enum FloatingToolbarDiagnostics {
         try wait("an out-of-range percentage restores the prior zoom on blur") {
             currentScroll()?.zoomSetting == .scale(1.275) && zoomField(in: host.view)?.stringValue == ZoomPercentage.display(1.275)
         }
+        for (text, scale, disabled, enabled) in [("25", 0.25, zoomOut, zoomIn), ("400", 4.0, zoomIn, zoomOut)] {
+            let fieldEditor = try enterZoomText(text)
+            fieldEditor.doCommand(by: #selector(NSResponder.insertNewline(_:)))
+            try wait("at \(text) percent only the inward zoom button is enabled") {
+                currentScroll()?.zoomSetting == .scale(scale) && accessibleElement(disabled)?.isAccessibilityEnabled?() == false
+                    && accessibleElement(enabled)?.isAccessibilityEnabled?() == true
+            }
+        }
         _ = try enterZoomText("75")
         window.makeFirstResponder(nil)
         try wait("losing focus commits a valid percentage without a percent sign") { currentScroll()?.zoomSetting == .scale(0.75) }
         try press("page-zoom-fit-width")
         try wait("Fit Width on the footer fits the new page and marks the button selected") {
             currentScroll()?.fitsPageWidth == true && button("page-zoom-fit-width")?.value == "Selected"
+        }
+        guard let fittedScale = currentScroll()?.magnification else { throw WorkspaceDiagnostics.Failure(description: "Missing fitted page") }
+        let expectedScale = min(4, max(0.25, fittedScale * 1.2))
+        try pressAccessibleButton(zoomIn)
+        try wait("Zoom in switches Fit Width to a manual step from the measured fit") {
+            guard let native = currentScroll(), case let .scale(actual) = native.zoomSetting else { return false }
+            return abs(actual - expectedScale) < 0.000001 && abs(native.magnification - actual) < 0.000001
         }
         try press("page-zoom-fit-page")
         try wait("Fit Page selects the whole-page fit and clears the width indicator") {
@@ -639,6 +689,89 @@ enum FloatingToolbarDiagnostics {
                       exitPage.textView.string == seed + suffix && matchesOriginalZoom() &&
                       defaults.string(forKey: "fullScreenToolbarMode") == exitSetting,
                       "\(label) sends the correct native command and preserves page, caret, undo, zoom, and toolbar preference")
+        }
+        // Use the same pinned footer and a disposable long topic. Install the
+        // fixture library in one update so only the chosen page mounts.
+        guard let parent = store.selectedSheet?.parentID else {
+            throw WorkspaceDiagnostics.Failure(description: "Missing parent for page navigation fixture")
+        }
+        var library = store.library
+        let topic = try library.create(kind: .topic, title: "Long page strip", parentID: parent)
+        var pages = try (1...14).map { _ in try library.create(kind: .sheet, parentID: topic) }
+        func dot(_ index: Int) -> String { "page-carousel-\(pages[index].uuidString)" }
+        func numbersOnScreen() -> [Int] { pages.indices.filter { visible(dot($0)) } }
+        let previous = "page-range-previous", next = "page-range-next"
+        func checkNumbers(_ context: String) throws {
+            guard let browse = frame("page-browser-button"), let add = frame("page-carousel-add"),
+                  let footer = frame("page-carousel"), let selected = pages.firstIndex(where: { $0 == store.sheetID }) else {
+                throw WorkspaceDiagnostics.Failure(description: "\(context) is missing page navigation")
+            }
+            let indices = numbersOnScreen()
+            let frames = indices.compactMap { frame(dot($0)) }
+            try check(indices.contains(selected) && button(dot(selected))?.value == "Current page" &&
+                      zip(indices, indices.dropFirst()).allSatisfy { $1 == $0 + 1 },
+                      "\(context) shows the selected page in a contiguous numbered range: \(indices)")
+            try check(frames.allSatisfy {
+                $0.width >= 43.5 && $0.height >= 43.5 && abs($0.midY - add.midY) <= 1 &&
+                $0.minX >= browse.maxX - 1 && $0.maxX <= add.minX + 1 && footer.insetBy(dx: -1, dy: -1).contains($0)
+            } && zip(frames, frames.dropFirst()).allSatisfy { $0.maxX <= $1.minX + 1 },
+                      "\(context) has whole aligned targets between Browse and Add: \(frames)")
+            func hasPageStripScroller(_ view: NSView) -> Bool {
+                if let scroller = view as? NSScrollView, scroller.hasHorizontalScroller, !scroller.isHiddenOrHasHiddenAncestor {
+                    let rect = scroller.convert(scroller.visibleRect, to: host.view)
+                    if !rect.isEmpty && footer.contains(CGPoint(x: rect.midX, y: rect.midY)) { return true }
+                }
+                return view.subviews.contains(where: hasPageStripScroller)
+            }
+            try check(!hasPageStripScroller(host.view), "\(context) keeps horizontal scrolling out of the page-number row")
+        }
+        let height = window.contentLayoutRect.height
+        window.setContentSize(NSSize(width: 1500, height: height))
+        store.library = library
+        store.folderID = topic
+        store.sheetID = pages[9]
+        try wait("fourteen pages fit in the wide footer") {
+            numbersOnScreen().count == pages.count && accessibleElement(next) == nil
+        }
+        try checkNumbers("Fourteen pages at wide width")
+        window.setContentSize(NSSize(width: 880, height: height))
+        try wait("the same topic shows navigation arrows after narrowing the window") {
+            accessibleElement(previous) != nil && accessibleElement(next) != nil && numbersOnScreen().count < pages.count
+        }
+        try checkNumbers("Fourteen pages at narrow width")
+
+        pages += try (15...104).map { _ in try library.create(kind: .sheet, parentID: topic) }
+        store.library = library
+        store.sheetID = pages[84]
+        try wait("an external selection brings page 85 into the bounded strip") {
+            button(dot(84))?.value == "Current page" && accessibleElement(next)?.isAccessibilityEnabled?() == true
+        }
+        try checkNumbers("104-page topic")
+        try pressAccessibleButton(next)
+        try wait("the forward control navigates to a later visible group") {
+            guard let selected = pages.firstIndex(where: { $0 == store.sheetID }) else { return false }
+            return selected > 84 && button(dot(selected))?.value == "Current page"
+        }
+        let forward = store.sheetID
+        try pressAccessibleButton(previous)
+        try wait("the backward control navigates to an earlier group") {
+            guard let before = forward.flatMap({ pages.firstIndex(of: $0) }),
+                  let now = pages.firstIndex(where: { $0 == store.sheetID }) else { return false }
+            return now < before && button(dot(now))?.value == "Current page"
+        }
+        for (index, disabled) in [(0, previous), (103, next)] {
+            store.sheetID = pages[index]
+            try wait("external selection exposes page \(index + 1) and disables its outward arrow") {
+                button(dot(index))?.value == "Current page" && accessibleElement(disabled)?.isAccessibilityEnabled?() == false
+            }
+            try checkNumbers("Page \(index + 1) at the range boundary")
+        }
+        try pressAccessibleButton(zoomIn)
+        try wait("the zoom button works beside triple-digit pages") { currentScroll()?.zoomSetting == .scale(1.8) || abs((currentScroll()?.magnification ?? 0) - 1.8) < 0.000001 }
+        try press("page-carousel-add")
+        try wait("Add appends page 105 and exposes its selected numbered button") {
+            guard let added = store.selectedSheet, added.parentID == topic, added.sheetNumber == 105 else { return false }
+            return button("page-carousel-\(added.id.uuidString)")?.value == "Current page"
         }
         return checks
     }

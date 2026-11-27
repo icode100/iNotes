@@ -188,6 +188,36 @@ extension Notification.Name {
     static let focusSearch = Notification.Name("iNotes.focusSearch")
 }
 
+/// The footer shows complete page targets. Long topics use a neighborhood
+/// around the selected page, with controls to move to the next group.
+struct PageStripLayout {
+    static let targetSize: CGFloat = 44
+    let visibleRange: Range<Int>
+    let showsRangeButtons: Bool
+    let previousIndex: Int?
+    let nextIndex: Int?
+    let badgeDiameter: CGFloat
+    let pageWidth: CGFloat
+    let usesBrowserShortcut: Bool
+
+    init(count: Int, selectedIndex: Int, availableWidth: CGFloat, largestNumber: Int) {
+        // Leave room for all the digits, including large archival Trash numbers.
+        pageWidth = max(Self.targetSize, CGFloat(String(largestNumber).count) * 8 + 12)
+        let slots = Int(max(0, availableWidth) / pageWidth)
+        let fits = count <= slots
+        let slotsWithArrows = Int(max(0, availableWidth - 2 * Self.targetSize) / pageWidth)
+        showsRangeButtons = !fits && slotsWithArrows >= 1
+        usesBrowserShortcut = !fits && !showsRangeButtons
+        badgeDiameter = fits ? 28 : 24
+        let visibleCount = fits ? count : showsRangeButtons ? min(7, slotsWithArrows) : min(1, slots)
+        let selected = min(max(0, selectedIndex), max(0, count - 1))
+        let start = min(max(0, selected - (visibleCount - 1) / 2), count - visibleCount)
+        visibleRange = start..<(start + visibleCount)
+        previousIndex = showsRangeButtons && start > 0 ? max(0, selected - visibleCount) : nil
+        nextIndex = showsRangeButtons && visibleRange.upperBound < count ? min(count - 1, selected + visibleCount) : nil
+    }
+}
+
 struct ContentView: View {
     @EnvironmentObject private var store: NotesStore
     @StateObject private var presentation: EditorPresentation
@@ -624,13 +654,20 @@ struct ContentView: View {
         let addPage = { newSheet() }
         let canAddPage = pageCreationParent != nil
         return GeometryReader { geometry in
+            // Keep room for page dots and the slider's draggable track once
+            // the two zoom buttons have their own pointer or touch targets.
+            let widthWithoutZoomButtons = geometry.size.width - PageZoomSlider.stepButtonsWidth
             #if os(iOS)
-            let compactZoom = geometry.size.width < (usesHoverNavigation ? 500 : 462)
-            let zoomWidth: CGFloat = zoom == nil ? 0 : compactZoom ? 72 : 254
+            let compactZoom = widthWithoutZoomButtons < (usesHoverNavigation ? 500 : 462)
+            let trackGroupWidth: CGFloat = 254
             #else
-            let compactZoom = geometry.size.width < (usesHoverNavigation ? 452 : 414)
-            let zoomWidth: CGFloat = zoom == nil ? 0 : compactZoom ? 72 : min(254, max(200, geometry.size.width * 0.26))
+            let compactZoom = widthWithoutZoomButtons < (usesHoverNavigation ? 452 : 414)
+            let trackGroupWidth = min(254, max(200, widthWithoutZoomButtons * 0.26))
             #endif
+            let zoomWidth: CGFloat = zoom == nil ? 0 : compactZoom ? 72 : trackGroupWidth + PageZoomSlider.stepButtonsWidth
+            let pageWidth = geometry.size.width - (usesHoverNavigation ? 168 : 128) - zoomWidth - (zoom == nil ? 0 : 4)
+            let strip = PageStripLayout(count: sheets.count, selectedIndex: sheets.firstIndex { $0.id == store.sheetID } ?? 0,
+                                       availableWidth: pageWidth, largestNumber: sheets.lazy.compactMap(\.sheetNumber).max() ?? 1)
             HStack(spacing: 4) {
                 Button(action: togglePageBrowser) {
                     Image(systemName: "square.grid.2x2").frame(width: 36, height: 44)
@@ -652,25 +689,21 @@ struct ContentView: View {
                             .presentationCompactAdaptation(.sheet)
                     }
                 Spacer(minLength: 0)
-                ScrollViewReader { proxy in
-                    ScrollView(.horizontal) {
-                        LazyHStack(spacing: 2) {
-                            ForEach(sheets) { sheet in
-                                pageDot(sheet)
-                            }
-                        }.padding(.horizontal, 2)
-                    }.scrollIndicators(.hidden)
-                        .accessibilityLabel("Notebook pages")
-                        .onAppear { if let selected = store.sheetID { proxy.scrollTo(selected, anchor: .center) } }
-                        .onChange(of: store.sheetID) { _, selected in
-                            if let selected { proxy.scrollTo(selected, anchor: .center) }
+                if !strip.visibleRange.isEmpty {
+                    HStack(spacing: 0) {
+                        if strip.showsRangeButtons {
+                            pageRangeButton(forward: false, destination: strip.previousIndex.map { sheets[$0] })
                         }
-                        .onChange(of: sheets.map(\.id)) { _, _ in
-                            if let selected = store.sheetID { proxy.scrollTo(selected, anchor: .center) }
+                        ForEach(sheets[strip.visibleRange]) { sheet in
+                            pageDot(sheet, layout: strip)
                         }
+                        if strip.showsRangeButtons {
+                            pageRangeButton(forward: true, destination: strip.nextIndex.map { sheets[$0] })
+                        }
+                    }
+                    .accessibilityElement(children: .contain)
+                    .accessibilityLabel("Notebook pages")
                 }
-                .frame(width: sheets.isEmpty ? 0 : min(CGFloat(sheets.count) * 46 + 4,
-                    max(0, geometry.size.width - (usesHoverNavigation ? 168 : 128) - zoomWidth - (zoom == nil ? 0 : 4))))
                 if sheets.isEmpty {
                     Text(store.filter == .trash ? "Trash is empty" : !store.search.isEmpty ? "No matching pages" : store.filter == .favorites ? "No favorite pages" : "No pages here")
                         .font(.caption).foregroundStyle(.secondary).lineLimit(1)
@@ -738,26 +771,54 @@ struct ContentView: View {
 
     private func togglePageBrowser() { showPageBrowser.toggle() }
 
-    private func pageDot(_ sheet: NoteNode) -> some View {
+    private func pageRangeButton(forward: Bool, destination: NoteNode?) -> some View {
+        let label = forward ? "Next group of pages" : "Previous group of pages"
+        return Button {
+            if let destination { store.sheetID = destination.id; showPageBrowser = false }
+        } label: {
+            Image(systemName: forward ? "chevron.forward.2" : "chevron.backward.2")
+                .font(.system(size: 11, weight: .semibold))
+                .foregroundStyle(.secondary)
+                .frame(width: PageStripLayout.targetSize, height: PageStripLayout.targetSize)
+                .contentShape(Rectangle())
+        }
+        .buttonStyle(.plain)
+        .disabled(destination == nil)
+        .help(destination?.numberedPageTitle.map { "\(label) · \($0)" } ?? label)
+        .accessibilityLabel(label)
+        .accessibilityValue(destination?.numberedPageTitle ?? "")
+        .accessibilityIdentifier(forward ? "page-range-next" : "page-range-previous")
+    }
+
+    private func pageDot(_ sheet: NoteNode, layout: PageStripLayout) -> some View {
         let selected = store.sheetID == sheet.id
         let pageNumber = sheet.numberedPageTitle ?? "Page"
-        let choosePage = { store.sheetID = sheet.id; showPageBrowser = false }
+        let opensBrowser = selected && layout.usesBrowserShortcut
+        let choosePage = {
+            if opensBrowser { togglePageBrowser() }
+            else { store.sheetID = sheet.id; showPageBrowser = false }
+        }
         let label: String = sheet.title.isEmpty ? pageNumber : pageNumber + ", " + sheet.displayTitle
         return Button(action: choosePage) {
-            Text("\(sheet.sheetNumber ?? 1)")
-                .font(.system(size: 12, weight: selected ? .bold : .medium, design: .rounded))
-                .monospacedDigit().minimumScaleFactor(0.65).lineLimit(1)
-                .frame(width: 32, height: 32)
+            Text(sheet.sheetNumber ?? 1, format: .number.grouping(.never))
+                .font(.system(size: 12, weight: selected ? .semibold : .regular, design: .rounded))
+                .monospacedDigit().lineLimit(1)
+                .fixedSize(horizontal: true, vertical: false)
+                .padding(.horizontal, 3)
+                .frame(minWidth: layout.badgeDiameter)
+                .frame(height: layout.badgeDiameter)
                 .foregroundStyle(Color.primary)
                 .background {
-                    Circle().fill(selected ? Color.accentColor.opacity(0.22) : Color.primary.opacity(0.07))
-                        .overlay { Circle().stroke(selected ? Color.accentColor : .clear, lineWidth: 2) }
+                    Capsule().fill(selected ? Color.accentColor.opacity(0.16) : Color.primary.opacity(0.05))
+                        .overlay { if selected { Capsule().strokeBorder(Color.accentColor, lineWidth: 1.5) } }
                 }
-                .frame(width: 44, height: 44).contentShape(Rectangle())
+                .frame(width: layout.pageWidth, height: PageStripLayout.targetSize)
+                .contentShape(Rectangle())
         }.buttonStyle(.plain)
             .id(sheet.id)
-            .help(sheet.displayTitle + " · " + store.breadcrumb(sheet.parentID))
+            .help(opensBrowser ? "Browse pages" : sheet.displayTitle + " · " + store.breadcrumb(sheet.parentID))
             .accessibilityLabel(label)
+            .accessibilityHint(opensBrowser ? "Browse pages" : "")
             .accessibilityValue(selected ? "Current page" : "Not selected")
             .accessibilityAddTraits(selected ? [.isSelected] : [])
             .accessibilityIdentifier("page-carousel-\(sheet.id.uuidString)")
