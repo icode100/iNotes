@@ -785,6 +785,62 @@ enum FloatingToolbarDiagnostics {
             guard let added = store.selectedSheet, added.parentID == topic, added.sheetNumber == 105 else { return false }
             return button("page-carousel-\(added.id.uuidString)")?.value == "Current page"
         }
+        // An empty custom ring still opens its editor. Preferences apply to the
+        // mounted window immediately and the next page uses the same choices.
+        let catalog = FloatingToolbarChoice.all
+        let factory = FloatingToolbarChoice.visibleIDs(in: FloatingToolbarChoice.factory)
+        try check(Set(catalog.map(\.id)).count == catalog.count &&
+                  factory.contains("fill") && factory.contains("textSize") && !factory.contains("selection"),
+                  "each configurable button has a stable ID and the default ring includes Fill and Text size")
+        let preference = FloatingToolbarChoice.preferenceKey
+        defaults.set("", forKey: preference)
+        defaults.set("floating", forKey: "fullScreenToolbarMode")
+        presentation.fullPage = true
+        try wait("a custom empty floating toolbar keeps its bubble") {
+            visible("floating.bubble") && !visible("floating.pen") && currentScroll() != nil
+        }
+        let customPage = find(UnifiedMacPageView.self, in: host.view)
+        let customUndo = customPage?.textView.undoManager
+        let customZoom = currentScroll()?.zoomSetting
+        try press("floating.bubble")
+        func sheetControl(_ name: String) -> WorkspaceDiagnosticControls.Control? {
+            // SwiftUI can host this presentation in a separate panel. Only this
+            // fixture's view hierarchy receives its diagnostic registry.
+            button("floating.choice." + name)
+        }
+        for id in ["draw.pen", "fill", "selection"] {
+            try wait("the empty ring opens the customization checkbox for \(id)") { sheetControl(id)?.value == "Off" }
+            try check(sheetControl(id)?.perform() == true, "enable \(id) in the mounted customization sheet")
+            try wait("the checked \(id) button is persisted") {
+                sheetControl(id)?.value == "On" && FloatingToolbarChoice.visibleIDs(in: defaults.string(forKey: preference) ?? "").contains(id)
+            }
+        }
+        try check(sheetControl("draw.pen")?.perform() == true, "remove Pen using its checked control")
+        try wait("only the two chosen buttons are saved") {
+            FloatingToolbarChoice.visibleIDs(in: defaults.string(forKey: preference) ?? "") == ["fill", "selection"]
+        }
+        try check(sheetControl("done")?.perform() == true, "Done dismisses the mounted customizer")
+        try wait("the customization sheet closes") { sheetControl("done") == nil }
+        try press("floating.bubble")
+        try wait("the ring shows the two chosen controls and hides Pen, Undo and Exit") {
+            button("floating.overlay")?.value == "2" && !visible("floating.pen") &&
+            !visible("floating.undo") && !visible("floating.exitWorkspace")
+        }
+        try check(find(UnifiedMacPageView.self, in: host.view) === customPage &&
+                  customPage?.textView.undoManager === customUndo && currentScroll()?.zoomSetting == customZoom,
+                  "customizing the floating controls preserves the editor, history and zoom")
+        defaults.set("", forKey: preference)
+        try wait("removing the last button closes the ring") { button("floating.bubble")?.value == "collapsed" }
+        try press("floating.bubble")
+        try wait("Restore defaults remains accessible with every control removed") { sheetControl("restore") != nil }
+        try check(sheetControl("restore")?.perform() == true, "Restore defaults uses the original button set")
+        try wait("the factory preference and checked controls return") {
+            defaults.string(forKey: preference) == FloatingToolbarChoice.factory &&
+            sheetControl("draw.pen")?.value == "On" && sheetControl("selection")?.value == "Off"
+        }
+        try check(sheetControl("done")?.perform() == true, "Done dismisses the mounted customizer")
+        try wait("the restored customizer closes") { sheetControl("done") == nil }
+        try openRing()
         return checks
     }
 }

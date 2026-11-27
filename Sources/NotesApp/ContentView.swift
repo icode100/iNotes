@@ -235,6 +235,7 @@ struct ContentView: View {
     @ViewState private var exportDocument = BackupDocument()
     @ViewState private var showSettings = false
     @ViewState private var showNotebookDefaults = false
+    @ViewState private var showFloatingToolbarCustomization = false
     @ViewState private var showRecovery = false
     @ViewState private var showEmptyTrash = false
     @ViewState private var columnVisibility: NavigationSplitViewVisibility = .all
@@ -406,6 +407,8 @@ struct ContentView: View {
         .sheet(isPresented: $showSettings) { StorageInfoView() }
         .sheet(isPresented: $showNotebookDefaults) { NotebookDefaultsView(store: store) }
         .environment(\.openNotebookDefaults, { showNotebookDefaults = true })
+        .sheet(isPresented: $showFloatingToolbarCustomization) { FloatingToolbarCustomization() }
+        .environment(\.customizeFloatingToolbar, { showFloatingToolbarCustomization = true })
         .sheet(item: $backupCleanupDestination) { destination in
             BackupCleanupView(destination: destination)
         }

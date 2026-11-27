@@ -67,11 +67,12 @@ extension MacPageSelectionController {
 struct ConnectorAppearanceButton: View {
     let connector: PageDiagram
     let selection: MacDiagramSelectionStyle
+    var floating = false
     @ViewState private var isPresented = false
 
     var body: some View {
         Button { isPresented.toggle() } label: {
-            Label("Arrow", systemImage: "arrow.up.right").font(.caption).frame(height: 30)
+            Label("Arrow", systemImage: "arrow.up.right").font(.caption).frame(height: 30).floatingHitArea(floating)
         }
         .buttonStyle(.borderless)
         .help("Change the selected arrow’s style")

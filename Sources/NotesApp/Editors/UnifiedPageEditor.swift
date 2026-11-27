@@ -38,6 +38,7 @@ struct UnifiedPageEditor: NSViewRepresentable {
     var toolbarHistory: PageToolbarHistory?
     var zoomSession: PageZoomSession?
     var inkSelectionStyle: PageInkSelectionStyle?
+    var textFormatting: PageTextFormatting?
     private var diagramSelectionStyle: MacDiagramSelectionStyle?
 
     init(text: Binding<String>, rtfData: Binding<Data?>, strokes: Binding<[InkStroke]>, pencilKitData: Binding<Data?>,
@@ -117,6 +118,33 @@ struct UnifiedPageEditor: NSViewRepresentable {
     }
 
     private func configure(_ page: UnifiedMacPageView, coordinator: Coordinator, isEnabled: Bool) {
+        page.textView.pageTextFormatting = textFormatting
+        textFormatting?.target = { [weak page] in
+            guard isEnabled, let page, page.activeTool == .text, page.selectionController?.canRecolorSelection != true else { return nil }
+            if let first = page.window?.firstResponder as? NSTextView {
+                guard let editor = first as? NotesTextView, editor.isDescendant(of: page) else { return nil }
+                return editor
+            }
+            if let active = NotesTextView.activeEditor, active.isDescendant(of: page) { return active }
+            return page.textView
+        }
+        textFormatting?.validate = { [weak page, weak coordinator] editor, text, rtf in
+            guard isEnabled, let page, let coordinator else { return false }
+            var candidate = coordinator.selection.content
+            if editor === page.textView {
+                candidate.text = text
+                candidate.rtfData = rtf
+            } else if let id = page.textBoxViews.first(where: { $0.value.editor === editor })?.key,
+                      let index = candidate.textBoxes.firstIndex(where: { $0.id == id }) {
+                candidate.textBoxes[index].text = text
+                candidate.textBoxes[index].rtfData = rtf
+                let frames = page.externalAnchorFrames(in: candidate, measuringTextBoxes: [id])
+                candidate.diagrams = PageDiagramGeometry.routedConnectors(in: candidate.diagrams, frames: frames,
+                    movedDiagramIDs: [], movedObjectIDs: [.textBox: [id]])
+            } else { return false }
+            return coordinator.parent.onPageValidate?(candidate) != false
+        }
+        textFormatting?.scheduleRefresh()
         toolbarHistory?.bind { [weak history = coordinator.selection.history] in isEnabled ? history : nil }
         let value = PageContent(text: text, rtfData: rtfData, strokes: strokes, pencilKitData: pencilKitData, textBoxes: textBoxes, equations: equations, images: images, diagrams: diagrams)
         coordinator.selection.load(value)
@@ -250,6 +278,7 @@ struct UnifiedPageEditor: NSViewRepresentable {
                 self.selection.onCommit?(value)
                 page.resizePaperToContent()
             }, onEquationEdit: parent.onEquationEdit)
+            for box in page.textBoxViews.values { box.editor.pageTextFormatting = parent.textFormatting }
         }
     }
 }

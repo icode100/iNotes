@@ -101,6 +101,7 @@ enum FullScreenToolbarMode: String, CaseIterable {
 }
 
 struct FullScreenToolbarModeMenu: View {
+    @Environment(\.customizeFloatingToolbar) private var customize
     @AppStorage("fullScreenToolbarMode") private var mode = FullScreenToolbarMode.docked
     var onSelection: () -> Void = {}
 
@@ -112,6 +113,8 @@ struct FullScreenToolbarModeMenu: View {
                     onSelection()
                 }
             }
+            Divider()
+            Button("Customize floating toolbar…", action: customize)
         } label: { Label("Full-screen toolbar", systemImage: "circle.grid.3x3.circle") }
         .help("Choose a toolbar for Full Page or full screen")
         .accessibilityValue(mode.title)

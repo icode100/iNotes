@@ -1198,10 +1198,110 @@ enum EditorDiagnostics {
         try check(editableBox.text == "Changed again" && editableView.isEditable,
                   "textbox editing continues after a model refresh in Text mode")
         checks += try selectAllChecks(window: window)
+        checks += try selectionAppearanceChecks()
         checks += try imageChecks(window: window)
+        checks += try textPaletteChecks(window: window)
         checks += try headingFieldChecks()
         checks += try DiagramDiagnostics.run()
         return "\(checks) native editor integration checks passed (shared text/ink page, straight lines, formatting, pressure, dark/light, searchable export, mixed text/ink lasso, atomic move/delete/undo, canonical rich text, native PencilKit masks and clipboard validation)."
+    }
+
+    private static func textPaletteChecks(window: NSWindow) throws -> Int {
+        var checks = 0
+        func check(_ value: Bool, _ message: String) throws {
+            guard value else { throw Failure(description: "Text palette: \(message)") }
+            checks += 1
+        }
+        let seed = NSMutableAttributedString(string: "Bold plain", attributes: [.font: NSFont.systemFont(ofSize: 16)])
+        seed.addAttribute(.font, value: NSFont.boldSystemFont(ofSize: 16), range: NSRange(location: 0, length: 4))
+        let box = PageTextBox(x: 15, y: 120, text: "Box letters")
+        var content = PageContent(text: seed.string, rtfData: ThemeTextAttributes.rtf(seed), textBoxes: [box])
+        let style = PageTextFormatting(color: nil)
+        var rejectFormatting = false
+        let appEditor = UnifiedPageEditor(
+            text: Binding(get: { content.text }, set: { content.text = $0 }),
+            rtfData: Binding(get: { content.rtfData }, set: { content.rtfData = $0 }),
+            strokes: .constant([]), pencilKitData: .constant(nil),
+            textBoxes: Binding(get: { content.textBoxes }, set: { content.textBoxes = $0 }),
+            tool: .text, theme: .rubyDark, onPageChange: { content = $0 }, onPageValidate: { _ in !rejectFormatting }
+        ).observingTextFormatting(style)
+        let host = NSHostingView(rootView: appEditor)
+        window.contentView = host
+        host.layoutSubtreeIfNeeded()
+        func findPage(_ view: NSView) -> UnifiedMacPageView? {
+            if let page = view as? UnifiedMacPageView { return page }
+            return view.subviews.lazy.compactMap(findPage).first
+        }
+        guard let page = findPage(host), let boxEditor = page.textBoxViews[box.id]?.editor,
+              let manager = page.textView.pageUndoManager else { throw Failure(description: "Could not mount palette fixture") }
+        let editor = page.textView
+        try check(window.makeFirstResponder(editor), "body accepts keyboard input")
+        let selected = NSRange(location: 0, length: 6)
+        editor.setSelectedRange(selected)
+        manager.removeAllActions()
+        manager.groupsByEvent = false
+        defer { manager.removeAllActions(); manager.groupsByEvent = true }
+        func action(_ body: () -> Void) {
+            manager.beginUndoGrouping()
+            body()
+            manager.endUndoGrouping()
+        }
+        func font(_ index: Int) -> NSFont? { editor.attributedString().attribute(.font, at: index, effectiveRange: nil) as? NSFont }
+        func color(_ data: Data?, _ text: String, at index: Int) -> String? {
+            guard let data, let rich = ThemeTextAttributes.readRTF(data, text: text), index < rich.length,
+                  let value = rich.attribute(.foregroundColor, at: index, effectiveRange: nil) as? NSColor else { return nil }
+            return ThemeTextAttributes.hex(value)
+        }
+        let original = content
+        rejectFormatting = true
+        style.chooseSize(48)
+        try check(content == original && font(0)?.pointSize == 16 && editor.selectedRange() == selected
+                  && !manager.canUndo && !manager.canRedo,
+                  "a rejected size change preserves native text, range, stored bytes and empty history")
+        rejectFormatting = false
+        action { style.chooseSize(36) }
+        try check(font(0)?.pointSize == 36 && font(5)?.pointSize == 36 && font(7)?.pointSize == 16,
+                  "resizes the native selection and preserves surrounding text")
+        try check(font(0).map { NSFontManager.shared.traits(of: $0).contains(.boldFontMask) } == true
+                    && font(5).map { !NSFontManager.shared.traits(of: $0).contains(.boldFontMask) } == true,
+                  "preserves mixed bold and regular fonts")
+        rejectFormatting = true
+        let acceptedSize = content
+        manager.undo()
+        try check(content == acceptedSize && font(0)?.pointSize == 36 && manager.canUndo && !manager.canRedo,
+                  "a rejected formatting undo retains the accepted content and retryable native action")
+        rejectFormatting = false
+        manager.undo()
+        try check(font(0)?.pointSize == 16, "size is undoable")
+        manager.redo()
+        try check(font(0)?.pointSize == 36 && editor.selectedRange() == selected, "size redo preserves the selected range")
+        action { style.chooseColor("#FFFFFF") }
+        try check(color(content.rtfData, content.text, at: 0) == "#FFFFFF" && color(content.rtfData, content.text, at: 6) != "#FFFFFF",
+                  "chosen white persists in RTF and stays within the selection")
+        manager.undo()
+        try check(color(content.rtfData, content.text, at: 0) != "#FFFFFF", "undo restores the previous canonical color")
+        manager.redo()
+        try check(color(content.rtfData, content.text, at: 0) == "#FFFFFF", "redo restores intentional white")
+        editor.setSelectedRange(NSRange(location: 10, length: 0))
+        let beforeCaret = content
+        style.chooseColor("#E2B84D")
+        style.chooseSize(24)
+        try check(content == beforeCaret, "choosing typing attributes alone leaves saved page content untouched")
+        editor.setSelectedRange(NSRange(location: 7, length: 0))
+        action {
+            editor.insertText("XY", replacementRange: editor.selectedRange())
+            editor.breakUndoCoalescing()
+        }
+        try check(content.text == "Bold plXYain" && color(content.rtfData, content.text, at: 7) == "#E2B84D"
+                  && font(8)?.pointSize == 24, "typing at a moved caret uses the chosen palette color and size")
+        let savedBody = content.rtfData
+        try check(window.makeFirstResponder(boxEditor), "positioned text accepts keyboard input")
+        boxEditor.setSelectedRange(NSRange(location: 4, length: 7))
+        action { style.chooseColor("#102040") }
+        let savedBox = content.textBoxes[0]
+        try check(content.rtfData == savedBody && color(savedBox.rtfData, savedBox.text, at: 4) == "#102040"
+                  && color(savedBox.rtfData, savedBox.text, at: 0) != "#102040", "formatting targets only the active text box range")
+        return checks
     }
 
     /// Exercise the actual heading components and AppKit field editor, including
@@ -1480,6 +1580,94 @@ enum EditorDiagnostics {
                   && reopened.library.node(id: sheetID)?.tags == ["pending", "last native edit"]
                   && reopened.library.node(id: sheetID)?.pageContent == originalContent,
                   "actual heading edits reopen with blank title, final tags and unchanged page payloads")
+        return checks
+    }
+
+    private static func selectionAppearanceChecks() throws -> Int {
+        var checks = 0
+        func check(_ condition: Bool, _ message: String) throws {
+            guard condition else { throw Failure(description: "Selection appearance: " + message) }
+            checks += 1
+        }
+        let page = UnifiedMacPageView(frame: NSRect(origin: .zero, size: InkExport.paperSize))
+        page.activeTool = .lasso
+        let controller = MacPageSelectionController()
+        controller.history.groupsByEvent = false
+        controller.page = page
+        let style = PageInkSelectionStyle()
+        style.bind(controller)
+        let attributes: [NSAttributedString.Key: Any] = [.font: NSFont.boldSystemFont(ofSize: 16),
+            .foregroundColor: ThemeTextAttributes.color("#202020")]
+        let text = NSAttributedString(string: "Aβ😀Z", attributes: attributes)
+        let rtf = ThemeTextAttributes.rtf(text)
+        let box = PageTextBox(text: text.string, rtfData: rtf)
+        let data = Data(base64Encoded: "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR4nGP4z8DwHwAFAAH/iZk9HQAAAABJRU5ErkJggg==")!
+        let image = PageImage(imageData: data)
+        let equation = NoteEquation(latex: "x^2")
+        let ink = InkStroke(points: [InkPoint(x: 10, y: 10), InkPoint(x: 20, y: 10)])
+        let shape = PageDiagram(fill: true, text: "Input")
+        let table = PageDiagram(kind: .table, rows: 1, columns: 1, cells: ["Output"])
+        let arrow = PageDiagram(kind: .connector, endAttachment: PageDiagramAttachment(targetDiagramID: shape.id, side: .left))
+        let untouched = PageDiagram(kind: .ellipse)
+        let original = PageContent(text: text.string, rtfData: rtf, strokes: [ink], textBoxes: [box], equations: [equation],
+            images: [image], diagrams: [shape, table, arrow, untouched])
+        var writes = 0
+        controller.onCommit = { _ in writes += 1 }
+        controller.load(original)
+        let selection = MacPageSelection(strokes: [ink.id], textBoxes: [box.id], equations: [equation.id], images: [image.id],
+            diagrams: [shape.id, table.id, arrow.id], textRanges: [NSRange(location: 1, length: 3)])
+        controller.selection = selection
+        controller.onValidate = { _ in false }
+        try check(!style.applySelectionColor("#1050F0") && !controller.history.canUndo && writes == 0 && controller.content == original,
+                  "A rejected mixed edit retains the complete previous snapshot")
+        controller.onValidate = nil
+        try check(style.applySelectionColor("#1050f0") && writes == 1 && controller.selection == selection,
+                  "A single palette operation changes the mixed selection")
+        let colored = controller.content
+        guard let bodyRTF = colored.rtfData, let boxRTF = colored.textBoxes[0].rtfData,
+              let bodyText = ThemeTextAttributes.readRTF(bodyRTF, text: text.string),
+              let boxText = ThemeTextAttributes.readRTF(boxRTF, text: text.string) else { throw Failure(description: "Missing colored text") }
+        func hex(_ source: NSAttributedString, _ index: Int) -> String? {
+            (source.attribute(.foregroundColor, at: index, effectiveRange: nil) as? NSColor).map(ThemeTextAttributes.hex)
+        }
+        try check(hex(bodyText, 0) == "#202020" && hex(bodyText, 1) == "#1050F0" && hex(bodyText, 4) == "#202020"
+                  && hex(boxText, 0) == "#1050F0" && hex(boxText, 4) == "#1050F0", "Only the selected UTF-16 range and box change color")
+        try check(colored.strokes[0].colorHex == "#1050F0" && colored.strokes[0].id == ink.id
+                  && colored.equations[0].colorHex == "#1050F0" && colored.equations[0].latex == equation.latex,
+                  "The ink and equation share the canonical selection color")
+        try check(colored.diagrams.prefix(3).allSatisfy { $0.colorHex == "#1050F0" } && colored.diagrams[0].fill
+                  && colored.diagrams[0].labelColorHex == "#1050F0" && colored.diagrams[1].labelColorHex == "#1050F0"
+                  && colored.diagrams[2].endAttachment == arrow.endAttachment && colored.diagrams[3] == untouched,
+                  "Selected shape, label, table, and arrow retain their geometry, fill and attachment")
+        try check(colored.images[0].tintHex == "#1050F0" && colored.images[0].imageData == data && controller.canClearImageTint,
+                  "Image color is a removable overlay on the original bytes")
+        let externalPNG = MacPageImageCodec.clipboardRepresentation(of: colored.images[0])
+        guard let bytes = externalPNG, let pixel = NSBitmapImageRep(data: bytes)?.colorAt(x: 0, y: 0)?.usingColorSpace(.sRGB) else {
+            throw Failure(description: "Could not render image tint")
+        }
+        try check(pixel.blueComponent > pixel.redComponent + 0.1 && pixel.alphaComponent > 0.99,
+                  "The exported image representation contains the selected blue tint and retains opacity")
+        try check(!style.applySelectionColor("#1050F0") && writes == 1, "Selecting the same color adds no write or history entry")
+        controller.history.undo()
+        try check(controller.content == original && !controller.history.canUndo, "One undo restores all original bytes")
+        controller.history.redo()
+        try check(controller.content == colored, "Redo reproduces the complete selection style")
+        try check(style.clearImageTint() && controller.content.images == original.images && controller.content.diagrams == colored.diagrams,
+                  "Remove tint restores the original image without changing selected diagrams")
+        controller.history.undo()
+        try check(controller.content == colored && style.applySelectionTextSize(36), "Undo restores the tint and the selected text accepts a new size")
+        let resized = controller.content
+        guard let sizedRTF = resized.rtfData, let sized = ThemeTextAttributes.readRTF(sizedRTF, text: text.string),
+              let inside = sized.attribute(.font, at: 1, effectiveRange: nil) as? NSFont,
+              let outside = sized.attribute(.font, at: 0, effectiveRange: nil) as? NSFont else { throw Failure(description: "Missing sized runs") }
+        try check(inside.pointSize == 36 && outside.pointSize == 16 && NSFontManager.shared.traits(of: inside).contains(.boldFontMask)
+                  && hex(sized, 1) == "#1050F0" && resized.diagrams[0].labelFontSize == 36 && resized.diagrams[1].labelFontSize == 36
+                  && resized.diagrams[2].labelFontSize == nil && resized.equations[0].fontSize == 36 && resized.images == colored.images,
+                  "Size edits preserve rich text traits, selected color, image appearance, and unlabeled connectors")
+        try check(!style.applySelectionTextSize(36) && !style.applySelectionTextSize(.infinity), "Repeated or invalid sizes leave history untouched")
+        page.inkView.isInputEnabled = false
+        try check(!style.applySelectionColor("#AA1155") && !style.clearImageTint() && controller.content == resized,
+                  "Read-only pages reject all selection color edits")
         return checks
     }
 

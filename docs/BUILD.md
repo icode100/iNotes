@@ -38,9 +38,9 @@ bash scripts/verify-macos.sh
 The build creates:
 
 - `dist/iNotes.app`: native ARM64 app bundle.
-- `dist/iNotes-1.5.0-arm64.dmg`: compressed disk image containing the app, an
+- `dist/iNotes-1.5.1-arm64.dmg`: compressed disk image containing the app, an
   Applications shortcut, and installation instructions.
-- `dist/iNotes-1.5.0-arm64.dmg.sha256`: SHA-256 checksum.
+- `dist/iNotes-1.5.1-arm64.dmg.sha256`: SHA-256 checksum.
 
 Open the disk image and drag iNotes to Applications. The DMG does not install
 background services, kernel extensions, browser runtimes, or privileged helpers.
@@ -48,7 +48,7 @@ The build script validates the property list, architecture, app signature, and D
 before publishing outputs. The verification script mounts it read-only and checks
 the packaged app and Applications shortcut.
 
-The packaging defaults are **v1.5.0 / build 2027**. The release workflow
+The packaging defaults are **v1.5.1 / build 2028**. The release workflow
 gives each same-version rebuild a build-specific filename so earlier
 installers keep their addresses.
 
@@ -300,6 +300,10 @@ Version 1.4 reads formats 1 through 5. Customized table row/column sizing,
 explicit arrowhead styling, automatic attachment sides and arrows attached to
 images, positioned text or equations promote a library to format 5. Removing
 those objects preserves the stored format. Older readers refuse format 5.
+
+Version 1.5.1 reads formats 1 through 6. Explicit image tint, equation color,
+diagram label color/size and deliberately near-white rich text require format 6.
+The selection clipboard uses the same content checks to advertise a compatible type.
 
 Ruled-page alignment uses native text-layout delegates and per-view geometry.
 Body lines and wrapped Unicode follow 28pt ruled rows; larger fonts use whole

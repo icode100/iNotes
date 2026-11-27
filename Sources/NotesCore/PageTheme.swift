@@ -123,6 +123,12 @@ public enum PageTheme: String, CaseIterable, Sendable {
         self == .vintageBlack ? "#F0E7D5" : (isDark ? "#EDF1F5" : "#20242A")
     }
 
+    public static func isRGBHex(_ value: String) -> Bool {
+        value.utf8.count == 7 && value.utf8.first == 35 && value.utf8.dropFirst().allSatisfy {
+            (48...57).contains($0) || (65...70).contains($0) || (97...102).contains($0)
+        }
+    }
+
     public var templateHex: String {
         switch self {
         case .vintage: return "#995D47"

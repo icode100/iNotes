@@ -67,7 +67,7 @@ enum InkColors {
         ("Teal", "#177E89"), ("Orange", "#C56A24"), ("Crimson", "#A62D42"),
         ("Indigo", "#4D4BA5"), ("Olive", "#6D762E"), ("Cocoa", "#805538"),
         ("Coral", "#DB746B"), ("Lilac", "#AA85C8"), ("Aqua", "#60B6B2"),
-        ("Silver", "#92989F")
+        ("Silver", "#92989F"), ("Yellow", "#FFD400")
     ]
 
     @MainActor static func canonicalHex(_ color: Color) -> String {
@@ -222,6 +222,7 @@ struct SheetDetail: View {
     let zoomSession: PageZoomSession
     @StateObject private var pageHistory = PageToolbarHistory()
     @StateObject private var selectedInkStyle = PageInkSelectionStyle()
+    @StateObject private var textFormatting = PageTextFormatting()
     #if os(macOS)
     @StateObject private var selectedDiagramStyle = MacDiagramSelectionStyle()
     #endif
@@ -229,6 +230,8 @@ struct SheetDetail: View {
     @AppStorage("inkWidth") private var inkWidth = InkNibPreset.defaultWidth(for: .pen)
     @AppStorage("inkTool") private var selectedTool = "pen"
     @AppStorage("fullScreenToolbarMode") private var fullScreenToolbarMode = FullScreenToolbarMode.docked
+    @AppStorage(FloatingToolbarChoice.preferenceKey) private var floatingButtons = FloatingToolbarChoice.factory
+    @Environment(\.customizeFloatingToolbar) private var customizeFloatingToolbar
     @AppStorage("floatingToolbarAnchorX") private var floatingAnchorX = 0.90
     @AppStorage("floatingToolbarAnchorY") private var floatingAnchorY = 0.32
     private var showsFloatingToolbar: Bool {
@@ -260,8 +263,16 @@ struct SheetDetail: View {
     @ViewState private var renameRequest: NameRequest?
     @ViewState private var showInkColors = false
     @ViewState private var recolorDraft = "#30343B"
+    @ViewState private var handwritingOnly = false
     @ViewState private var showDiagramPalette = false
     private var sheet: NoteNode? { store.library.node(id: sheetID) }
+    private func isPageReadOnly(_ sheet: NoteNode) -> Bool {
+        #if os(iOS)
+        return sheet.isTrashed || !sheet.images.isEmpty || !sheet.diagrams.isEmpty
+        #else
+        return sheet.isTrashed
+        #endif
+    }
     private var inkTool: InkTool { InkTool(rawValue: selectedTool) ?? .pen }
     private var diagramKind: PageDiagram.Kind { PageDiagram.Kind(rawValue: diagramKindPreference) ?? .rectangle }
     private var connectorRoute: PageDiagram.ConnectorRoute { PageDiagram.ConnectorRoute(rawValue: connectorRoutePreference) ?? .straight }
@@ -364,12 +375,15 @@ struct SheetDetail: View {
                             equationActions
                             Divider().frame(height: 22)
                             inkSettings
+                            if inkTool == .text || selectedInkStyle.canResizeSelectedText {
+                                textSizeMenu()
+                            }
                             #if os(macOS)
                             if inkTool == .text { Divider().frame(height: 22); formattingToolbar }
                             #endif
                         }.fixedSize(horizontal: true, vertical: false)
-                    }.frame(height: 34).disabled(sheet.isTrashed)
-                    attachmentButton(sheet)
+                    }.frame(height: 34).disabled(isPageReadOnly(sheet))
+                    attachmentButton(sheet).disabled(isPageReadOnly(sheet))
                     sheetsButton
                     headingButton
                     fullPageButton
@@ -407,6 +421,7 @@ struct SheetDetail: View {
                                   onObjectPlacement: { selectedTool = InkTool.select.rawValue },
                                   toolbarHistory: pageHistory, zoomSession: zoomSession)
                     .observingInkSelection(selectedInkStyle)
+                    .observingTextFormatting(textFormatting)
                     #if os(macOS)
                     .observingDiagramSelection(selectedDiagramStyle)
                     #endif
@@ -439,7 +454,11 @@ struct SheetDetail: View {
             .navigationTitle(store.sheetHeading(sheet.id))
             .focusedSceneValue(\.floatingPagePresentation, showsFloatingToolbar ? presentation : nil)
             .onReceive(NotificationCenter.default.publisher(for: .noteToolShortcut)) { note in
-                if let tool = note.object as? InkTool, !sheet.isTrashed { selectTool(tool) }
+                if let tool = note.object as? InkTool, !isPageReadOnly(sheet) { selectTool(tool) }
+            }
+            .onChange(of: inkColor) { _, color in
+                // Tool defaults and other windows can change the palette without a formatting command.
+                textFormatting.chooseColor(color, applyToTextSelection: false)
             }
             .onChange(of: store.notebookDefaults) { old, new in
                 guard NotebookDefaults.writingTools.contains(inkTool) else { return }
@@ -612,35 +631,48 @@ struct SheetDetail: View {
     }
 
     #if os(macOS)
-    private static let formatCommands: [(title: String, icon: String, command: RichTextCommand)] = [
-        ("Bold", "bold", .bold), ("Italic", "italic", .italic), ("Underline", "underline", .underline),
-        ("Heading", "textformat.size", .heading), ("Body text", "textformat", .body),
-        ("Bullet list", "list.bullet", .bullet), ("Checklist", "checklist", .checklist)
-    ]
-
     private var formattingToolbar: some View {
         HStack(spacing: 4) {
-            ForEach(Self.formatCommands, id: \.command) { item in
+            ForEach(FloatingToolbarChoice.formatCommands, id: \.command) { item in
                 if item.command == .heading { Divider().frame(height: 16).padding(.horizontal, 3) }
                 formatButton(item.title, item.icon, item.command)
             }
         }
     }
-    private func formatButton(_ title: String, _ symbol: String, _ command: RichTextCommand) -> some View {
-        Button { RichTextEditor.perform(command) } label: { Image(systemName: symbol).frame(width: 24, height: 22) }
+    private func formatButton(_ title: String, _ symbol: String, _ command: RichTextCommand, floating: Bool = false) -> some View {
+        Button { RichTextEditor.perform(command) } label: { Image(systemName: symbol).frame(width: 24, height: 22).floatingHitArea(floating) }
             .buttonStyle(.borderless).help(title).accessibilityLabel(title)
     }
     #endif
 
-    private static let drawingChoices: [(tool: InkTool, title: String, symbol: String)] = [
-        (.text, "Text", "textformat"), (.select, "Select", "cursorarrow"), (.lasso, "Lasso", "lasso"),
-        (.pen, "Pen", "pencil.tip"), (.line, "Straight line", "line.diagonal"), (.pencil, "Pencil", "pencil"),
-        (.marker, "Marker", "paintbrush.pointed"), (.highlighter, "Highlighter", "highlighter"), (.eraser, "Eraser", "eraser")
-    ]
+    private func textSizeMenu(floating: Bool = false) -> some View {
+        let currentSize = selectedInkStyle.canResizeSelectedText ? selectedInkStyle.selectionPointSize : textFormatting.selectionPointSize
+        let sizeLabel = currentSize.map { String(format: "%g pt", Double($0)) } ?? "Size"
+        return Menu {
+            ForEach(PageTextFormatting.sizes, id: \.self) { size in
+                let checked = currentSize == CGFloat(size)
+                Toggle("\(size) pt", isOn: Binding(get: { checked }, set: { _ in
+                    if selectedInkStyle.canResizeSelectedText { selectedInkStyle.applySelectionTextSize(CGFloat(size)) }
+                    else { textFormatting.chooseSize(size) }
+                })).accessibilityValue(checked ? "Selected" : "Not selected")
+            }
+        } label: {
+            if floating {
+                Image(systemName: "textformat.size").floatingHitArea(true)
+            } else {
+                Label(sizeLabel, systemImage: "textformat.size")
+            }
+        }
+        .disabled(inkTool != .text && !selectedInkStyle.canResizeSelectedText)
+        .help("Set the size of selected text or the next text you type")
+        .accessibilityLabel("Text size")
+        .accessibilityValue(sizeLabel == "Size" ? "" : sizeLabel)
+        .accessibilityIdentifier("page.text.size")
+    }
 
     private var drawingTools: some View {
         HStack(spacing: 3) {
-            ForEach(Self.drawingChoices, id: \.tool) { item in
+            ForEach(FloatingToolbarChoice.drawingChoices, id: \.tool) { item in
                 toolButton(item.tool, title: item.title, symbol: item.symbol)
             }
         }
@@ -703,7 +735,7 @@ struct SheetDetail: View {
     private var diagramTools: some View {
         HStack(spacing: 5) {
             diagramPaletteButton()
-            selectedDiagramAppearance
+            selectedDiagramAppearance()
         }
     }
 
@@ -759,7 +791,7 @@ struct SheetDetail: View {
                     HStack {
                         Text("Selection").font(.caption).foregroundStyle(.secondary)
                         Spacer()
-                        selectedDiagramAppearance
+                        selectedDiagramAppearance()
                     }
                     Text("Choose an icon, then drag once. Click blank paper to deselect; double-click an object to edit its text.")
                         .font(.caption).foregroundStyle(.secondary).fixedSize(horizontal: false, vertical: true)
@@ -768,15 +800,15 @@ struct SheetDetail: View {
             }
     }
 
-    @ViewBuilder private var selectedDiagramAppearance: some View {
+    @ViewBuilder private func selectedDiagramAppearance(floating: Bool = false) -> some View {
         if let arrow = selectedDiagramStyle.editableConnector {
-            ConnectorAppearanceButton(connector: arrow, selection: selectedDiagramStyle).id(arrow.id)
+            ConnectorAppearanceButton(connector: arrow, selection: selectedDiagramStyle, floating: floating).id(arrow.id)
         } else {
-            selectedShapeFillMenu
+            selectedShapeFillMenu(floating: floating)
         }
     }
 
-    private var selectedShapeFillMenu: some View {
+    private func selectedShapeFillMenu(floating: Bool) -> some View {
         Menu {
             if selectedDiagramStyle.fill == nil && selectedDiagramStyle.selectedCount > 0 {
                 Text("Mixed fill")
@@ -788,7 +820,7 @@ struct SheetDetail: View {
                 selectedDiagramStyle.setFill(false)
             }
         } label: {
-            Label("Fill", systemImage: "paintbrush.fill").font(.caption).frame(height: 30)
+            Label("Fill", systemImage: "paintbrush.fill").font(.caption).frame(height: 30).floatingHitArea(floating)
         }
         .menuStyle(.borderlessButton)
         .disabled(!selectedDiagramStyle.canEdit)
@@ -850,37 +882,50 @@ struct SheetDetail: View {
                 inkSwatch(choice)
             }
             inkPaletteButton()
-            if !selectedInkStyle.canEdit { customInkPicker.labelsHidden().frame(width: 26) }
+            if !selectedInkStyle.canRecolorSelection && inkTool != .text { customInkPicker.labelsHidden().frame(width: 26) }
             paperSettingsMenu()
         }
     }
 
     private func inkPaletteButton(compact: Bool = false) -> some View {
-        Button {
-            if !showInkColors { recolorDraft = inkColor }
+        let hasSelection = selectedInkStyle.canRecolorSelection
+        let title = hasSelection ? "Selection color" : (inkTool == .text ? "Text color" : "Ink colors")
+        return Button {
+            if !showInkColors {
+                recolorDraft = inkColor
+                handwritingOnly = false
+            }
             showInkColors.toggle()
         } label: {
-            if selectedInkStyle.canEdit && !compact { Label("Recolor ink", systemImage: "paintpalette") }
+            if hasSelection && !compact { Label(title, systemImage: "paintpalette") }
             else { Image(systemName: "paintpalette").frame(width: 24, height: 26).floatingHitArea(compact) }
         }.buttonStyle(.plain)
-            .help(selectedInkStyle.canEdit ? "Recolor selected handwriting" : "More ink colors")
-            .accessibilityLabel(selectedInkStyle.canEdit ? "Recolor selected handwriting" : "More ink colors")
+            .help(title).accessibilityLabel(title)
             .popover(isPresented: $showInkColors) {
                 VStack(alignment: .leading, spacing: 14) {
-                    Text(selectedInkStyle.canEdit ? "Recolor selected ink" : "Ink colors").font(.headline)
+                    Text(title).font(.headline)
+                    if selectedInkStyle.canEdit && hasSelection {
+                        Toggle("Handwriting only", isOn: $handwritingOnly)
+                    }
                     LazyVGrid(columns: Array(repeating: GridItem(.fixed(42)), count: 4), spacing: 12) {
                         ForEach(InkColors.palette, id: \.hex) { choice in
-                            inkSwatch(choice)
+                            inkSwatch(choice, inPalette: true)
                         }
                     }
-                    if selectedInkStyle.canEdit {
+                    if hasSelection || inkTool == .text {
                         ColorPicker("Custom color", selection: Binding(get: { Color(hex: recolorDraft) },
                             set: { recolorDraft = InkColors.canonicalHex($0) }), supportsOpacity: false)
                         HStack {
                             Text(recolorDraft).font(.caption.monospaced()).foregroundStyle(.secondary)
                             Spacer()
                             Button("Apply") {
-                                selectedInkStyle.apply(recolorDraft)
+                                chooseColor(recolorDraft, inkOnly: handwritingOnly)
+                                showInkColors = false
+                            }
+                        }
+                        if selectedInkStyle.canClearImageTint {
+                            Button("Remove image tint") {
+                                selectedInkStyle.clearImageTint()
                                 showInkColors = false
                             }
                         }
@@ -890,7 +935,7 @@ struct SheetDetail: View {
                     }
                 }.padding(18)
             }
-            .onChange(of: selectedInkStyle.canEdit) { _, _ in showInkColors = false }
+            .onChange(of: hasSelection) { _, _ in showInkColors = false }
     }
 
     private func paperSettingsMenu(readOnly: Bool = false, floating: Bool = false) -> some View {
@@ -954,27 +999,36 @@ struct SheetDetail: View {
     private var customInkPicker: some View {
         ColorPicker("Custom ink color", selection: Binding(
             get: { Color(hex: inkColor) },
-            set: { inkColor = InkColors.canonicalHex($0) }
+            set: { chooseColor(InkColors.canonicalHex($0)) }
         ), supportsOpacity: false)
         .help("Choose any ink color. Dark paper adapts dark colors for readability.")
         .accessibilityLabel("Custom ink color")
         .accessibilityValue(inkColor.uppercased())
     }
 
-    private func inkSwatch(_ choice: (name: String, hex: String)) -> some View {
-        let isCurrent = !selectedInkStyle.canEdit && inkColor.uppercased() == choice.hex
-        let label = selectedInkStyle.canEdit ? "Recolor selected ink " + choice.name : choice.name + " ink"
+    private func chooseColor(_ hex: String, inkOnly: Bool = false) {
+        if selectedInkStyle.canRecolorSelection {
+            if inkOnly && selectedInkStyle.canEdit { selectedInkStyle.apply(hex) }
+            else { selectedInkStyle.applySelectionColor(hex) }
+        } else {
+            inkColor = hex
+            textFormatting.chooseColor(hex, applyToTextSelection: inkTool == .text)
+        }
+    }
+
+    private func inkSwatch(_ choice: (name: String, hex: String), inPalette: Bool = false) -> some View {
+        let hasSelection = selectedInkStyle.canRecolorSelection
+        let isCurrent = !hasSelection && inkColor.uppercased() == choice.hex
+        let label = hasSelection ? "Recolor selection " + choice.name : choice.name + (inkTool == .text ? " text" : " ink")
         return Button {
-            if selectedInkStyle.canEdit {
-                selectedInkStyle.apply(choice.hex)
-                showInkColors = false
-            } else { inkColor = choice.hex }
+            chooseColor(choice.hex, inkOnly: inPalette && handwritingOnly)
+            if inPalette { showInkColors = false }
         } label: {
             Circle().fill(Color(hex: pageTheme.resolvedInkHex(choice.hex))).frame(width: 15, height: 15)
                 .padding(5).overlay(Circle().stroke(isCurrent ? Color.primary : .clear, lineWidth: 1.5))
         }.buttonStyle(.plain).help(label)
             .accessibilityLabel(label)
-            .accessibilityValue(selectedInkStyle.canEdit ? "" : (isCurrent ? "Selected" : "Not selected"))
+            .accessibilityValue(hasSelection ? "" : (isCurrent ? "Selected" : "Not selected"))
     }
 
     private func attachments(_ sheet: NoteNode) -> some View {
@@ -1028,41 +1082,26 @@ struct SheetDetail: View {
 }
 
 
-private extension View {
+extension View {
     @ViewBuilder func floatingHitArea(_ enabled: Bool) -> some View {
         if enabled { frame(maxWidth: .infinity, maxHeight: .infinity).contentShape(Circle()) }
         else { self }
     }
 }
 
-private enum FloatingPageTool: Hashable {
-    case exitWorkspace, drawing(InkTool), colors, undo, redo, paper, more
-    #if os(macOS)
-    case shapes
-    #endif
-}
-
 extension SheetDetail {
     func floatingDrawingToolbar(_ sheet: NoteNode) -> some View {
-        // Keep Exit on the first group of controls when the ring needs paging.
-        var items = [FloatingPageTool.exitWorkspace] + Self.drawingChoices.map { .drawing($0.tool) }
-        #if os(macOS)
-        items.append(.shapes)
-        #endif
-        items += [.colors, .undo, .redo, .paper, .more]
+        let selected = FloatingToolbarChoice.visibleIDs(in: floatingButtons)
+        let items = FloatingToolbarChoice.all.filter { selected.contains($0.id) }.map(\.tool)
         return FloatingPageToolbar(items: items, hoverOnly: floatingHoverOnly, anchor: floatingAnchor) { item in
             floatingControl(item, sheet: sheet)
         }
     }
 
     @ViewBuilder private func floatingControl(_ item: FloatingPageTool, sheet: NoteNode) -> some View {
-        #if os(macOS)
-        let readOnly = sheet.isTrashed
-        #else
-        let readOnly = sheet.isTrashed || !sheet.images.isEmpty || !sheet.diagrams.isEmpty
-        #endif
+        let readOnly = isPageReadOnly(sheet)
         switch item {
-        case .exitWorkspace:
+        case .command(.exitWorkspace):
             Button(action: presentation.exitFullScreenWorkspace) {
                 Image(systemName: "arrow.down.right.and.arrow.up.left").floatingHitArea(true)
             }
@@ -1079,7 +1118,7 @@ extension SheetDetail {
             }
             #endif
         case .drawing(let tool):
-            if let choice = Self.drawingChoices.first(where: { $0.tool == tool }) {
+            if let choice = FloatingToolbarChoice.drawingChoices.first(where: { $0.tool == tool }) {
                 toolButton(tool, title: choice.title, symbol: choice.symbol, floating: true)
                     .disabled(readOnly)
                     .accessibilityIdentifier("floating." + tool.rawValue)
@@ -1093,38 +1132,88 @@ extension SheetDetail {
                     #endif
             }
         #if os(macOS)
-        case .shapes:
+        case .command(.shapes):
             diagramPaletteButton(floating: true).disabled(readOnly)
+        case .command(.fill):
+            selectedDiagramAppearance(floating: true).labelStyle(.iconOnly).menuIndicator(.hidden)
+                .disabled(readOnly)
+        case .format(let command):
+            if let choice = FloatingToolbarChoice.formatCommands.first(where: { $0.command == command }) {
+                formatButton(choice.title, choice.icon, command, floating: true).disabled(readOnly || inkTool != .text)
+            }
         #endif
-        case .colors:
+        case .command(.textSize):
+            textSizeMenu(floating: true).disabled(readOnly)
+                #if os(macOS)
+                .menuStyle(.borderlessButton).menuIndicator(.hidden)
+                #endif
+        case .command(.selection):
+            floatingMenu("Selection actions", "square.dashed") { selectionCommands }.disabled(readOnly)
+        case .command(.equations):
+            floatingMenu("Equations", "function") { equationCommands }.disabled(readOnly)
+        case .command(.attachment):
+            floatingButton("Attach a file", "paperclip") { showAttachmentImporter = true }.disabled(readOnly)
+        case .command(.navigation):
+            floatingButton(presentation.sheetsVisible ? "Hide page navigation" : "Show page navigation", "ellipsis.rectangle") {
+                presentation.toggleSheets()
+            }
+        case .command(.heading):
+            floatingButton(!presentation.fullPage && presentation.headingVisible ? "Hide heading" : "Show heading", "text.rectangle") {
+                presentation.toggleHeading()
+            }
+        case .command(.tablet):
+            floatingMenu(inputDevice.status, "pencil.tip") { tabletStatusEntries }
+        case .command(.toolbarLayout):
+            fullScreenToolbarModeMenu.labelStyle(.iconOnly)
+                #if os(macOS)
+                .menuStyle(.borderlessButton).menuIndicator(.hidden)
+                #endif
+        case .command(.hideToolbar):
+            floatingButton("Hide drawing toolbar", "rectangle.topthird.inset.filled") { presentation.toolsVisible = false }
+        case .command(.colors):
             inkPaletteButton(compact: true).disabled(readOnly)
-        case .undo:
+        case .command(.undo):
             historyButton("Undo", symbol: "arrow.uturn.backward", enabled: !readOnly && pageHistory.canUndo,
                           action: pageHistory.undo, floating: true)
-        case .redo:
+        case .command(.redo):
             historyButton("Redo", symbol: "arrow.uturn.forward", enabled: !readOnly && pageHistory.canRedo,
                           action: pageHistory.redo, floating: true)
-        case .paper:
+        case .command(.paper):
             paperSettingsMenu(readOnly: readOnly, floating: true)
                 #if os(macOS)
                 .menuStyle(.borderlessButton).menuIndicator(.hidden)
                 #endif
-        case .more:
+        case .command(.more):
             moreFloatingTools(sheet, readOnly: readOnly)
         }
+    }
+
+    private func floatingButton(_ title: String, _ symbol: String, action: @escaping () -> Void) -> some View {
+        Button(action: action) { Image(systemName: symbol).floatingHitArea(true) }
+            .buttonStyle(.plain).help(title).accessibilityLabel(title)
+    }
+
+    private func floatingMenu<Items: View>(_ title: String, _ symbol: String, @ViewBuilder items: () -> Items) -> some View {
+        Menu(content: items) { Image(systemName: symbol).floatingHitArea(true) }
+            #if os(macOS)
+            .menuStyle(.borderlessButton).menuIndicator(.hidden)
+            #endif
+            .help(title).accessibilityLabel(title)
     }
 
     private var exitWorkspaceTitle: String { presentation.nativeFullScreen ? "Exit Full Screen" : "Exit Full Page" }
 
     private func moreFloatingTools(_ sheet: NoteNode, readOnly: Bool) -> some View {
         Menu {
+            Button("Customize floating toolbar…", action: customizeFloatingToolbar)
+            Divider()
             Group {
                 Menu("Selection") { selectionCommands }
                 Menu("Equations") { equationCommands }
                 #if os(macOS)
                 if inkTool == .text {
                     Menu("Format text") {
-                        ForEach(Self.formatCommands, id: \.command) { item in
+                        ForEach(FloatingToolbarChoice.formatCommands, id: \.command) { item in
                             Button(item.title) { RichTextEditor.perform(item.command) }
                         }
                     }

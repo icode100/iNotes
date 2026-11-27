@@ -1,7 +1,7 @@
 import Foundation
 
 public struct NoteLibrary: Codable, Equatable, Sendable {
-    public static let currentFormatVersion = 5
+    public static let currentFormatVersion = 6
     public var formatVersion: Int
     public private(set) var nodes: [NoteNode]
     public private(set) var modifiedAt: Date
@@ -113,12 +113,7 @@ public struct NoteLibrary: Codable, Equatable, Sendable {
         }
         replacement.updatedAt = Date()
         candidate.nodes[index] = replacement
-        if replacement.diagrams.contains(where: \.requiresFormat5) { candidate.formatVersion = max(candidate.formatVersion, 5) }
-        else if !replacement.diagrams.isEmpty { candidate.formatVersion = max(candidate.formatVersion, 4) }
-        else if !replacement.images.isEmpty { candidate.formatVersion = max(candidate.formatVersion, 3) }
-        else if !replacement.textBoxes.isEmpty || !replacement.equations.isEmpty {
-            candidate.formatVersion = max(candidate.formatVersion, 2)
-        }
+        candidate.formatVersion = max(candidate.formatVersion, replacement.minimumPageFormat)
         if previous.parentID == replacement.parentID, previous.kind == replacement.kind,
            previous.isTrashed == replacement.isTrashed, previous.order == replacement.order {
             // Existing structure is unchanged. Avoid scanning every other sheet's ink on each keypress.
@@ -261,24 +256,16 @@ public struct NoteLibrary: Codable, Equatable, Sendable {
 
     public func validate() throws {
         guard (1...Self.currentFormatVersion).contains(formatVersion) else { throw LibraryError.unsupportedVersion(formatVersion) }
-        if formatVersion == 1, nodes.contains(where: { !$0.textBoxes.isEmpty || !$0.equations.isEmpty }) {
-            throw LibraryError.invalidData("Movable text and equations require archive format 2.")
-        }
-        if formatVersion < 3, nodes.contains(where: { !$0.images.isEmpty }) {
-            throw LibraryError.invalidData("Page images require archive format 3.")
-        }
-        if formatVersion < 4, nodes.contains(where: { !$0.diagrams.isEmpty }) {
-            throw LibraryError.invalidData("Shapes, connectors, and tables require archive format 4.")
-        }
-        if formatVersion < 5, nodes.contains(where: { $0.diagrams.contains(where: \.requiresFormat5) }) {
-            throw LibraryError.invalidData("Custom table dimensions, open arrowheads, and links to page objects require archive format 5.")
-        }
         guard nodes.count <= 50_000 else { throw LibraryError.invalidData("Too many items.") }
         guard Set(nodes.map(\.id)).count == nodes.count else { throw LibraryError.duplicateID }
         let lookup = Dictionary(uniqueKeysWithValues: nodes.map { ($0.id, $0) })
         var ancestorDepths: [UUID: Int] = [:]
         var usedSheetNumbers: [UUID: Set<Int>] = [:]
         for node in nodes {
+            let required = node.minimumPageFormat
+            guard required <= formatVersion else {
+                throw LibraryError.invalidData("This page contains objects that require archive format \(required).")
+            }
             try Self.validatePayload(node)
             if node.kind == .workbook {
                 guard node.parentID == nil else { throw LibraryError.invalidParent }
@@ -359,6 +346,9 @@ public struct NoteLibrary: Codable, Equatable, Sendable {
         if previous?.equations != node.equations {
             guard node.equations.count <= 10_000,
                   Set(node.equations.map(\.id)).count == node.equations.count else { throw LibraryError.duplicateID }
+            guard node.equations.allSatisfy({ $0.colorHex.map(PageTheme.isRGBHex) ?? true }) else {
+                throw LibraryError.invalidData("An equation color must be a six-digit RGB color.")
+            }
             guard node.equations.allSatisfy({ !$0.latex.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
                 && $0.latex.count <= NoteEquation.maximumSourceLength && $0.x.isFinite && $0.y.isFinite
                 && $0.width.isFinite && $0.height.isFinite && $0.fontSize.isFinite

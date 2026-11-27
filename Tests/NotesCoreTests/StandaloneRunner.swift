@@ -106,6 +106,8 @@ struct StandaloneTestRunner {
             ("automatic connector facing and vertical elbows", diagrams, diagrams.testAutomaticConnectorFacesMovingAndResizedTargetsInEveryDirection),
             ("automatic external ports pins detachment and clipboard", diagrams, diagrams.testAutomaticConnectorProjectionScopesTypedTargetsPinsAndFreeEnds),
             ("annotated image save duplicate import", images, images.testImageArchiveSaveDuplicateAndImportPreserveAnnotatedPage),
+            ("object color and label size archive and clipboard versions", images, images.testObjectColorsAndLabelSizesUseLosslessArchiveAndClipboardVersions),
+            ("object color and label size atomic rejection", images, images.testInvalidObjectColorsAndLabelSizesRejectAtomically),
             ("legacy image defaults and version promotion", images, images.testLegacyArchivesSnapshotsAndClipboardDefaultImagesAndPromoteOnlyWhenNeeded),
             ("image geometry atomic rejection", images, images.testImageGeometryAndIDsRejectAtomicallyAcrossArchiveAndClipboard),
             ("image byte pixel and container bounds", images, images.testImageBytePixelAndContainerLimitsRejectBeforeRendering),

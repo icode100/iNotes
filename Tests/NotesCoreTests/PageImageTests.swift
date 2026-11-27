@@ -45,6 +45,74 @@ final class PageImageTests: XCTestCase {
         XCTAssertEqual(destination.nodes.last?.pageContent, original.pageContent)
     }
 
+    func testObjectColorsAndLabelSizesUseLosslessArchiveAndClipboardVersions() throws {
+        let (base, id) = try fixture()
+        let original = try XCTUnwrap(base.node(id: id))
+        var plain = original
+        plain.diagrams = [PageDiagram(kind: .rectangle, text: "Title")]
+        let whiteRTF = PageContent.explicitWhiteRTFPrefix + Data(#"{\colortbl;\red255\green255\blue255;}\cf1 White}"#.utf8)
+        for variant in 0..<6 {
+            var node = plain
+            switch variant {
+            case 0: node.equations[0].colorHex = "#FFCC10"
+            case 1: node.images[0].tintHex = "#993344"
+            case 2: node.diagrams[0].labelFontSize = 36
+            case 3: node.diagrams[0].labelColorHex = "#5588FF"
+            case 4: node.body = "White"; node.richTextRTF = whiteRTF
+            default: node.textBoxes[0].text = "White"; node.textBoxes[0].rtfData = whiteRTF
+            }
+            var library = base
+            try library.update(node)
+            XCTAssertEqual(library.formatVersion, 6)
+            let data = try LibraryArchive.encode(library)
+            let reopened = try LibraryArchive.decode(data)
+            XCTAssertEqual(reopened.node(id: id)?.pageContent, node.pageContent)
+            XCTAssertThrowsError(try LibraryArchive.encode(NoteLibrary(nodes: library.nodes, formatVersion: 5)))
+            var incoming = NoteLibrary()
+            _ = try incoming.merge(reopened)
+            XCTAssertEqual(incoming.formatVersion, 6)
+            XCTAssertEqual(incoming.nodes.last?.pageContent, node.pageContent)
+            let selection = PageClipboardPayload(text: node.body, rtfData: node.richTextRTF, textBoxes: node.textBoxes,
+                                                equations: node.equations, images: node.images, diagrams: node.diagrams)
+            XCTAssertEqual(selection.writablePasteboardTypes, ["io.inotes.page-selection.v6"])
+            XCTAssertEqual(try PageClipboardPayload.decodeValidated(JSONEncoder().encode(selection)), selection)
+            try library.update(plain)
+            XCTAssertEqual(library.formatVersion, 6)
+            XCTAssertEqual(library.node(id: id)?.images.first?.imageData, png)
+        }
+    }
+
+    func testInvalidObjectColorsAndLabelSizesRejectAtomically() throws {
+        let (base, id) = try fixture()
+        let original = try XCTUnwrap(base.node(id: id))
+        var invalid: [NoteNode] = []
+        for color in ["BAD", "#ABCDE", "#12345G", "#00FF00FF", "#1234６"] {
+            var node = original
+            node.images[0].tintHex = color
+            invalid.append(node)
+            node = original
+            node.equations[0].colorHex = color
+            invalid.append(node)
+            node = original
+            node.diagrams = [PageDiagram(kind: .ellipse)]
+            node.diagrams[0].labelColorHex = color
+            invalid.append(node)
+        }
+        for size in [0.0, 9.99, 72.01, .infinity, .nan] {
+            var node = original
+            node.diagrams = [PageDiagram(kind: .rectangle)]
+            node.diagrams[0].labelFontSize = size
+            invalid.append(node)
+        }
+        for node in invalid {
+            var library = base
+            XCTAssertThrowsError(try library.update(node))
+            XCTAssertEqual(library, base)
+            let clipboard = PageClipboardPayload(equations: node.equations, images: node.images, diagrams: node.diagrams)
+            XCTAssertThrowsError(try clipboard.validatePageContent())
+        }
+    }
+
     func testLegacyArchivesSnapshotsAndClipboardDefaultImagesAndPromoteOnlyWhenNeeded() throws {
         for version in [1, 2] {
             var object = try XCTUnwrap(JSONSerialization.jsonObject(with: LibraryArchive.encode(NoteLibrary.sample())) as? [String: Any])

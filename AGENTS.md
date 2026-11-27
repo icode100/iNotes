@@ -147,6 +147,16 @@ for the separate local, hosted and public verification results.
 
 ## Priorities
 
+- In 1.5.1 the floating toolbar has a device-local button list. Keep customization
+  reachable through Appearance and the bubble even after every button is removed.
+  Restore defaults returns Fill/Arrow style on Mac and Text size to the ring.
+- A palette choice in Text applies the canonical color to native highlighted text
+  and subsequent typing. Point-size changes preserve individual font traits.
+  Route commands to the owning page body or text box and preserve marked text.
+  A color change on a selected group edits all its supported members in one
+  undoable transaction. Keep connector attachments, image PNGs and pen defaults
+  intact. Removing an image tint restores its original colors.
+
 - Version 1.5 starts pages at 100% unless the user chooses another
   Notebook default or the page has its own saved zoom. Manual zoom (25–400%),
   Fit Page and Fit Width are device-local viewing preferences, keyed by library
@@ -232,7 +242,7 @@ for the separate local, hosted and public verification results.
   Commit the completed drag as one undoable change. The **Arrow** inspector
   edits a single selected connector's route, heads, head style, line pattern,
   width and canonical color. Apply the draft once and retain both attachments.
-- **Recolor ink** edits selected handwriting on editable Mac and iPad pages in
+- **Handwriting only** in Selection color edits selected handwriting on editable Mac and iPad pages in
   one undo step. Preserve unrelated members of mixed selections, the drawing
   tool's current color, portable stroke IDs and geometry, and native PencilKit
   ink type, opacity, transforms and eraser masks. Update matching portable
@@ -308,7 +318,9 @@ Use availability guards for APIs newer than the deployment target.
   IDs, titles, timestamps, and all page payloads; reject nonfinite dates before
   sorting. Incidental renumbering must not recreate the native editor or rewrite
   content/creation metadata. Content edits alone must not change numbering.
-- The 1.4 reader accepts archive formats 1 through 5. New libraries
+- The 1.5.1 reader accepts archive formats 1 through 6. Format 6 preserves
+  equation color, image tint, styled diagram labels and explicitly chosen near-white
+  RTF text. An absent style retains the earlier rendering. New libraries
   start at 2. Positioned text/equations require at least 2, images require 3,
   and basic diagrams require 4. Promote to 5 for custom table row/column
   fractions, explicit head style, automatic attachment sides, or an endpoint anchored to an image, positioned
@@ -336,8 +348,8 @@ Use availability guards for APIs newer than the deployment target.
   references to included targets and detaches omitted targets at their visible
   coordinates. Shapes move by frame, and free connectors move by their endpoints.
   Keep canonical colors and existing text/ink/image payloads intact.
-- Clipboard reads accept v5, v4, v3 and the original unversioned type under the
-  16 MiB limit. Advertise only v5 for selections requiring format 5 and only v4
+- Clipboard reads accept v6, v5, v4, v3 and the original unversioned type under the
+  16 MiB limit. Advertise only v6 for selections requiring format 6, only v5 for format 5 and only v4
   for other diagram selections. Image selections without diagrams advertise v4
   and v3. Selections without either also advertise the unversioned type. Keep
   iPad's explicit rejection of diagram editing and diagram clipboard pastes.

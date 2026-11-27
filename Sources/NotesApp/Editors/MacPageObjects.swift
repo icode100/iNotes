@@ -131,7 +131,7 @@ enum MacPageImageCodec {
         let message: String
         var errorDescription: String? { message }
     }
-    private static let cache = NSCache<NSData, NSImage>()
+    private static let cache = NSCache<NSArray, NSImage>()
 
     private static func source(_ data: Data) throws -> CGImageSource {
         guard !data.isEmpty, data.count <= PageImageLimits.maximumBytes else {
@@ -179,15 +179,40 @@ enum MacPageImageCodec {
         return CGImageSourceCreateImageAtIndex(source, 0, [kCGImageSourceShouldCacheImmediately: true] as CFDictionary)
     }
 
-    static func displayImage(_ data: Data) -> NSImage? {
+    static func displayImage(_ data: Data, tintHex: String? = nil) -> NSImage? {
         cache.countLimit = 16
         cache.totalCostLimit = 64 * 1024 * 1024
-        let key = data as NSData
+        let key: NSArray = [data as NSData, tintHex ?? ""]
         if let image = cache.object(forKey: key) { return image }
-        guard let cgImage = decode(data) else { return nil }
+        guard var cgImage = decode(data) else { return nil }
+        if let tintHex {
+            guard let space = CGColorSpace(name: CGColorSpace.sRGB),
+                  let surface = CGContext(data: nil, width: cgImage.width, height: cgImage.height, bitsPerComponent: 8,
+                      bytesPerRow: 0, space: space, bitmapInfo: CGImageAlphaInfo.premultipliedLast.rawValue) else { return nil }
+            let bounds = CGRect(x: 0, y: 0, width: cgImage.width, height: cgImage.height)
+            // Keep photographic detail and the original alpha mask. A bitmap
+            // context also works when exporting without a GPU-backed window.
+            surface.setFillColor(ThemeTextAttributes.color(tintHex).cgColor)
+            surface.fill(bounds)
+            surface.setBlendMode(.luminosity)
+            surface.draw(cgImage, in: bounds)
+            surface.setBlendMode(.destinationIn)
+            surface.draw(cgImage, in: bounds)
+            guard let rendered = surface.makeImage() else { return nil }
+            cgImage = rendered
+        }
         let image = NSImage(cgImage: cgImage, size: NSSize(width: cgImage.width, height: cgImage.height))
         cache.setObject(image, forKey: key, cost: cgImage.bytesPerRow * cgImage.height + data.count)
         return image
+    }
+
+    static func clipboardRepresentation(of image: PageImage) -> Data? {
+        guard let tint = image.tintHex else { return image.imageData }
+        guard let displayed = displayImage(image.imageData, tintHex: tint),
+              let pixels = displayed.cgImage(forProposedRect: nil, context: nil, hints: nil) else { return nil }
+        let data = NSBitmapImageRep(cgImage: pixels).representation(using: .png, properties: [:])
+        guard let data, data.count <= PageClipboardPayload.maximumBytes else { return nil }
+        return data
     }
 
     static let rasterTypes: [NSPasteboard.PasteboardType] = [.png, .tiff,
@@ -213,19 +238,24 @@ enum MacPageImageCodec {
 @MainActor
 final class MacPageImageView: NSView {
     private var imageData = Data()
+    private var tintHex: String?
     override var isFlipped: Bool { true }
     override func hitTest(_ point: NSPoint) -> NSView? { nil }
 
     func configure(_ image: PageImage) {
         frame = NSRect(x: image.x, y: image.y, width: image.width, height: image.height)
-        if imageData != image.imageData { imageData = image.imageData; needsDisplay = true }
+        if imageData != image.imageData || tintHex != image.tintHex {
+            imageData = image.imageData
+            tintHex = image.tintHex
+            needsDisplay = true
+        }
         setAccessibilityElement(true)
         setAccessibilityRole(.image)
         setAccessibilityLabel("Pasted page image")
     }
 
     override func draw(_ dirtyRect: NSRect) {
-        guard let image = MacPageImageCodec.displayImage(imageData) else { return }
+        guard let image = MacPageImageCodec.displayImage(imageData, tintHex: tintHex) else { return }
         image.draw(in: bounds, from: .zero, operation: .sourceOver, fraction: 1, respectFlipped: true,
                    hints: [.interpolation: NSImageInterpolation.high])
     }

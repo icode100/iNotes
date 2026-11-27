@@ -38,6 +38,9 @@ public struct PageDiagram: Identifiable, Codable, Equatable, Sendable {
     public var width: Double
     public var height: Double
     public var colorHex: String
+    public var labelColorHex: String?
+    public var labelFontSize: Double?
+    public var hasLabelText: Bool { !text.isEmpty || (kind == .table && cells.contains { !$0.isEmpty }) }
     public var lineWidth: Double
     public var linePattern: LinePattern
     public var fill: Bool
@@ -71,7 +74,7 @@ public struct PageDiagram: Identifiable, Codable, Equatable, Sendable {
     public var requiresFormat5: Bool { rowSizing != nil || columnSizing != nil || openArrowheads != nil || hasExternalAttachment || hasAutomaticPort }
 
     private enum CodingKeys: String, CodingKey {
-        case id, kind, x, y, width, height, colorHex, lineWidth, linePattern, fill, text, rows, columns, cells
+        case id, kind, x, y, width, height, colorHex, labelColorHex, labelFontSize, lineWidth, linePattern, fill, text, rows, columns, cells
         case start, end, startAttachment, endAttachment, route, arrowHeads, openArrowheads
         case rowSizing = "rowFractions", columnSizing = "columnFractions"
     }
@@ -84,9 +87,11 @@ public struct PageDiagram: Identifiable, Codable, Equatable, Sendable {
                 rowFractions: [Double]? = nil, columnFractions: [Double]? = nil,
                 start: InkPoint = InkPoint(x: 40, y: 40), end: InkPoint = InkPoint(x: 280, y: 180),
                 startAttachment: PageDiagramAttachment? = nil, endAttachment: PageDiagramAttachment? = nil,
-                route: ConnectorRoute = .straight, arrowHeads: ArrowHeads = .end, openArrowheads: Bool? = nil) {
+                route: ConnectorRoute = .straight, arrowHeads: ArrowHeads = .end, openArrowheads: Bool? = nil,
+                labelColorHex: String? = nil, labelFontSize: Double? = nil) {
         self.id = id; self.kind = kind; self.x = x; self.y = y
         self.width = width; self.height = height; self.colorHex = colorHex
+        self.labelColorHex = labelColorHex; self.labelFontSize = labelFontSize
         self.lineWidth = lineWidth; self.linePattern = linePattern; self.fill = fill; self.text = text
         self.rows = rows; self.columns = columns
         self.rowSizing = rowFractions.map(TableFractions.init)
@@ -184,10 +189,16 @@ public enum PageDiagramLimits {
         let lookup = Dictionary(uniqueKeysWithValues: diagrams.map { ($0.id, $0) })
         var cellCount = 0, textBytes = 0, patternBudget = maximumPatternSegments
         for value in diagrams {
+            if let color = value.labelColorHex, !PageTheme.isRGBHex(color) {
+                throw LibraryError.invalidData("A diagram's text color must be a six-digit RGB color.")
+            }
+            if let size = value.labelFontSize, !size.isFinite || !(10...72).contains(size) {
+                throw LibraryError.invalidData("Diagram text must be between 10 and 72 points.")
+            }
             guard coordinate(value.x), coordinate(value.y), value.width.isFinite, value.height.isFinite,
                   (1...10_000).contains(value.width), (1...10_000).contains(value.height),
                   value.lineWidth.isFinite, (0.5...100).contains(value.lineWidth),
-                  validColor(value.colorHex), value.text.utf8.count <= maximumLabelBytes,
+                  PageTheme.isRGBHex(value.colorHex), value.text.utf8.count <= maximumLabelBytes,
                   point(value.start), point(value.end) else {
                 throw LibraryError.invalidData("A diagram has invalid coordinates, style, or text.")
             }
@@ -254,11 +265,6 @@ public enum PageDiagramLimits {
             && (0...InkGeometryLimits.maximumPageDimension).contains(value.x)
             && (0...InkGeometryLimits.maximumPageDimension).contains(value.y)
             && value.pressure.isFinite && (0...1).contains(value.pressure)
-    }
-    private static func validColor(_ value: String) -> Bool {
-        value.utf8.count == 7 && value.first == "#" && value.dropFirst().utf8.allSatisfy {
-            (48...57).contains($0) || (65...70).contains($0) || (97...102).contains($0)
-        }
     }
 }
 

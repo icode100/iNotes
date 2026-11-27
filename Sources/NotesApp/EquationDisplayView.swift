@@ -17,6 +17,7 @@ final class EquationDisplayView: EquationPlatformView {
     private struct RenderSignature: Equatable {
         let latex: String
         let fontSize: Double
+        let colorHex: String
         let theme: PageTheme
     }
     private var renderSignature: RenderSignature?
@@ -51,11 +52,12 @@ final class EquationDisplayView: EquationPlatformView {
         setNeedsLayout()
         #endif
         let fontSize = max(8, min(120, equation.fontSize.isFinite ? equation.fontSize : 24))
-        let signature = RenderSignature(latex: equation.latex, fontSize: fontSize, theme: theme)
+        let colorHex = equation.colorHex.map(theme.resolvedInkHex) ?? theme.textHex
+        let signature = RenderSignature(latex: equation.latex, fontSize: fontSize, colorHex: colorHex, theme: theme)
         guard signature != renderSignature else { return }
         renderSignature = signature
         math.fontSize = CGFloat(fontSize)
-        math.textColor = ThemeTextAttributes.color(theme.textHex)
+        math.textColor = ThemeTextAttributes.color(colorHex)
         // Reject excessive complexity before invoking the recursive LaTeX parser.
         if let error = Self.sourceLimitError(equation.latex) {
             math.latex = ""

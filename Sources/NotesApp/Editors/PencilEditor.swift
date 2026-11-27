@@ -14,12 +14,23 @@ private typealias InkPlatformColor = UIColor
 protocol SelectedInkEditing: AnyObject {
     var canRecolorSelectedInk: Bool { get }
     @discardableResult func recolorSelectedInk(_ hex: String) -> Bool
+    var canRecolorSelection: Bool { get }
+    var canResizeSelectedText: Bool { get }
+    var selectionPointSize: CGFloat? { get }
+    var canClearImageTint: Bool { get }
+    @discardableResult func applySelectionColor(_ hex: String) -> Bool
+    @discardableResult func applySelectionTextSize(_ pointSize: CGFloat) -> Bool
+    @discardableResult func clearImageTint() -> Bool
 }
 
 @MainActor
 final class PageInkSelectionStyle: ObservableObject {
     private weak var target: (any SelectedInkEditing)?
     @Published private(set) var canEdit = false
+    @Published private(set) var canRecolorSelection = false
+    @Published private(set) var canResizeSelectedText = false
+    @Published private(set) var selectionPointSize: CGFloat?
+    @Published private(set) var canClearImageTint = false
     private var refreshPending = false
 
     func bind(_ target: any SelectedInkEditing) {
@@ -35,10 +46,21 @@ final class PageInkSelectionStyle: ObservableObject {
             refreshPending = false
             let enabled = target?.canRecolorSelectedInk == true
             if canEdit != enabled { canEdit = enabled }
+            let canRecolor = target?.canRecolorSelection == true
+            if canRecolorSelection != canRecolor { canRecolorSelection = canRecolor }
+            let canResize = target?.canResizeSelectedText == true
+            if canResizeSelectedText != canResize { canResizeSelectedText = canResize }
+            let pointSize = canResize ? target?.selectionPointSize : nil
+            if selectionPointSize != pointSize { selectionPointSize = pointSize }
+            let canClear = target?.canClearImageTint == true
+            if canClearImageTint != canClear { canClearImageTint = canClear }
         }
     }
 
     @discardableResult func apply(_ hex: String) -> Bool { target?.recolorSelectedInk(hex) ?? false }
+    @discardableResult func applySelectionColor(_ hex: String) -> Bool { target?.applySelectionColor(hex) ?? false }
+    @discardableResult func applySelectionTextSize(_ pointSize: CGFloat) -> Bool { target?.applySelectionTextSize(pointSize) ?? false }
+    @discardableResult func clearImageTint() -> Bool { target?.clearImageTint() ?? false }
 }
 
 extension UnifiedPageEditor {
@@ -46,6 +68,127 @@ extension UnifiedPageEditor {
         var editor = self
         editor.inkSelectionStyle = style
         return editor
+    }
+}
+
+/// Work on canonical snapshots so a mixed lasso edit has a single validation
+/// and undo boundary, even when it contains both PencilKit and rich text.
+enum SelectedPageAppearance {
+    case color(String)
+    case textSize(CGFloat)
+
+    /// Stop as soon as the size is mixed. Read visible text directly when the
+    /// controller has mounted it so inspection doesn't serialize any RTF.
+    @MainActor
+    static func pointSize(in page: PageContent, textRanges: [NSRange], textBoxes: Set<UUID>, equations: Set<UUID>,
+                          diagrams: Set<UUID> = [], body: () -> NSAttributedString,
+                          boxText: (PageTextBox) -> NSAttributedString) -> CGFloat? {
+        var sizes = Set<CGFloat>()
+        func collect(_ text: NSAttributedString, ranges: [NSRange]) {
+            for range in ranges {
+                guard sizes.count < 2, range.location >= 0, range.location <= text.length,
+                      range.length >= 0, range.length <= text.length - range.location else { return }
+                text.enumerateAttribute(.font, in: range) { font, _, stop in
+                    sizes.insert((font as? NoteTextFont)?.pointSize ?? 16)
+                    if sizes.count > 1 { stop.pointee = true }
+                }
+            }
+        }
+        for diagram in page.diagrams where diagrams.contains(diagram.id) && diagram.hasLabelText {
+            sizes.insert(diagram.labelFontSize ?? 14)
+            if sizes.count > 1 { return nil }
+        }
+        for equation in page.equations where equations.contains(equation.id) {
+            sizes.insert(equation.fontSize)
+            if sizes.count > 1 { return nil }
+        }
+        if !textRanges.isEmpty { collect(body(), ranges: textRanges) }
+        if sizes.count > 1 { return nil }
+        for box in page.textBoxes where textBoxes.contains(box.id) {
+            let text = boxText(box)
+            collect(text, ranges: [NSRange(location: 0, length: text.length)])
+            if sizes.count > 1 { return nil }
+        }
+        return sizes.first
+    }
+
+    @MainActor
+    func applying(to original: PageContent, strokes: Set<UUID>, nativeStrokes: Set<Int>,
+                  textRanges: [NSRange], textBoxes: Set<UUID>, equations: Set<UUID>,
+                  images: Set<UUID> = [], diagrams: Set<UUID> = [],
+                  canonicalBody: () -> NSAttributedString) throws -> PageContent {
+        var page = original
+        switch self {
+        case .color(let hex):
+            page = try PortableInkConverter.recoloring(original, strokes: strokes, nativeStrokes: nativeStrokes, hex: hex)
+            let color = hex.uppercased()
+            for index in page.diagrams.indices where diagrams.contains(page.diagrams[index].id) {
+                if page.diagrams[index].colorHex.uppercased() != color { page.diagrams[index].colorHex = color }
+                if page.diagrams[index].hasLabelText { page.diagrams[index].labelColorHex = color }
+            }
+            for index in page.equations.indices where equations.contains(page.equations[index].id) { page.equations[index].colorHex = color }
+            for index in page.images.indices where images.contains(page.images[index].id) { page.images[index].tintHex = color }
+        case .textSize(let pointSize):
+            guard (10...72).contains(pointSize) else { throw LibraryError.invalidData("Choose a text size from 10 to 72 points.") }
+            for index in page.diagrams.indices where diagrams.contains(page.diagrams[index].id) && page.diagrams[index].hasLabelText {
+                page.diagrams[index].labelFontSize = pointSize
+            }
+            for index in page.equations.indices where equations.contains(page.equations[index].id) && page.equations[index].fontSize != pointSize {
+                let size = EquationDisplayView.measuredSize(latex: page.equations[index].latex, fontSize: pointSize)
+                page.equations[index].fontSize = pointSize
+                page.equations[index].width = size.width
+                page.equations[index].height = size.height
+            }
+        }
+
+        if !textRanges.isEmpty, let rtf = try formatting(canonicalBody(), ranges: textRanges) { page.rtfData = rtf }
+        for index in page.textBoxes.indices where textBoxes.contains(page.textBoxes[index].id) {
+            let box = page.textBoxes[index]
+            let text: NSAttributedString
+            if let rtf = box.rtfData {
+                guard let decoded = ThemeTextAttributes.readRTF(rtf, text: box.text) else {
+                    throw LibraryError.invalidData("The selected text box's formatting could not be read.")
+                }
+                text = decoded
+            } else {
+                text = NSAttributedString(string: box.text, attributes: [
+                    .font: NoteTextFont.systemFont(ofSize: 16), .foregroundColor: ThemeTextAttributes.color(PageTheme.light.textHex)
+                ])
+            }
+            if let rtf = try formatting(text, ranges: [NSRange(location: 0, length: text.length)]) {
+                page.textBoxes[index].rtfData = rtf
+            }
+        }
+        return page
+    }
+
+    @MainActor
+    private func formatting(_ source: NSAttributedString, ranges: [NSRange]) throws -> Data? {
+        let edited = NSMutableAttributedString(attributedString: source)
+        var changed = false
+        for range in ranges {
+            guard range.location >= 0, range.location <= source.length, range.length >= 0,
+                  range.length <= source.length - range.location else {
+                throw LibraryError.invalidData("The text selection has changed.")
+            }
+            source.enumerateAttributes(in: range) { attributes, run, _ in
+                switch self {
+                case .color(let hex):
+                    let color = hex.uppercased()
+                    let old = (attributes[.foregroundColor] as? NoteTextColor).map(ThemeTextAttributes.hex) ?? PageTheme.light.textHex
+                    guard old != color else { return }
+                    edited.addAttribute(.foregroundColor, value: ThemeTextAttributes.color(color), range: run)
+                case .textSize(let size):
+                    let font = attributes[.font] as? NoteTextFont ?? NoteTextFont.systemFont(ofSize: 16)
+                    guard font.pointSize != size else { return }
+                    edited.addAttribute(.font, value: ThemeTextAttributes.resizedFont(font, to: size), range: run)
+                }
+                changed = true
+            }
+        }
+        guard changed else { return nil }
+        guard let data = ThemeTextAttributes.rtf(edited) else { throw LibraryError.invalidData("The selected text's formatting could not be saved.") }
+        return data
     }
 }
 

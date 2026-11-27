@@ -8,11 +8,14 @@ public struct PageImage: Identifiable, Codable, Equatable, Sendable {
     public var width: Double
     public var height: Double
     public var imageData: Data
+    /// An optional photographic tint. The PNG always contains the original pixels.
+    public var tintHex: String?
 
     public init(id: UUID = UUID(), x: Double = 40, y: Double = 40,
-                width: Double = 400, height: Double = 300, imageData: Data) {
+                width: Double = 400, height: Double = 300, imageData: Data, tintHex: String? = nil) {
         self.id = id; self.x = x; self.y = y; self.width = width; self.height = height
         self.imageData = imageData
+        self.tintHex = tintHex
     }
 }
 
@@ -29,6 +32,9 @@ public enum PageImageLimits {
         guard Set(images.map(\.id)).count == images.count else { throw LibraryError.duplicateID }
         var pixels = 0
         for image in images {
+            if let tint = image.tintHex, !PageTheme.isRGBHex(tint) {
+                throw LibraryError.invalidData("An image tint must be a six-digit RGB color.")
+            }
             guard image.x.isFinite, image.y.isFinite, image.width.isFinite, image.height.isFinite,
                   (0...100_000).contains(image.x), (0...100_000).contains(image.y),
                   (1...10_000).contains(image.width), (1...10_000).contains(image.height) else {
@@ -104,6 +110,9 @@ public struct PageTextBox: Identifiable, Codable, Equatable, Sendable {
 
 /// One transaction and undo snapshot for operations spanning text and ink.
 public struct PageContent: Codable, Equatable, Sendable {
+    /// Earlier readers interpret white RTF as the automatic foreground on dark paper.
+    public static let explicitWhiteRTFPrefix = Data(#"{\rtf1{\*\inotesexplicitwhite 1}"#.utf8)
+
     public var text: String
     public var rtfData: Data?
     public var strokes: [InkStroke]
@@ -112,6 +121,21 @@ public struct PageContent: Codable, Equatable, Sendable {
     public var equations: [NoteEquation]
     public var images: [PageImage]
     public var diagrams: [PageDiagram]
+
+    /// The oldest reader that can round-trip every object on this page.
+    static func minimumArchiveFormat(rtf: Data?, textBoxes: [PageTextBox], equations: [NoteEquation],
+                                     images: [PageImage], diagrams: [PageDiagram]) -> Int {
+        if images.contains(where: { $0.tintHex != nil })
+            || equations.contains(where: { $0.colorHex != nil })
+            || diagrams.contains(where: { $0.labelColorHex != nil || $0.labelFontSize != nil })
+            || rtf?.starts(with: explicitWhiteRTFPrefix) == true
+            || textBoxes.contains(where: { $0.rtfData?.starts(with: explicitWhiteRTFPrefix) == true }) { return 6 }
+        if diagrams.contains(where: \.requiresFormat5) { return 5 }
+        if !diagrams.isEmpty { return 4 }
+        if !images.isEmpty { return 3 }
+        if !textBoxes.isEmpty || !equations.isEmpty { return 2 }
+        return 1
+    }
 
     public init(text: String = "", rtfData: Data? = nil, strokes: [InkStroke] = [],
                 pencilKitData: Data? = nil, textBoxes: [PageTextBox] = [], equations: [NoteEquation] = [],
@@ -140,6 +164,10 @@ public struct PageContent: Codable, Equatable, Sendable {
 }
 
 extension NoteNode {
+    var minimumPageFormat: Int {
+        PageContent.minimumArchiveFormat(rtf: richTextRTF, textBoxes: textBoxes, equations: equations, images: images, diagrams: diagrams)
+    }
+
     public var plainTextExport: String {
         ([body] + textBoxes.sorted { $0.y == $1.y ? $0.x < $1.x : $0.y < $1.y }.map(\.text)
          + equations.sorted { $0.y == $1.y ? $0.x < $1.x : $0.y < $1.y }.map { "$$\n\($0.latex)\n$$" }

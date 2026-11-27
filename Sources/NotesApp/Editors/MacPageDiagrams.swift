@@ -150,11 +150,11 @@ final class MacPageDiagramView: NSView {
                let tail = points.dropFirst().first(where: { hypot(start.x - $0.x, start.y - $0.y) > 0.01 }) {
                 arrow(at: start, from: tail, width: value.lineWidth, color: color, open: value.openArrowheads == true)
             }
-            if let label = labelBounds(of: value) { drawText(value.text, in: label) }
+            if let label = labelBounds(of: value) { drawText(value.text, in: label, diagram: value) }
         } else if value.kind == .table {
             for index in value.cells.indices {
                 let cell = PageTableGeometry.cellRect(index, in: value).insetBy(dx: 5, dy: 3)
-                drawText(value.cells[index], in: cell)
+                drawText(value.cells[index], in: cell, diagram: value)
             }
         } else {
             let label: CGRect
@@ -164,7 +164,7 @@ final class MacPageDiagramView: NSView {
             case .ellipse: label = rect.insetBy(dx: rect.width * 0.16, dy: rect.height * 0.16)
             default: label = rect.insetBy(dx: 8, dy: 8)
             }
-            drawText(value.text, in: label)
+            drawText(value.text, in: label, diagram: value)
         }
     }
 
@@ -173,7 +173,9 @@ final class MacPageDiagramView: NSView {
     func labelBounds(of value: PageDiagram, in values: [PageDiagram]? = nil) -> CGRect? {
         guard value.kind == .connector, !value.text.isEmpty else { return nil }
         let endpoints = PageDiagramGeometry.resolvedEndpoints(for: value, in: values ?? diagrams)
-        let width = min(180, bounds.width), height = min(48, bounds.height)
+        let pointSize = value.labelFontSize ?? 14
+        let width = min(max(180, pointSize * 10), bounds.width)
+        let height = min(max(48, pointSize * 2.5), bounds.height)
         let x = max(0, min(bounds.maxX - width, (endpoints.start.x + endpoints.end.x) / 2 - width / 2))
         let y = max(0, min(bounds.maxY - height, (endpoints.start.y + endpoints.end.y) / 2 + 5))
         return CGRect(x: x, y: y, width: width, height: height)
@@ -210,11 +212,11 @@ final class MacPageDiagramView: NSView {
             polygon([point, left, right]).fill()
         }
     }
-    private func drawText(_ text: String, in rect: CGRect) {
+    private func drawText(_ text: String, in rect: CGRect, diagram: PageDiagram) {
         guard !text.isEmpty, rect.width > 0, rect.height > 0 else { return }
         let paragraph = NSMutableParagraphStyle(); paragraph.lineBreakMode = .byWordWrapping
-        let attributes: [NSAttributedString.Key: Any] = [.font: NSFont.systemFont(ofSize: 14),
-            .foregroundColor: InkRenderer.color(theme.textHex), .paragraphStyle: paragraph]
+        let attributes: [NSAttributedString.Key: Any] = [.font: NSFont.systemFont(ofSize: diagram.labelFontSize ?? 14),
+            .foregroundColor: InkRenderer.color(diagram.labelColorHex.map(theme.resolvedInkHex) ?? theme.textHex), .paragraphStyle: paragraph]
         (text as NSString).draw(with: rect, options: [.usesLineFragmentOrigin, .truncatesLastVisibleLine], attributes: attributes)
     }
 }

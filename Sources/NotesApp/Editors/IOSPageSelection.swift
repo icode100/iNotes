@@ -19,10 +19,41 @@ final class IOSPageSelectionController: NSObject, SelectedInkEditing {
     var content = PageContent() { didSet { inkSelectionStyle?.scheduleRefresh() } }
     var selection = IOSPageSelection() { didSet { inkSelectionStyle?.scheduleRefresh() } }
     weak var inkSelectionStyle: PageInkSelectionStyle?
-    var canRecolorSelectedInk: Bool {
+    var canRecolorSelection: Bool {
         guard let page, page.isUserInteractionEnabled, page.selectionInputAllowed, !hasPreview,
               page.selectionEnabled || selectionIsTemporary, content.images.isEmpty, content.diagrams.isEmpty else { return false }
-        return !selection.strokes.isEmpty || !selection.nativeStrokes.isEmpty
+        return !selection.isEmpty
+    }
+    var canRecolorSelectedInk: Bool {
+        canRecolorSelection && (!selection.strokes.isEmpty || !selection.nativeStrokes.isEmpty)
+    }
+    var canResizeSelectedText: Bool { canRecolorSelection && (!selection.textBoxes.isEmpty || !selection.textRanges.isEmpty || !selection.equations.isEmpty) }
+    var selectionPointSize: CGFloat? {
+        guard canResizeSelectedText else { return nil }
+        return SelectedPageAppearance.pointSize(in: content, textRanges: selection.textRanges, textBoxes: selection.textBoxes,
+            equations: selection.equations, body: { page?.textView.textStorage ?? self.canonicalBody() },
+            boxText: { self.page?.textBoxViews[$0.id]?.editor.textStorage ?? self.attributed(text: $0.text, data: $0.rtfData) })
+    }
+    // Image-bearing pages are read-only on iPad.
+    var canClearImageTint: Bool { false }
+    @discardableResult func clearImageTint() -> Bool { false }
+
+    @discardableResult func applySelectionColor(_ hex: String) -> Bool {
+        guard canRecolorSelection else { return false }
+        return changeAppearance(.color(hex), action: "Change Selection Color")
+    }
+    @discardableResult func applySelectionTextSize(_ pointSize: CGFloat) -> Bool {
+        guard canResizeSelectedText else { return false }
+        return changeAppearance(.textSize(pointSize), action: "Change Text Size")
+    }
+    private func changeAppearance(_ appearance: SelectedPageAppearance, action: String) -> Bool {
+        do {
+            let value = try appearance.applying(to: content, strokes: selection.strokes, nativeStrokes: selection.nativeStrokes,
+                textRanges: selection.textRanges, textBoxes: selection.textBoxes, equations: selection.equations, canonicalBody: canonicalBody)
+            guard value != content else { return false }
+            commit(value, action: action)
+            return content == value
+        } catch { onError?(error.localizedDescription); return false }
     }
 
     @discardableResult func recolorSelectedInk(_ hex: String) -> Bool {
@@ -441,11 +472,11 @@ final class IOSPageSelectionController: NSObject, SelectedInkEditing {
     }
 
     private func attributed(text: String, data: Data?) -> NSAttributedString {
-        if let data, let value = try? NSAttributedString(data: data, options: [.documentType: NSAttributedString.DocumentType.rtf], documentAttributes: nil), value.string == text { return value }
+        if let data, let value = ThemeTextAttributes.readRTF(data, text: text) { return value }
         return NSAttributedString(string: text, attributes: [.font: UIFont.systemFont(ofSize: 16), .foregroundColor: ThemeTextAttributes.color(PageTheme.light.textHex)])
     }
 
-    private func rtf(_ text: NSAttributedString) -> Data? { try? text.data(from: NSRange(location: 0, length: text.length), documentAttributes: [.documentType: NSAttributedString.DocumentType.rtf]) }
+    private func rtf(_ text: NSAttributedString) -> Data? { ThemeTextAttributes.rtf(text) }
 
     func bodyRect(range: NSRange) -> CGRect? {
         guard let page, NSMaxRange(range) <= (page.textView.text as NSString).length, range.length > 0 else { return nil }

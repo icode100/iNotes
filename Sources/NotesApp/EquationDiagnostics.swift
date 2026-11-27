@@ -63,6 +63,19 @@ enum EquationDiagnostics {
         }
         let previousSize = view.intrinsicContentSize
         var edited = equation
+        edited.colorHex = "#0088FF"
+        view.configure(equation: edited, theme: .dark)
+        view.layoutSubtreeIfNeeded()
+        guard let blue = view.bitmapImageRepForCachingDisplay(in: view.bounds) else { throw CocoaError(.fileWriteUnknown) }
+        view.cacheDisplay(in: view.bounds, to: blue)
+        var blueGlyphPixels = 0
+        for y in 0..<blue.pixelsHigh {
+            for x in 0..<blue.pixelsWide {
+                if let color = blue.colorAt(x: x, y: y)?.usingColorSpace(.sRGB),
+                   color.alphaComponent > 0.5 && color.blueComponent > color.redComponent + 0.3 { blueGlyphPixels += 1 }
+            }
+        }
+        try require(blueGlyphPixels > 20 && edited.latex == equation.latex, "Color-only changes refresh the visible math glyphs")
         edited.latex = #"\int_0^{\infty} e^{-x^2}\,dx = \frac{\sqrt{\pi}}{2}"#
         view.configure(equation: edited, theme: .dark)
         view.layoutSubtreeIfNeeded()

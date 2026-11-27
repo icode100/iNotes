@@ -38,6 +38,7 @@ struct UnifiedPageEditor: UIViewRepresentable {
     var onObjectPlacement: (() -> Void)? = nil
     var toolbarHistory: PageToolbarHistory?
     var inkSelectionStyle: PageInkSelectionStyle?
+    var textFormatting: PageTextFormatting?
     var onEquationEdit: ((NoteEquation) -> Void)? = nil
     var zoomSession: PageZoomSession?
 
@@ -311,6 +312,29 @@ struct UnifiedPageEditor: UIViewRepresentable {
         }
 
         private func bindToolbarHistory() {
+            view?.page.textView.pageTextFormatting = parent.textFormatting
+            parent.textFormatting?.target = { [weak self] in
+                guard let self, let page = self.view?.page, page.textToolSelected, page.selectionInputAllowed,
+                      page.isUserInteractionEnabled, self.supportsPageEditing, !self.selection.canRecolorSelection else { return nil }
+                if let active = page.activeTextView as? IOSPageTextView { return active }
+                if let previous = self.parent.textFormatting?.lastActiveEditor, previous.isDescendant(of: page) { return previous }
+                return page.textView
+            }
+            parent.textFormatting?.validate = { [weak self] editor, text, rtf in
+                guard let self, let page = self.view?.page, page.isUserInteractionEnabled,
+                      page.selectionInputAllowed, self.supportsPageEditing else { return false }
+                var candidate = self.selection.content
+                if editor === page.textView {
+                    candidate.text = text
+                    candidate.rtfData = rtf
+                } else if let id = page.textBoxViews.first(where: { $0.value.editor === editor })?.key,
+                          let index = candidate.textBoxes.firstIndex(where: { $0.id == id }) {
+                    candidate.textBoxes[index].text = text
+                    candidate.textBoxes[index].rtfData = rtf
+                } else { return false }
+                return self.parent.onPageValidate?(candidate) != false
+            }
+            parent.textFormatting?.scheduleRefresh()
             selection.inkSelectionStyle = parent.inkSelectionStyle
             parent.inkSelectionStyle?.bind(selection)
             parent.toolbarHistory?.bind { [weak self] in self?.toolbarUndoManager() }
@@ -487,7 +511,10 @@ struct UnifiedPageEditor: UIViewRepresentable {
             revealCaret(textView)
         }
 
-        func textViewDidChangeSelection(_ textView: UITextView) { revealCaret(textView) }
+        func textViewDidChangeSelection(_ textView: UITextView) {
+            parent.textFormatting?.scheduleRefresh()
+            revealCaret(textView)
+        }
 
         private func revealCaret(_ textView: UITextView) {
             guard textView.isFirstResponder, let view, let selected = textView.selectedTextRange else { return }
@@ -673,6 +700,7 @@ struct UnifiedPageEditor: UIViewRepresentable {
             for box in content.textBoxes {
                 let object = page.textBoxViews[box.id] ?? IOSTextBoxView(box: box, theme: theme)
                 if page.textBoxViews[box.id] == nil { page.textBoxViews[box.id] = object; page.insertSubview(object, belowSubview: page.canvas) }
+                object.editor.pageTextFormatting = parent.textFormatting
                 object.configure(box: box, theme: theme, editable: enabled && parent.tool == .text, paper: parent.paper)
                 object.onChange = { [weak self, weak view] changed in
                     guard let self, self.supportsPageEditing, let view, let index = self.selection.content.textBoxes.firstIndex(where: { $0.id == changed.id }) else { return }
@@ -1308,6 +1336,24 @@ struct UnifiedPageEditor: UIViewRepresentable {
             controller.history.redo()
             try require(saved == recolored, "Redo restores the iPad ink color")
             controller.history.undo()
+            controller.perform(.selectAll)
+            let beforeMixedColor = writes
+            try require(inkStyle.applySelectionColor("#dd8844") && writes == beforeMixedColor + 1 &&
+                        saved.equations.first?.colorHex == "#DD8844" && saved.strokes.first?.colorHex == "#DD8844",
+                        "One iPad selection color changes the equation and native handwriting")
+            guard let bodyRTF = saved.rtfData, let boxRTF = saved.textBoxes.first?.rtfData,
+                  let body = ThemeTextAttributes.readRTF(bodyRTF, text: saved.text),
+                  let boxText = ThemeTextAttributes.readRTF(boxRTF, text: saved.textBoxes[0].text) else { throw CocoaError(.fileReadCorruptFile) }
+            try require((body.attribute(.foregroundColor, at: 0, effectiveRange: nil) as? UIColor)?.noteHex == "#DD8844" &&
+                        (boxText.attribute(.foregroundColor, at: 0, effectiveRange: nil) as? UIColor)?.noteHex == "#DD8844",
+                        "Mixed iPad recolor also persists the body and positioned text")
+            let fullRecolor = saved
+            try require(inkStyle.applySelectionTextSize(36) && saved.equations.first?.fontSize == 36,
+                        "The iPad size command includes selected equations and text")
+            controller.history.undo()
+            try require(saved == fullRecolor, "One undo restores the earlier text sizes and selected color")
+            controller.history.undo()
+            try require(saved == source, "One undo restores the entire original mixed iPad selection")
             coordinator.parent.paper = .ruled
             coordinator.update(view, enabled: true)
             controller.selection = IOSPageSelection(strokes: Set(source.strokes.map(\.id)), nativeStrokes: [0], textBoxes: Set(source.textBoxes.map(\.id)))
@@ -1775,7 +1821,7 @@ struct UnifiedPageEditor: UIViewRepresentable {
                 var savedRTF: Data? = initialRTF
                 let delegate = RichTextEditor.Coordinator(RichTextEditor(text: .constant(seed), rtfData: .constant(initialRTF), theme: theme,
                     onChange: { text, data in savedText = text; savedRTF = data }))
-                let editor = UITextView(frame: CGRect(x: 40, y: 40, width: 600, height: 240))
+                let editor = IOSPageTextView(frame: CGRect(x: 40, y: 40, width: 600, height: 240))
                 editor.allowsEditingTextAttributes = true
                 editor.delegate = delegate
                 host.view.addSubview(editor)
@@ -1818,6 +1864,40 @@ struct UnifiedPageEditor: UIViewRepresentable {
                 editor.delegate?.textViewDidChange?(editor)
                 try require(editor.text == typed && savedText == typed && savedRTF == typedRTF,
                             "Native redo must restore the typed Unicode and rich text in \(theme.rawValue) mode")
+
+                let style = PageTextFormatting(color: nil)
+                style.target = { [weak editor] in editor }
+                editor.pageTextFormatting = style
+                editor.selectedRange = NSRange(location: 0, length: 4)
+                manager.beginUndoGrouping()
+                style.chooseColor("#FFFFFF")
+                manager.endUndoGrouping()
+                func savedColor(at index: Int) -> String? {
+                    guard let data = savedRTF, let rich = ThemeTextAttributes.readRTF(data, text: savedText),
+                          index < rich.length, let color = rich.attribute(.foregroundColor, at: index, effectiveRange: nil) as? UIColor else { return nil }
+                    return ThemeTextAttributes.hex(color)
+                }
+                try require(savedColor(at: 0) == "#FFFFFF" && savedColor(at: 4) == "#3869B2",
+                            "Color changes only selected characters and preserves intentionally white RTF")
+                manager.undo()
+                try require(savedColor(at: 0) == "#3869B2", "UIKit text color undo restores canonical color")
+                manager.redo()
+                try require(savedColor(at: 0) == "#FFFFFF", "UIKit text color redo restores intentional white")
+                manager.beginUndoGrouping()
+                style.chooseSize(36)
+                manager.endUndoGrouping()
+                let font = editor.textStorage.attribute(.font, at: 0, effectiveRange: nil) as? UIFont
+                try require(font?.pointSize == 36 && font?.fontDescriptor.symbolicTraits.contains(.traitBold) == true,
+                            "Resizing selected text preserves its font traits")
+                editor.selectedRange = NSRange(location: editor.textStorage.length, length: 0)
+                style.chooseSize(24)
+                style.chooseColor("#E2B84D")
+                editor.selectedRange = NSRange(location: 2, length: 0)
+                manager.beginUndoGrouping()
+                editor.insertText("Y")
+                manager.endUndoGrouping()
+                try require(savedColor(at: 2) == "#E2B84D" && (editor.textStorage.attribute(.font, at: 2, effectiveRange: nil) as? UIFont)?.pointSize == 24,
+                            "Typing at a moved insertion point uses the chosen color and point size")
             }
             try require(originalView.page.textView.text == originalText && richTextCoordinator.lastRTF == originalRTF,
                         "Typing fixtures must leave the original page and rich-text bytes unchanged")
@@ -1909,6 +1989,8 @@ final class IOSPageDiagramView: UIView {
             let bounds = PageDiagramGeometry.bounds(of: value, in: diagrams)
             guard bounds.insetBy(dx: -value.lineWidth, dy: -value.lineWidth).intersects(rect) else { continue }
             let color = UIColor(noteHex: theme.resolvedInkHex(value.colorHex))
+            let textColor = value.labelColorHex.map { UIColor(noteHex: theme.resolvedInkHex($0)) } ?? color
+            let fontSize = value.labelFontSize ?? 16
             context.saveGState()
             color.setStroke()
             context.setLineWidth(value.lineWidth)
@@ -1951,7 +2033,7 @@ final class IOSPageDiagramView: UIView {
                 context.strokePath()
                 for (index, text) in value.cells.enumerated() {
                     let cell = PageTableGeometry.cellRect(index, in: value)
-                    drawText(text, in: cell.insetBy(dx: 5, dy: 3), color: color)
+                    drawText(text, in: cell.insetBy(dx: 5, dy: 3), color: textColor, fontSize: fontSize)
                 }
             } else if value.kind == .connector {
                 context.setLineDash(phase: 0, lengths: [])
@@ -1965,9 +2047,9 @@ final class IOSPageDiagramView: UIView {
                    let next = points.dropFirst().first(where: { $0.x != start.x || $0.y != start.y }) {
                     drawArrowhead(at: start, from: next, diagram: value, color: color, context: context)
                 }
-                drawText(value.text, in: bounds.insetBy(dx: 10, dy: 3), color: color)
+                drawText(value.text, in: bounds.insetBy(dx: 10, dy: 3), color: textColor, fontSize: fontSize)
             } else {
-                drawText(value.text, in: frame.insetBy(dx: 10, dy: 5), color: color)
+                drawText(value.text, in: frame.insetBy(dx: 10, dy: 5), color: textColor, fontSize: fontSize)
             }
             context.restoreGState()
         }
@@ -1991,12 +2073,12 @@ final class IOSPageDiagramView: UIView {
         else { context.closePath(); context.setFillColor(color.cgColor); context.fillPath() }
     }
 
-    private func drawText(_ text: String, in rect: CGRect, color: UIColor) {
+    private func drawText(_ text: String, in rect: CGRect, color: UIColor, fontSize: CGFloat) {
         guard !text.isEmpty, rect.width > 0, rect.height > 0, let context = UIGraphicsGetCurrentContext() else { return }
         let paragraph = NSMutableParagraphStyle()
         paragraph.alignment = .center
         paragraph.lineBreakMode = .byTruncatingTail
-        let attributes: [NSAttributedString.Key: Any] = [.font: UIFont.systemFont(ofSize: 16), .foregroundColor: color, .paragraphStyle: paragraph]
+        let attributes: [NSAttributedString.Key: Any] = [.font: UIFont.systemFont(ofSize: fontSize), .foregroundColor: color, .paragraphStyle: paragraph]
         let measured = (text as NSString).boundingRect(with: rect.size, options: [.usesLineFragmentOrigin, .usesFontLeading], attributes: attributes, context: nil)
         let textRect = CGRect(x: rect.minX, y: rect.minY + max(0, (rect.height - measured.height) / 2), width: rect.width, height: rect.height)
         context.saveGState()
@@ -2278,6 +2360,28 @@ final class UnifiedPencilPage: UIView {
 /// Search, titles, and equation-source editors use their normal UIKit behavior.
 @MainActor
 final class IOSPageTextView: UITextView {
+    weak var pageTextFormatting: PageTextFormatting?
+    var formattingTheme: PageTheme = .light
+
+    override func becomeFirstResponder() -> Bool {
+        let accepted = super.becomeFirstResponder()
+        if accepted {
+            pageTextFormatting?.lastActiveEditor = self
+            pageTextFormatting?.scheduleRefresh()
+        }
+        return accepted
+    }
+
+    override func insertText(_ text: String) {
+        if markedTextRange == nil { pageTextFormatting?.prepareTyping(in: self) }
+        super.insertText(text)
+    }
+
+    override func setMarkedText(_ markedText: String?, selectedRange: NSRange) {
+        if markedTextRange == nil { pageTextFormatting?.prepareTyping(in: self) }
+        super.setMarkedText(markedText, selectedRange: selectedRange)
+    }
+
     override func paste(_ sender: Any?) {
         if let page = enclosingNotePage {
             guard page.isUserInteractionEnabled && page.selectionInputAllowed else { return }

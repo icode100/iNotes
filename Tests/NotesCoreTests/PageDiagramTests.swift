@@ -272,7 +272,8 @@ final class PageDiagramTests: XCTestCase {
         XCTAssertThrowsError(try PageDiagramLimits.validate([ordinary[0], ordinary[1], invalid]))
         let v4 = PageClipboardPayload.pasteboardType, v5 = PageClipboardPayload.styledDiagramPasteboardType
         XCTAssertEqual(v5, "io.inotes.page-selection.v5")
-        XCTAssertEqual(PageClipboardPayload.readablePasteboardTypes, [v5, v4, PageClipboardPayload.imagePasteboardType, PageClipboardPayload.legacyPasteboardType])
+        XCTAssertEqual(PageClipboardPayload.readablePasteboardTypes, [PageClipboardPayload.objectColorPasteboardType,
+            v5, v4, PageClipboardPayload.imagePasteboardType, PageClipboardPayload.legacyPasteboardType])
         XCTAssertEqual(PageClipboardPayload(diagrams: ordinary).writablePasteboardTypes, [v4])
         for styled in [[ordinary[0], table, ordinary[2]], [ordinary[0], ordinary[1], arrow],
                        [ordinary[0], ordinary[1], floating], [ordinary[0], table, arrow]] {

@@ -10,9 +10,11 @@ public struct NoteEquation: Identifiable, Codable, Equatable, Sendable {
     public var width: Double
     public var height: Double
     public var fontSize: Double
+    /// Absence follows the paper's default text color, including legacy equations.
+    public var colorHex: String?
 
     public init(id: UUID = UUID(), latex: String = "E=mc^2", x: Double = 40, y: Double = 80,
-                width: Double = 300, height: Double = 100, fontSize: Double = 24) {
+                width: Double = 300, height: Double = 100, fontSize: Double = 24, colorHex: String? = nil) {
         self.id = id
         self.latex = latex
         self.x = x
@@ -20,5 +22,6 @@ public struct NoteEquation: Identifiable, Codable, Equatable, Sendable {
         self.width = width
         self.height = height
         self.fontSize = fontSize
+        self.colorHex = colorHex
     }
 }

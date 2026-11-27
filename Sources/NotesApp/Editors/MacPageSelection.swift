@@ -98,10 +98,55 @@ final class MacPageSelectionController: NSObject, SelectedInkEditing {
     }
     weak var diagramSelectionStyle: MacDiagramSelectionStyle?
     weak var inkSelectionStyle: PageInkSelectionStyle?
-    var canRecolorSelectedInk: Bool {
+    var canRecolorSelection: Bool {
         guard let page, page.inkView.isInputEnabled, !hasPreview,
               hasToolIndependentSelection || page.activeTool == .select || page.activeTool == .lasso else { return false }
-        return !selection.strokes.isEmpty || !selection.nativeStrokes.isEmpty
+        return !selection.isEmpty
+    }
+    var canRecolorSelectedInk: Bool {
+        canRecolorSelection && (!selection.strokes.isEmpty || !selection.nativeStrokes.isEmpty)
+    }
+    var canResizeSelectedText: Bool {
+        canRecolorSelection && (!selection.textBoxes.isEmpty || !selection.textRanges.isEmpty || !selection.equations.isEmpty
+            || content.diagrams.contains { selection.diagrams.contains($0.id) && $0.hasLabelText })
+    }
+    var selectionPointSize: CGFloat? {
+        guard canResizeSelectedText else { return nil }
+        return SelectedPageAppearance.pointSize(in: content, textRanges: selection.textRanges, textBoxes: selection.textBoxes,
+            equations: selection.equations, diagrams: selection.diagrams,
+            body: { page?.textView.textStorage ?? self.canonicalBody() },
+            boxText: { self.page?.textBoxViews[$0.id]?.editor.textStorage ?? self.attributed(text: $0.text, data: $0.rtfData) })
+    }
+    var canClearImageTint: Bool {
+        canRecolorSelection && content.images.contains { selection.images.contains($0.id) && $0.tintHex != nil }
+    }
+    @discardableResult func clearImageTint() -> Bool {
+        guard canClearImageTint else { return false }
+        var value = content
+        for index in value.images.indices where selection.images.contains(value.images[index].id) { value.images[index].tintHex = nil }
+        return commit(value, action: "Remove Image Tint")
+    }
+    @discardableResult func applySelectionColor(_ hex: String) -> Bool {
+        guard canRecolorSelection else { return false }
+        return changeAppearance(.color(hex), action: "Change Selection Color")
+    }
+    @discardableResult func applySelectionTextSize(_ pointSize: CGFloat) -> Bool {
+        guard canResizeSelectedText else { return false }
+        return changeAppearance(.textSize(pointSize), action: "Change Text Size")
+    }
+    private func changeAppearance(_ appearance: SelectedPageAppearance, action: String) -> Bool {
+        do {
+            var value = try appearance.applying(to: content, strokes: selection.strokes, nativeStrokes: selection.nativeStrokes,
+                textRanges: selection.textRanges, textBoxes: selection.textBoxes, equations: selection.equations,
+                images: selection.images, diagrams: selection.diagrams, canonicalBody: canonicalBody)
+            guard value != content else { return false }
+            if case .textSize = appearance, value.diagrams.contains(where: \.hasExternalAttachment) {
+                let frames = page?.externalAnchorFrames(in: value, measuringTextBoxes: selection.textBoxes) ?? [:]
+                value.diagrams = PageDiagramGeometry.routedConnectors(in: value.diagrams, frames: frames, movedDiagramIDs: [],
+                    movedObjectIDs: [.textBox: selection.textBoxes, .equation: selection.equations])
+            }
+            return commit(value, action: action)
+        } catch { onPasteError?(error.localizedDescription); return false }
     }
 
     @discardableResult func recolorSelectedInk(_ hex: String) -> Bool {
@@ -528,8 +573,9 @@ final class MacPageSelectionController: NSObject, SelectedInkEditing {
             board.setData(data, forType: NSPasteboard.PasteboardType(type))
         }
         if payload.diagrams.isEmpty && payload.images.count == 1, payload.strokes.isEmpty, payload.pencilKitData == nil,
-                  payload.textBoxes.isEmpty, payload.equations.isEmpty, payload.text.isEmpty {
-            board.setData(payload.images[0].imageData, forType: .png)
+                  payload.textBoxes.isEmpty, payload.equations.isEmpty, payload.text.isEmpty,
+                  let png = MacPageImageCodec.clipboardRepresentation(of: payload.images[0]) {
+            board.setData(png, forType: .png)
         }
         let fallback = NSMutableAttributedString(attributedString: attributed(text: payload.text, data: payload.rtfData))
         for label in payload.diagrams.map(\.plainText) where !label.isEmpty {
@@ -699,11 +745,11 @@ final class MacPageSelectionController: NSObject, SelectedInkEditing {
     }
 
     private func attributed(text: String, data: Data?) -> NSAttributedString {
-        if let data, let value = try? NSAttributedString(data: data, options: [.documentType: NSAttributedString.DocumentType.rtf], documentAttributes: nil), value.string == text { return value }
+        if let data, let value = ThemeTextAttributes.readRTF(data, text: text) { return value }
         return NSAttributedString(string: text, attributes: [.font: NSFont.systemFont(ofSize: 16), .foregroundColor: ThemeTextAttributes.color(PageTheme.light.textHex)])
     }
 
-    private func rtf(_ text: NSAttributedString) -> Data? { try? text.data(from: NSRange(location: 0, length: text.length), documentAttributes: [.documentType: NSAttributedString.DocumentType.rtf]) }
+    private func rtf(_ text: NSAttributedString) -> Data? { ThemeTextAttributes.rtf(text) }
 
     func bodyRect(range: NSRange) -> CGRect? {
         guard let page, let layout = page.textView.layoutManager, let container = page.textView.textContainer,

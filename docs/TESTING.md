@@ -1,5 +1,15 @@
 # Validation
 
+## iNotes 1.5.1 formatting and floating toolbar candidate — 27 November 2026
+
+The local standalone suite passed 146 tests with disposable files. It exercised
+archive and clipboard format selection, reopening and importing colored objects,
+preservation of original image bytes, and atomic rejection of invalid colors and
+label sizes. A separate offscreen AppKit fixture exercised caret typing, selected
+text resizing across bold and regular fonts, explicit white text, and Undo/Redo.
+An isolated SwiftUI host passed 14 floating-toolbar checks covering visibility
+preferences, empty-toolbar recovery and restoring the default buttons.
+
 ## iNotes 1.5.0 / build 2027 published and verified — 27 November 2026
 
 The user approved publishing the isolated Page Strip QA changes as another

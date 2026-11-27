@@ -3,6 +3,189 @@ import SwiftUI
 import AppKit
 #endif
 
+private struct CustomizeFloatingToolbarKey: EnvironmentKey {
+    static let defaultValue: () -> Void = {}
+}
+
+extension EnvironmentValues {
+    var customizeFloatingToolbar: () -> Void {
+        get { self[CustomizeFloatingToolbarKey.self] }
+        set { self[CustomizeFloatingToolbarKey.self] = newValue }
+    }
+}
+
+enum FloatingPageTool: Hashable {
+    enum Command: String {
+        case exitWorkspace, colors, undo, redo, paper, more, equations, attachment
+        case selection, textSize, navigation, heading, tablet, toolbarLayout, hideToolbar
+        #if os(macOS)
+        case shapes, fill
+        #endif
+    }
+    case command(Command), drawing(InkTool)
+    #if os(macOS)
+    case format(RichTextCommand)
+    #endif
+
+    var key: String {
+        switch self {
+        case .command(let command): return command.rawValue
+        case .drawing(let tool): return "draw." + tool.rawValue
+        #if os(macOS)
+        case .format(let command): return "format." + command.rawValue
+        #endif
+        }
+    }
+}
+
+struct FloatingToolbarChoice: Identifiable {
+    enum Category: String, CaseIterable {
+        case drawing = "Drawing and selection", text = "Text", page = "Page and workspace"
+    }
+    let tool: FloatingPageTool
+    let title: String
+    let symbol: String
+    let category: Category
+    let startsVisible: Bool
+    var id: String { tool.key }
+
+    static let preferenceKey = "floatingToolbarButtons"
+    static let factory = "default"
+
+    static let drawingChoices: [(tool: InkTool, title: String, symbol: String)] = [
+        (.text, "Text", "textformat"), (.select, "Select", "cursorarrow"), (.lasso, "Lasso", "lasso"),
+        (.pen, "Pen", "pencil.tip"), (.line, "Straight line", "line.diagonal"), (.pencil, "Pencil", "pencil"),
+        (.marker, "Marker", "paintbrush.pointed"), (.highlighter, "Highlighter", "highlighter"), (.eraser, "Eraser", "eraser")
+    ]
+    #if os(macOS)
+    static let formatCommands: [(title: String, icon: String, command: RichTextCommand)] = [
+        ("Bold", "bold", .bold), ("Italic", "italic", .italic), ("Underline", "underline", .underline),
+        ("Heading", "textformat.size", .heading), ("Body text", "textformat", .body),
+        ("Bullet list", "list.bullet", .bullet), ("Checklist", "checklist", .checklist)
+    ]
+    #endif
+
+    static let all: [Self] = {
+        func button(_ command: FloatingPageTool.Command, _ title: String, _ symbol: String,
+                    _ category: Category, visible: Bool = false) -> Self {
+            Self(tool: .command(command), title: title, symbol: symbol, category: category, startsVisible: visible)
+        }
+        // Exit comes first so its default placement is reachable in a narrow viewport.
+        var items = [button(.exitWorkspace, "Exit Full Page or Full Screen", "arrow.down.right.and.arrow.up.left", .page, visible: true)]
+        items += drawingChoices.map {
+            Self(tool: .drawing($0.tool), title: $0.title, symbol: $0.symbol,
+                 category: $0.tool == .text ? .text : .drawing, startsVisible: true)
+        }
+        #if os(macOS)
+        items += [button(.shapes, "Shapes and tables", "square.on.circle", .drawing, visible: true),
+                  button(.fill, "Shape fill and arrow style", "paintbrush.fill", .drawing, visible: true)]
+        #endif
+        items += [
+            button(.colors, "Colors", "paintpalette", .drawing, visible: true),
+            button(.undo, "Undo", "arrow.uturn.backward", .page, visible: true),
+            button(.redo, "Redo", "arrow.uturn.forward", .page, visible: true),
+            button(.paper, "Paper and appearance", "slider.horizontal.3", .page, visible: true),
+            button(.more, "More page tools", "ellipsis.circle", .page, visible: true),
+            button(.textSize, "Text size", "textformat.size", .text, visible: true),
+            button(.selection, "Selection actions", "square.dashed", .drawing),
+            button(.equations, "Equations", "function", .text),
+            button(.attachment, "Attach a file", "paperclip", .page),
+            button(.navigation, "Show or hide page navigation", "ellipsis.rectangle", .page),
+            button(.heading, "Show or hide heading", "text.rectangle", .page),
+            button(.tablet, "Pen tablet status", "pencil.tip", .page),
+            button(.toolbarLayout, "Full-screen toolbar layout", "circle.grid.3x3.circle", .page),
+            button(.hideToolbar, "Hide drawing toolbar", "rectangle.topthird.inset.filled", .page)
+        ]
+        #if os(macOS)
+        items += formatCommands.map {
+            Self(tool: .format($0.command), title: $0.title, symbol: $0.icon, category: .text, startsVisible: false)
+        }
+        #endif
+        return items
+    }()
+
+    static func visibleIDs(in setting: String) -> Set<String> {
+        if setting == factory { return Set(all.filter(\.startsVisible).map(\.id)) }
+        return Set(setting.split(separator: ",").map(String.init))
+    }
+
+    static func setting(_ setting: String, including id: String, visible: Bool) -> String {
+        var ids = visibleIDs(in: setting)
+        if visible { ids.insert(id) } else { ids.remove(id) }
+        return ids.sorted().joined(separator: ",")
+    }
+}
+
+struct FloatingToolbarCustomization: View {
+    @AppStorage(FloatingToolbarChoice.preferenceKey) private var setting = FloatingToolbarChoice.factory
+    @Environment(\.dismiss) private var dismiss
+    #if os(macOS)
+    @Environment(\.workspaceDiagnosticControls) private var diagnostics
+    #endif
+
+    private func visibility(of choice: FloatingToolbarChoice) -> Binding<Bool> {
+        Binding(get: { FloatingToolbarChoice.visibleIDs(in: setting).contains(choice.id) },
+                set: { setting = FloatingToolbarChoice.setting(setting, including: choice.id, visible: $0) })
+    }
+
+    private func restore() { setting = FloatingToolbarChoice.factory }
+    private func finish() { dismiss() }
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 12) {
+            Text("Customize floating toolbar").font(.title2.bold())
+            ScrollView {
+                VStack(alignment: .leading, spacing: 18) {
+                    ForEach(FloatingToolbarChoice.Category.allCases, id: \.self) { category in
+                        VStack(alignment: .leading, spacing: 8) {
+                            Text(category.rawValue).font(.headline)
+                            LazyVGrid(columns: [GridItem(.adaptive(minimum: 172), alignment: .leading)], alignment: .leading, spacing: 10) {
+                                ForEach(FloatingToolbarChoice.all.filter { $0.category == category }) { choice in
+                                    let selected = visibility(of: choice)
+                                    Toggle(isOn: selected) { Label(choice.title, systemImage: choice.symbol) }
+                                    #if os(macOS)
+                                    .toggleStyle(.checkbox)
+                                    .background {
+                                        if let diagnostics {
+                                            WorkspaceDiagnosticControlProbe(controls: diagnostics, identifier: "floating.choice." + choice.id,
+                                                value: selected.wrappedValue ? "On" : "Off", action: { selected.wrappedValue.toggle() })
+                                        }
+                                    }
+                                    #endif
+                                    .accessibilityLabel(choice.title)
+                                }
+                            }
+                        }
+                    }
+                }.frame(maxWidth: .infinity, alignment: .leading).padding(4)
+            }
+            HStack {
+                Button("Restore defaults", action: restore)
+                    #if os(macOS)
+                    .background {
+                        if let diagnostics {
+                            WorkspaceDiagnosticControlProbe(controls: diagnostics, identifier: "floating.choice.restore", action: restore)
+                        }
+                    }
+                    #endif
+                Spacer()
+                Button("Done", action: finish).keyboardShortcut(.defaultAction)
+                    #if os(macOS)
+                    .background {
+                        if let diagnostics {
+                            WorkspaceDiagnosticControlProbe(controls: diagnostics, identifier: "floating.choice.done", action: finish)
+                        }
+                    }
+                    #endif
+            }
+        }
+        .padding(20)
+        #if os(macOS)
+        .frame(width: 584, height: 510)
+        #endif
+    }
+}
+
 /// Coordinates are in the visible page viewport, independent of page zoom and scroll.
 struct FloatingPageToolbarLayout {
     let diameter: CGFloat
@@ -84,6 +267,7 @@ struct FloatingPageToolbarLayout {
 struct FloatingPageToolbar<Item: Hashable, ItemContent: View>: View {
     let items: [Item]
     let hoverOnly: Bool
+    @Environment(\.customizeFloatingToolbar) private var customize
     @Binding var anchor: CGPoint
     @ViewBuilder let content: (Item) -> ItemContent
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
@@ -185,6 +369,10 @@ struct FloatingPageToolbar<Item: Hashable, ItemContent: View>: View {
                 }
                 #endif
             }
+            .onChange(of: items) { _, newItems in
+                pageIndex = 0
+                if newItems.isEmpty { expanded = false }
+            }
             .onKeyPress(.escape) {
                 guard expanded else { return .ignored }
                 toggle()
@@ -221,10 +409,12 @@ struct FloatingPageToolbar<Item: Hashable, ItemContent: View>: View {
         }
         .buttonStyle(.plain)
         .focused($hubFocused)
-        .help(expanded ? "Close tools · Drag to move" : "Open tools · Drag to move")
+        .contextMenu { Button("Customize floating toolbar…", action: customize) }
+        .accessibilityAction(named: Text("Customize floating toolbar"), customize)
+        .help(items.isEmpty ? "Choose floating toolbar buttons" : expanded ? "Close tools · Drag to move" : "Open tools · Drag to move")
         .accessibilityLabel("Floating toolbar")
         .accessibilityValue(expanded ? "Expanded" : "Collapsed")
-        .accessibilityHint("Opens or closes the drawing tools.")
+        .accessibilityHint(items.isEmpty ? "Choose buttons to add." : "Opens or closes the drawing tools.")
         .accessibilityAction(named: Text("Move left")) { nudge(-0.15, 0) }
         .accessibilityAction(named: Text("Move right")) { nudge(0.15, 0) }
         .accessibilityAction(named: Text("Move up")) { nudge(0, -0.15) }
@@ -233,6 +423,7 @@ struct FloatingPageToolbar<Item: Hashable, ItemContent: View>: View {
 
     private func toggle() {
         guard !suppressClick else { return }
+        guard !items.isEmpty else { customize(); return }
         withAnimation(reduceMotion ? nil : .easeOut(duration: 0.13)) {
             expanded.toggle()
             pageIndex = 0
