@@ -43,6 +43,18 @@ does not publish a release.
 
 ## Build and sign a local update
 
+**1.5.1 / build 2030** was published from rebuild source
+`2ec83dd28c1d6d3906af16ad4ba540230a95dd00`. The Mac handwriting update retains
+the final movement at pen lift and reduces pauses on ink-heavy pages. Native
+run 70 passed before signed release run 28 published the installer, checksum
+and signed feed on the existing release. The final latest-feed readback timed
+out after 120 seconds. Independent downloads from the versioned and latest
+URLs subsequently returned the same signed feed for build 2030.
+[Build 2030 installer](https://github.com/icode100/iNotes/releases/download/v1.5.1/iNotes-1.5.1-build2030-arm64.dmg) ·
+[Native run 70](https://github.com/icode100/iNotes/actions/runs/46122568203) ·
+[Signed release run 28](https://github.com/icode100/iNotes/actions/runs/46124611496) ·
+[Validation](TESTING.md)
+
 **1.5.1 / build 2029** was published on 28 November 2026 from rebuild source
 `9e0337d69fae6139d965de23e4776be2cd420b22`. Native run 68 passed on that commit
 before signed release run 27 published the rebuild to the existing release.
@@ -194,7 +206,7 @@ Runs 13, 14 and 15 published 2015, 2016 and 2017. Runs 16 and 17 built 2018 and
 2021. Run 20 published 2022. Run 21 stopped before publication at the pinned footer
 viewport-height assertion and reserved v1.4.1/build 2023.
 Run 22 published 2024 and run 23 published 2025. Run 24 published build 2026 and run 25 published build 2027.
-Runs 26 and 27 published v1.5.1 builds 2028 and 2029. The next new run, 28, should produce **2030**.
+Runs 26, 27 and 28 published v1.5.1 builds 2028, 2029 and 2030. The next new run, 29, should produce **2031**.
 Recheck the public feed and workflow counter before tagging. Failed builds
 2014, 2018, 2019 and 2023 remain reserved alongside
 original installers and QA slots.
@@ -229,7 +241,7 @@ build 2021. Published `v1.4.0` identifies `d2f3a180` and build 2022.
 Keep unpublished `v1.4.1` at `164868ff` with build 2023 reserved. Published
 `v1.4.2` identifies `f21afe8d` and build 2024. The `v1.5.0` tag identifies
 `79551368` and build 2025. Builds 2026 and 2027 use rebuild sources `dbc5704e` and `af0e168d`. The `v1.5.1` tag identifies `f40ed27b` and build 2028.
-Its build 2029 rebuild uses `9e0337d6`. Preserve each release tag and installer, and use a higher build number for a new binary.
+Its rebuilds use `9e0337d6` for build 2029 and `2ec83dd2` for build 2030. Preserve each release tag and installer, and use a higher build number for a new binary.
 `.github/workflows/release.yml` runs unit/integration tests, builds the
 ARM64 DMG, verifies the mounted bundle, signs and independently verifies the
 appcast, then publishes the DMG, SHA-256 checksum, and `appcast.xml` as GitHub

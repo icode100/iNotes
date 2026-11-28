@@ -167,11 +167,16 @@ and the mounted app passed persistence and all 33 PDF/ZIP checks. The original
 v1.5.1 tag and build 2028 installer were preserved. See the
 [build 2029 verification record](docs/TESTING.md#inotes-151--build-2029--28-november-2026).
 
-The user authorized publication of the Mac handwriting fixes on 28 November
-2026. The local QA candidate retains the final movement at
-pen lift and reduces redraw, commit and autosave pauses on ink-heavy pages.
-The [handwriting verification record](docs/TESTING.md#mac-cursive-handwriting-fixes-local-qa--28-november-2026)
-documents the local replay and timing results. Physical tablet testing is pending.
+**v1.5.1 / build 2030** was published on **28 November 2026** from
+`2ec83dd28c1d6d3906af16ad4ba540230a95dd00` with the user's approval.
+The Mac editor keeps movement delivered at pen lift and reduces drawing
+and autosave pauses on ink-heavy pages. Native run 70 passed, including
+iPad simulator compilation. Signed release run 28 published the installer
+and feed, then timed out reading back the latest feed URL. Independent public
+downloads verified matching feeds and preserved both earlier installer builds.
+The [build 2030 verification record](docs/TESTING.md#inotes-151--build-2030--28-november-2026)
+separates release checks from synthetic handwriting measurements. Physical
+tablet performance remains unmeasured.
 
 ## Priorities
 
@@ -732,6 +737,7 @@ Reserve tag v1.4.1 and build 2023. Run 22 published v1.4.2/build 2024 from
 published the same-version rebuild 2026 from `dbc5704e`. Run 25 published
 build 2027 from `af0e168d`. Run 26 published v1.5.1/build 2028 from `f40ed27b`.
 Run 27 published the v1.5.1 rebuild 2029 from `9e0337d6`.
+Run 28 published the v1.5.1 handwriting rebuild 2030 from `2ec83dd2`.
 Preserve original installers and tag reservations, including the failed
 1.2.0/1.2.1 reservations.
 Initial v1.2.0 user QA and publication authorization were recorded on
@@ -739,7 +745,7 @@ Initial v1.2.0 user QA and publication authorization were recorded on
 later-source or public-build results. The v1.1.0 local QA identities use separate
 QA builds 1 and 2 (final Pen correction). The 1.3 QA apps use separate identities
 and temporary libraries, QA builds 1 and 2, with no updater. The next new
-signed-release run (28) should produce build 2030. Recheck the feed and counter before publishing.
+signed-release run (29) should produce build 2031. Recheck the feed and counter before publishing.
 A workflow rerun does not
 advance `GITHUB_RUN_NUMBER`. Never reuse its build number for an updated binary.
 The release workflow supports an explicit `workflow_dispatch` for the current

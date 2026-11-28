@@ -1,5 +1,40 @@
 # Validation
 
+## iNotes 1.5.1 / build 2030 — 28 November 2026
+
+The user authorized publication of the Mac handwriting fixes from
+`2ec83dd28c1d6d3906af16ad4ba540230a95dd00`. Native run 70 passed 147 core
+tests, 1,372 Mac editor checks, 2,381 workspace checks and 33 PDF/ZIP checks.
+It verified the mounted disk image and compiled the iPad simulator app.
+[Native run 70](https://github.com/icode100/iNotes/actions/runs/46122568203)
+
+Signed release run 28 repeated the core and Mac suites and passed the five
+signature checks. It published the build-numbered installer, checksum and
+signed feed. GitHub marked the run failed when its final latest-feed readback
+exceeded the shared 120-second deadline. Independent downloads subsequently
+returned identical signed bytes at both public feed URLs, each pointing to
+the build 2030 installer. The release notes identify the exact source. The
+original v1.5.1 tag and the build 2028 and 2029 installer and checksum assets
+retained their original identities and bytes.
+[Signed release run 28](https://github.com/icode100/iNotes/actions/runs/46124611496) ·
+[GitHub release](https://github.com/icode100/iNotes/releases/tag/v1.5.1)
+
+| Build 2030 public asset | Bytes | SHA-256 |
+| --- | ---: | --- |
+| Apple silicon DMG | 36,181,482 | `e79542865dfba49317855730cfbe92bf70e7980f1c0b75621ccec9136a67aee0` |
+| DMG checksum file | 99 | `660153cb18c58440f1998fcab1dfa74afd996efcc179f50c19f8a694ed6f4e66` |
+| Signed Sparkle feed | 1,278 | `96cc4c8ec333abbfa2da6ba7ddadcbaf26ae85c925b990799d804188332b570e` |
+
+Independent Ed25519 checks accepted the public feed and installer and rejected
+a changed feed, an unsigned feed, a changed installer and a different key.
+The read-only mounted download contained the ad hoc signed ARM64 production
+app `io.inotes.app`, version 1.5.1, build 2030, with the expected updater key
+and feed. It passed persistence and all 33 PDF/ZIP checks on temporary notes.
+
+See the [local handwriting measurements](#mac-cursive-handwriting-fixes-local-qa--28-november-2026)
+for the input replay, redraw, pen-lift and autosave timings. Physical tablet
+and driver behavior remain unmeasured.
+
 ## iNotes 1.5.1 / build 2029 — 28 November 2026
 
 The user requested a same-version rebuild for windowed page navigation.
