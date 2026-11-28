@@ -342,7 +342,7 @@ private final class PageNavigationScrollerBacking: NSView {
 
     override func draw(_ dirtyRect: NSRect) {
         NSColor.windowBackgroundColor.setFill()
-        dirtyRect.fill()
+        dirtyRect.intersection(bounds).fill()
     }
 }
 
@@ -446,6 +446,7 @@ final class PageZoomScrollView: NSScrollView, PageZoomViewport {
             if navigationBacking.superview == nil {
                 navigationBacking.identifier = NSUserInterfaceItemIdentifier("page-navigation-scroller-backing")
                 navigationBacking.setAccessibilityElement(false)
+                navigationBacking.clipsToBounds = true
                 addSubview(navigationBacking, positioned: .above, relativeTo: contentView)
             }
             let frame = CGRect(x: bounds.minX, y: isFlipped ? bounds.maxY - clearance : bounds.minY,

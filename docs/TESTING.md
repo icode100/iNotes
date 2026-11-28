@@ -1,5 +1,22 @@
 # Validation
 
+## Windowed page navigation rebuild — 28 November 2026
+
+An isolated Mac window at 75% zoom exercised the footer at 940 and 1,600
+points wide. The first candidate, `91aae6d`, stopped at the narrow-window
+assertion. The footer controls began 17 points above the bottom edge, but
+the background view reported 748 visible points. The editor was only 508
+points tall. The correction explicitly clips the background view and its
+paint to the scrollbar lane. The fixture retains the original visible-area
+assertion, checks a rendered pixel and verifies stacking below the native
+scrollbar.
+
+On the first candidate the local standalone suite passed 146 tests after
+two sandboxed runs encountered filesystem errors in their temporary fixtures.
+The native run passed 1,335 editor checks, 32 equation checks, 9 shortcut
+checks and 12 ruled-text checks before the footer assertion. A separate local
+export run passed 33 PDF/ZIP checks.
+
 ## iNotes 1.5.1 / build 2028 published and verified — 27 November 2026
 
 The user requested publication as 1.5.1. The release tag identifies
