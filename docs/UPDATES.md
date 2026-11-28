@@ -161,7 +161,7 @@ identity, QA build 1, temporary library, and disconnected updater. Recheck the
 public feed and workflow counter before any later publication.
 
 ```sh
-VERSION=1.5.1 BUILD_NUMBER=2028 bash scripts/build-macos.sh
+VERSION=1.5.1 BUILD_NUMBER=2029 bash scripts/build-macos.sh
 VERSION=1.5.1 bash scripts/verify-macos.sh
 VERSION=1.5.1 bash scripts/generate-appcast.sh
 VERSION=1.5.1 bash scripts/test-update-signatures.sh
@@ -173,7 +173,7 @@ using Apple CryptoKit and the committed public key. It does not upload anything.
 For v1.0.3, the security rebuild 2011 exceeds the initial public build 2010 and
 shared local builds 1010–1012. Check both published and shared `CFBundleVersion`
 values and use a larger number for every update, including same-version rebuilds.
-Defaults (`1.5.1`, build 2028) identify the customizable toolbar and formatting release. They remain
+Defaults (`1.5.1`, build 2029) include the windowed page navigation fix. They remain
 separate from the release workflow's
 `2002 + GITHUB_RUN_NUMBER`. Run 11 published v1.0.4 build 2012; isolated backup QA
 used build 2013. Run 12 built 2014 but stopped at native diagnostic verification before publication.

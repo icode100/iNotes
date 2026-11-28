@@ -91,9 +91,10 @@ page browser and **+** button. Click the pin on the bar to keep it in view, or
 choose **Appearance → Page navigation → Pin to bottom**. Choose **Show on
 hover** to return to the edge handle. The same setting applies in a regular
 window, in Full Page and in macOS full screen. With touch, tap the handle.
-In build 2027, the handle sits just above the horizontal scrollbar when the
+The handle sits just above the horizontal scrollbar when the
 page is wider than the Mac editor. Drag the scrollbar to pan the page, or
-move up to the handle to reveal navigation.
+move up to the handle to reveal navigation. In build 2029, the open bar
+extends to the window edge even after the overlay scrollbar fades.
 Long topics show a group of numbered buttons around the current page. Use the
 chevrons to move through the topic by group, or **Browse and organize pages**
 to jump directly to a page. The group adjusts as you resize the window. When

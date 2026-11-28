@@ -48,7 +48,7 @@ The build script validates the property list, architecture, app signature, and D
 before publishing outputs. The verification script mounts it read-only and checks
 the packaged app and Applications shortcut.
 
-The packaging defaults are **v1.5.1 / build 2028**. The release workflow
+The packaging defaults are **v1.5.1 / build 2029**. The release workflow
 gives each same-version rebuild a build-specific filename so earlier
 installers keep their addresses.
 

@@ -291,9 +291,6 @@ enum FloatingToolbarDiagnostics {
         // Use the same content-bearing window, with its native Pen input owner and undo history.
         let handleID = "page-navigation-handle", pinID = "page-navigation-pin"
         let dotID = "page-carousel-\(pageID.uuidString)"
-        // Keep a persistent scrollbar in this disposable window even on hosts
-        // that fade their overlay scrollbars when no physical pointer is present.
-        scroll.scrollerStyle = .legacy
         func hoverNavigation(_ type: NSEvent.EventType, bottomOffset: CGFloat = 0, windowX: CGFloat? = nil,
                              at windowPoint: CGPoint? = nil) throws {
             let content = window.contentLayoutRect
@@ -425,6 +422,74 @@ enum FloatingToolbarDiagnostics {
         }
         try check(defaults.object(forKey: "pageNavigationMode") == nil,
                   "the page-navigation fixture starts without a saved mode")
+        func scrollerBacking(in view: NSView) -> NSView? {
+            guard !view.isHiddenOrHasHiddenAncestor else { return nil }
+            if view.identifier?.rawValue == "page-navigation-scroller-backing" { return view }
+            return view.subviews.lazy.compactMap { scrollerBacking(in: $0) }.first
+        }
+        // Match the reported 75% in a regular window. Resize the same live
+        // editor so the page naturally crosses the horizontal overflow boundary.
+        let originalSize = host.view.bounds.size
+        scroll.scrollerStyle = .overlay
+        window.setContentSize(NSSize(width: 940, height: originalSize.height))
+        scroll.setMagnification(0.75, centeredAt: CGPoint(x: page.visibleRect.midX, y: page.visibleRect.midY))
+        try wait("the narrow window has an overflowing page and a collapsed navigation handle") {
+            visible(handleID) && !visible("page-carousel") && presentation.pageScrollerClearance > 0
+        }
+        try check(scrollerBacking(in: scroll) == nil, "collapsed hover leaves the paper visible down to the window edge")
+        try press(handleID)
+        try wait("the revealed windowed footer paints the overlay scrollbar lane: \(layoutContext())") {
+            visible("page-carousel") && scrollerBacking(in: scroll) != nil
+        }
+        guard let backing = scrollerBacking(in: scroll), let narrowBar = frame("page-carousel") else {
+            throw WorkspaceDiagnostics.Failure(description: "Missing revealed footer surface")
+        }
+        let lane = backing.convert(backing.visibleRect, to: nil)
+        let controlsInWindow = host.view.convert(narrowBar, to: nil)
+        let editorInWindow = scroll.convert(scroll.bounds, to: nil)
+        try check(lane.height > 0 && abs(lane.minY - window.contentLayoutRect.minY) <= 1 &&
+                  abs(lane.maxY - controlsInWindow.minY) <= 1 &&
+                  abs(lane.minX - editorInWindow.minX) <= 1 && abs(lane.maxX - editorInWindow.maxX) <= 1 &&
+                  abs(lane.minX - controlsInWindow.minX) <= 1 && abs(lane.maxX - controlsInWindow.maxX) <= 1,
+                  "the revealed overlay lane fills the width under the controls to the window edge: lane=\(lane) controls=\(controlsInWindow) editor=\(editorInWindow)")
+        let laneCenter = backing.superview?.convert(CGPoint(x: lane.midX, y: lane.midY), from: nil) ?? .zero
+        try check(backing.hitTest(laneCenter) == nil, "the footer surface passes pointer events through to AppKit")
+        guard let contentIndex = scroll.subviews.firstIndex(of: scroll.contentView),
+              let backingIndex = scroll.subviews.firstIndex(of: backing),
+              let horizontal = scroll.horizontalScroller,
+              let scrollerIndex = scroll.subviews.firstIndex(where: { $0 === horizontal || horizontal.isDescendant(of: $0) }),
+              let bitmap = backing.bitmapImageRepForCachingDisplay(in: backing.bounds) else {
+            throw WorkspaceDiagnostics.Failure(description: "The overlay lane needs a mounted paper clip, backing and native scroller")
+        }
+        try check(contentIndex < backingIndex && backingIndex < scrollerIndex,
+                  "the footer surface draws over the paper and underneath the native overlay scrollbar")
+        backing.cacheDisplay(in: backing.bounds, to: bitmap)
+        try check((bitmap.colorAt(x: bitmap.pixelsWide / 2, y: bitmap.pixelsHigh / 2)?.alphaComponent ?? 0) >= 0.99,
+                  "the rendered backing actually masks the paper beneath the fading overlay scrollbar")
+        try press(pinID)
+        try wait("pinning the narrow overlay footer removes the paper backing") {
+            visible(reservationID) && button(pinID)?.value == "pinned" && scrollerBacking(in: scroll) == nil
+        }
+        try press(pinID)
+        try wait("unpinning the narrow overlay footer restores the collapsed handle") {
+            visible(handleID) && !visible(dotID) && !visible(reservationID)
+        }
+        try press(handleID)
+        try wait("the narrow overlay footer has its surface again after unpinning") { scrollerBacking(in: scroll) != nil }
+        window.setContentSize(NSSize(width: 1600, height: originalSize.height))
+        try wait("widening the same window fits the 75% page and removes the scrollbar backing: \(layoutContext())") {
+            guard let bar = frame("page-carousel") else { return false }
+            return page.visibleRect.width >= page.bounds.width - 1 && scrollerBacking(in: scroll) == nil &&
+                abs(host.view.convert(bar, to: nil).minY - window.contentLayoutRect.minY) <= 1
+        }
+        window.setContentSize(originalSize)
+        scroll.setMagnification(zoom, centeredAt: CGPoint(x: page.visibleRect.midX, y: page.visibleRect.midY))
+        try wait("narrowing the window restores the backing under the open footer") { scrollerBacking(in: scroll) != nil }
+        try press(handleID)
+        try wait("closing the overflowing footer removes its backing") { !visible(dotID) && scrollerBacking(in: scroll) == nil }
+        // Keep a persistent scrollbar for the real knob drags below, even on
+        // hosts that fade overlay scrollbars without a physical pointer.
+        scroll.scrollerStyle = .legacy
         for mode in ["windowed", "Full Page", "native full screen"] {
             presentation.fullPage = mode == "Full Page"
             if mode == "native full screen" {
@@ -455,8 +520,8 @@ enum FloatingToolbarDiagnostics {
                       "\(mode) revealing the footer preserves the available viewport: before=\(base) \(layoutContext())")
             let scrollerInWindow = scroller.convert(scroller.bounds, to: nil)
             let barInWindow = host.view.convert(bar, to: nil)
-            try check(barInWindow.minY >= scrollerInWindow.maxY - 1,
-                      "\(mode) keeps the revealed controls above the native scrollbar: bar=\(barInWindow) scroller=\(scrollerInWindow)")
+            try check(abs(barInWindow.minY - scrollerInWindow.maxY) <= 1,
+                      "\(mode) places the revealed controls directly above the native scrollbar: bar=\(barInWindow) scroller=\(scrollerInWindow)")
             try dragScrollbar("\(mode) revealed")
             let nearFooter = CGPoint(x: revealed.midX, y: host.view.isFlipped ? bar.minY - 6 : bar.maxY + 6)
             try check(pageTakesInk(at: nearFooter) && !pageTakesInk(at: CGPoint(x: pin.midX, y: pin.midY)),
@@ -500,6 +565,7 @@ enum FloatingToolbarDiagnostics {
             try check(pinFits(pinned, available: beforePin.available(in: host.view.bounds),
                               footer: pinnedBar, reservation: reservation, height: bar.height, flipped: host.view.isFlipped),
                       "\(mode) reserves exactly the pinned footer's height in the editor: before=\(beforePin) hoverBar=\(bar) \(layoutContext())")
+            try check(scrollerBacking(in: scroll) == nil, "\(mode) pinned navigation leaves its separate editor scrollbar untouched")
             try dragScrollbar("\(mode) pinned")
             try checkPage("\(mode) bottom navigation")
             try check(manager.canUndo && editor.string == seed + suffix,

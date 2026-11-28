@@ -3,6 +3,17 @@ import SwiftUI
 import AppKit
 import NotesCore
 
+private struct PageNavigationScrollerBackingKey: EnvironmentKey {
+    static let defaultValue = false
+}
+
+extension EnvironmentValues {
+    var showsPageNavigationScrollerBacking: Bool {
+        get { self[PageNavigationScrollerBackingKey.self] }
+        set { self[PageNavigationScrollerBackingKey.self] = newValue }
+    }
+}
+
 /// One paper surface: text and pressure ink share coordinates, scrolling and zoom.
 struct UnifiedPageEditor: NSViewRepresentable {
     @Binding var text: String
@@ -97,13 +108,17 @@ struct UnifiedPageEditor: NSViewRepresentable {
         page.selectionView.controller = context.coordinator.selection
         context.coordinator.richText.load(text: text, rtf: rtfData, into: page.textView)
         configure(page, coordinator: context.coordinator, isEnabled: context.environment.isEnabled)
+        scroll.showsNavigationBacking = context.environment.showsPageNavigationScrollerBacking
         scroll.connectZoom(to: zoomSession)
         return scroll
     }
 
     func updateNSView(_ scroll: NSScrollView, context: Context) {
         guard let page = scroll.documentView as? UnifiedMacPageView else { return }
-        (scroll as? PageZoomScrollView)?.connectZoom(to: zoomSession)
+        if let scroll = scroll as? PageZoomScrollView {
+            scroll.connectZoom(to: zoomSession)
+            scroll.showsNavigationBacking = context.environment.showsPageNavigationScrollerBacking
+        }
         context.coordinator.parent = self
         context.coordinator.richText.parent = textEditor
         configure(page, coordinator: context.coordinator, isEnabled: context.environment.isEnabled)
@@ -321,6 +336,16 @@ enum PageZoomActions {
     }
 }
 
+/// Extends the footer behind a fading overlay scrollbar without taking its mouse events.
+private final class PageNavigationScrollerBacking: NSView {
+    override func hitTest(_ point: NSPoint) -> NSView? { nil }
+
+    override func draw(_ dirtyRect: NSRect) {
+        NSColor.windowBackgroundColor.setFill()
+        dirtyRect.fill()
+    }
+}
+
 /// Owns native magnification and keeps fitted paper inside the visible editor.
 @MainActor
 final class PageZoomScrollView: NSScrollView, PageZoomViewport {
@@ -329,6 +354,12 @@ final class PageZoomScrollView: NSScrollView, PageZoomViewport {
     private weak var zoomSession: PageZoomSession?
     private var applyingZoom = false
     private var updatingNativeGeometry = false
+    private let navigationBacking = PageNavigationScrollerBacking()
+    var showsNavigationBacking = false {
+        didSet {
+            if showsNavigationBacking != oldValue { reportHorizontalScrollerClearance() }
+        }
+    }
 
     func connectZoom(to session: PageZoomSession?) {
         guard session !== zoomSession else { return }
@@ -410,7 +441,20 @@ final class PageZoomScrollView: NSScrollView, PageZoomViewport {
                 }
             }
         }
-        zoomSession.reportScrollerClearance(min(bounds.height, clearance), from: self)
+        clearance = min(bounds.height, clearance)
+        if showsNavigationBacking, scrollerStyle == .overlay, clearance > 0 {
+            if navigationBacking.superview == nil {
+                navigationBacking.identifier = NSUserInterfaceItemIdentifier("page-navigation-scroller-backing")
+                navigationBacking.setAccessibilityElement(false)
+                addSubview(navigationBacking, positioned: .above, relativeTo: contentView)
+            }
+            let frame = CGRect(x: bounds.minX, y: isFlipped ? bounds.maxY - clearance : bounds.minY,
+                               width: bounds.width, height: clearance)
+            if navigationBacking.frame != frame { navigationBacking.frame = frame }
+        } else if navigationBacking.superview != nil {
+            navigationBacking.removeFromSuperview()
+        }
+        zoomSession.reportScrollerClearance(clearance, from: self)
     }
 
     func applyZoom(_ setting: PageZoomSetting) {

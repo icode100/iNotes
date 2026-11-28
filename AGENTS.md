@@ -206,7 +206,12 @@ See `docs/TESTING.md` for separate local, hosted and public results.
   When the Mac page overflows horizontally, keep the hover handle, revealed
   controls and pointer tracking area above the native scrollbar. The knob
   must receive drags in both hover states and in pinned mode. An empty or
-  fitted page needs no scrollbar clearance.
+  fitted page needs no scrollbar clearance. In a narrow Mac window an overlay
+  scrollbar can fade while its hit lane still occupies the bottom edge. Build
+  2029 extends the revealed footer behind that lane. Keep the backing above
+  the paper and below the native scrollbar, let pointer events through, and
+  remove it on collapse, pinning or when the page fits. Check the same regular
+  window at 75% zoom on both sides of the horizontal overflow threshold.
 - Full Page (and macOS window full screen) can use a docked toolbar, a movable
   floating bubble, or the hover-reveal bubble. Docked is the initial choice.
   Keep the visibility toggle independent of the preferred layout. Store the

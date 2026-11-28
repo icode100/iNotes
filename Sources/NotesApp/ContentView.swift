@@ -270,6 +270,9 @@ struct ContentView: View {
                 ZStack {
                     if let sheet, let zoom {
                         SheetDetail(sheetID: sheet.id, zoomSession: zoom).id(sheet.id)
+                            #if os(macOS)
+                            .environment(\.showsPageNavigationScrollerBacking, usesHoverNavigation && navigationIsRevealed)
+                            #endif
                     } else {
                         ContentUnavailableView {
                             Label(emptyPageTitle, systemImage: store.filter == .trash ? "trash" : "square.and.pencil")
@@ -758,7 +761,12 @@ struct ContentView: View {
         }
         .frame(height: 44)
         .padding(.horizontal, 8).padding(.vertical, 3)
+        #if os(macOS)
+        .background(usesHoverNavigation && presentation.pageScrollerClearance > 0
+                    ? AnyShapeStyle(Color(nsColor: .windowBackgroundColor)) : AnyShapeStyle(.bar))
+        #else
         .background(.bar)
+        #endif
         .overlay(alignment: .top) { Divider() }
         .accessibilityElement(children: .contain)
         .accessibilityIdentifier("page-carousel")
