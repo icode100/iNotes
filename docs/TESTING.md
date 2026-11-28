@@ -1,5 +1,41 @@
 # Validation
 
+## iNotes 1.5.1 / build 2029 — 28 November 2026
+
+The user requested a same-version rebuild for windowed page navigation.
+Native run 68 passed on `9e0337d69fae6139d965de23e4776be2cd420b22`,
+including 146 core tests, 1,333 editor checks (429 diagram), 32 equation,
+9 shortcut, 12 ruled-text, 2,381 workspace and 33 PDF/ZIP checks. It verified
+the mounted Mac installer and compiled the iPad simulator target.
+[Native run 68](https://github.com/icode100/iNotes/actions/runs/46108532632)
+
+Signed release run 27 repeated the core and Mac suites with those counts.
+The installer, checksum and new signed feed were published to the existing
+1.5.1 release. The final workflow readback of the versioned feed timed out at
+120 seconds, so the run is marked failed. The original tag still identifies
+build 2028.
+[Signed release run 27](https://github.com/icode100/iNotes/actions/runs/46109418594)
+
+Independent downloads after the timeout returned byte-identical latest and
+versioned feeds. Both pointed to the build 2029 installer. Its SHA-256 matched
+the published checksum. Ed25519 verification accepted the feed and installer
+with the project's public key and rejected a modified feed, an unsigned feed,
+a modified installer and a different key. The build 2028 installer and its
+checksum retained their GitHub asset IDs and matched their pre-release bytes.
+[GitHub release](https://github.com/icode100/iNotes/releases/tag/v1.5.1)
+
+| Build 2029 public asset | Bytes | SHA-256 |
+| --- | ---: | --- |
+| Apple silicon DMG | 36,155,530 | `a43a426e5482962d71fa76456ab02ab0f7f0e5b1d631f11961c34bcd7314dbf9` |
+| DMG checksum file | 99 | `87858d3e8e73f69766f3dbf5658e6e00022dd604ee3e1b1df41dd85fecbad559` |
+| Signed Sparkle feed | 1,278 | `2b1921493bf3973aeecf0d0bfce54429e83c0dacccac39c9eada19cf64fab319` |
+
+The read-only mounted download contained the ad hoc signed ARM64 app
+`io.inotes.app`, version 1.5.1, build 2029. It passed the persistence smoke
+test and all 33 PDF/ZIP checks using temporary notes. The footer resize and
+drag results below came from automated Mac fixtures. Manual acceptance on
+this build and physical iPad testing were not recorded.
+
 ## Windowed page navigation rebuild — 28 November 2026
 
 An isolated Mac window at 75% zoom exercised the footer at 940 and 1,600
@@ -16,6 +52,21 @@ two sandboxed runs encountered filesystem errors in their temporary fixtures.
 The native run passed 1,335 editor checks, 32 equation checks, 9 shortcut
 checks and 12 ruled-text checks before the footer assertion. A separate local
 export run passed 33 PDF/ZIP checks.
+
+Hosted Native run 67 reproduced the same failure at 940 points wide. Its
+backing reported 622 visible points, the editor was 382 points tall and the
+controls began 17 points above the window edge. The run had passed 146 core
+tests and 1,333 editor, 32 equation, 9 shortcut and 12 ruled-text checks.
+[Native run 67](https://github.com/icode100/iNotes/actions/runs/46108318189)
+
+On the clipped source, `9e0337d69fae6139d965de23e4776be2cd420b22`,
+the local instrumented fixture passed 334 checks on macOS 27.2.1. The visible
+backing measured 17 points, had an opaque center pixel, and sat between the paper
+and the native overlay scroller. Pinning, collapsing and widening the window
+removed it. The fixture also dragged the native scrollbar with the bar open,
+collapsed and pinned. The release-mode QA executable passed 1,335 editor, 32
+equation, 9 shortcut, 12 ruled-text, 2,381 workspace and 33 PDF/ZIP checks
+with disposable notes. Separate workspace and export invocations also passed.
 
 ## iNotes 1.5.1 / build 2028 published and verified — 27 November 2026
 

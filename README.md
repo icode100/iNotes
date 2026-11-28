@@ -1,10 +1,14 @@
 # iNotes
 
-**iNotes 1.5.1, build 2028** lets you choose the buttons on the floating
-toolbar, including shape fill and arrow style on Mac. Choose a palette color
+**iNotes 1.5.1, build 2029** fixes the gap below page navigation when you
+resize a Mac window. The open bar reaches the bottom edge, and the horizontal
+scrollbar stays available for dragging.
+
+Version 1.5.1 also lets you choose the buttons on the floating toolbar,
+including shape fill and arrow style on Mac. Choose a palette color
 before typing, highlight words to recolor them, or pick from 13 text sizes.
 Select several page objects to change their colors together in one undo step.
-[Download the Apple silicon Mac installer](https://github.com/icode100/iNotes/releases/download/v1.5.1/iNotes-1.5.1-arm64.dmg)
+[Download the Apple silicon Mac installer](https://github.com/icode100/iNotes/releases/download/v1.5.1/iNotes-1.5.1-build2029-arm64.dmg)
 or [read the release notes](https://github.com/icode100/iNotes/releases/tag/v1.5.1).
 
 **iNotes 1.5.0, build 2027** added grouped page buttons for long topics,
@@ -193,7 +197,7 @@ Requires an Apple silicon Mac and macOS 14+. Building the installer requires ful
 open dist/iNotes.app
 ```
 
-The public installer and packaging defaults use version 1.5.1, build 2028. Earlier 1.5.0 installers are available for [build 2027](https://github.com/icode100/iNotes/releases/download/v1.5.0/iNotes-1.5.0-build2027-arm64.dmg), [build 2026](https://github.com/icode100/iNotes/releases/download/v1.5.0/iNotes-1.5.0-build2026-arm64.dmg) and [build 2025](https://github.com/icode100/iNotes/releases/download/v1.5.0/iNotes-1.5.0-arm64.dmg). Unpublished versions 1.2.0/build 2018, 1.2.1/build 2019 and 1.4.1/build 2023 stay reserved. Downloaded public builds use ad hoc signing without Apple notarization, so macOS may report that Apple could not verify iNotes is free of malware.
+The public installer and packaging defaults use version 1.5.1, build 2029. The [original 1.5.1 installer (build 2028)](https://github.com/icode100/iNotes/releases/download/v1.5.1/iNotes-1.5.1-arm64.dmg) is also available. Earlier 1.5.0 installers are available for [build 2027](https://github.com/icode100/iNotes/releases/download/v1.5.0/iNotes-1.5.0-build2027-arm64.dmg), [build 2026](https://github.com/icode100/iNotes/releases/download/v1.5.0/iNotes-1.5.0-build2026-arm64.dmg) and [build 2025](https://github.com/icode100/iNotes/releases/download/v1.5.0/iNotes-1.5.0-arm64.dmg). Unpublished versions 1.2.0/build 2018, 1.2.1/build 2019 and 1.4.1/build 2023 stay reserved. Downloaded public builds use ad hoc signing without Apple notarization, so macOS may report that Apple could not verify iNotes is free of malware.
 
 If you trust the download from the [official releases](https://github.com/icode100/iNotes/releases), follow Apple's [per-app first-open procedure](https://support.apple.com/en-us/102445):
 

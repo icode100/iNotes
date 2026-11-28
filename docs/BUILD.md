@@ -52,6 +52,16 @@ The packaging defaults are **v1.5.1 / build 2029**. The release workflow
 gives each same-version rebuild a build-specific filename so earlier
 installers keep their addresses.
 
+Build 2029 was published from `9e0337d69fae6139d965de23e4776be2cd420b22`.
+Native run 68 passed the Mac checks and compiled the iPad simulator app.
+Signed release run 27 published the build-numbered Mac installer, checksum
+and signed update feed. Its final public readback timed out after 120 seconds
+waiting for the versioned feed. Independent downloads passed checksum, signature
+and mounted-app verification.
+[Download build 2029](https://github.com/icode100/iNotes/releases/download/v1.5.1/iNotes-1.5.1-build2029-arm64.dmg) ·
+[Native run 68](https://github.com/icode100/iNotes/actions/runs/46108532632) ·
+[Signed release run 27](https://github.com/icode100/iNotes/actions/runs/46109418594)
+
 The v1.5.1 tag identifies build 2028 at `f40ed27b4463c06c11494f7332c2ac8777a56fb8`.
 Native run 65 passed the Mac checks and compiled the iPad simulator app.
 Signed release run 26 published the Apple silicon installer. Independent
@@ -178,7 +188,7 @@ before publishing; runs 13/14/15 published 2015/2016/2017. Runs 16 and 17 built
 2018 and 2019 but failed before publication; run 18 published 2020 and run 19
 published 2021. Run 20 published 2022. Run 21 reserved 2023 before publication. Run 22
 published 2024, and run 23 published 2025. Run 24 published build 2026 and run 25 published build 2027.
-Run 26 published v1.5.1/build 2028. The next new run, 27, should produce **2029**. Recheck the public feed and workflow counter before tagging. A rerun does not
+Runs 26 and 27 published v1.5.1 builds 2028 and 2029. The next new run, 28, should produce **2030**. Recheck the public feed and workflow counter before tagging. A rerun does not
 increase its build number. The local v1.1.0 QA apps use separate
 identities, QA builds 1 and 2, temporary libraries and
 disconnected updaters. User QA passed the initial candidate; the final Pen-only
