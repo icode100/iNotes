@@ -792,6 +792,40 @@ final class NoteLibraryTests: XCTestCase {
         XCTAssertLessThan(abs(nodeDelta - archiveDelta), 32)
     }
 
+    func testIncrementalInkSizeMatchesArchiveAcrossEditsAndUndo() throws {
+        var (library, _, chapter, _, sheet) = try hierarchy()
+        let index = try XCTUnwrap(library.nodes.firstIndex { $0.id == sheet })
+        let a = InkStroke(points: [InkPoint(x: -0.0, y: 1)], colorHex: "é")
+        let b = InkStroke(points: [InkPoint(x: 1.23456789, y: 3), InkPoint(x: 17, y: 19)])
+        let c = InkStroke(points: [InkPoint(x: 31, y: 37)])
+        func edit(_ change: (inout NoteNode) -> Void) throws {
+            let before = library
+            let previousSize = try LibraryArchive.encode(before).count
+            var node = before.nodes[index]
+            change(&node)
+            try library.update(node)
+            let size = try LibraryArchive.sizeAfterUpdatingNode(at: index, from: before, to: library, previousSize: previousSize)
+            XCTAssertEqual(size, try LibraryArchive.encode(library).count)
+        }
+        try edit {
+            $0.strokes = [a, c]; $0.pencilKitData = Data([0, 255, 1])
+            $0.attachments = [NoteAttachment(filename: "photo", data: Data(repeating: 255, count: 128))]
+        }
+        try edit { $0.strokes.insert(b, at: 1); $0.pencilKitData = nil }
+        try edit { $0.strokes.remove(at: 1) }
+        try edit { $0.strokes.append(b) }
+        try edit { $0.strokes.removeLast() }
+        // Same IDs and apparently equal Swift values can have different wire bytes.
+        try edit { $0.strokes[0].points[0].x = 0.0 }
+        try edit { $0.strokes[0].colorHex = "e\u{301}" }
+        try edit { $0.strokes[1].width = 12; $0.strokes[1].style = .highlighter }
+        try edit { $0.body = "é"; $0.richTextRTF = Data([3]) }
+        try edit { $0.body = "e\u{301}"; $0.richTextRTF = nil; $0.attachments.removeAll() }
+        try edit { $0.equations = [NoteEquation(latex: "x", x: 10, y: 20)] }
+        try edit { $0.strokes.removeAll() }
+        try edit { $0.parentID = chapter }
+    }
+
     func testPayloadOptimizationCannotBypassStructuralAndDateChecks() throws {
         var (library, workbook, _, topic, sheet) = try hierarchy()
         let original = library

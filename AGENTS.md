@@ -167,6 +167,12 @@ and the mounted app passed persistence and all 33 PDF/ZIP checks. The original
 v1.5.1 tag and build 2028 installer were preserved. See the
 [build 2029 verification record](docs/TESTING.md#inotes-151--build-2029--28-november-2026).
 
+The user authorized publication of the Mac handwriting fixes on 28 November
+2026. The local QA candidate retains the final movement at
+pen lift and reduces redraw, commit and autosave pauses on ink-heavy pages.
+The [handwriting verification record](docs/TESTING.md#mac-cursive-handwriting-fixes-local-qa--28-november-2026)
+documents the local replay and timing results. Physical tablet testing is pending.
+
 ## Priorities
 
 - In 1.5.1 the floating toolbar has a device-local button list. Keep customization
@@ -417,6 +423,14 @@ Do not treat callback-level cursor assertions alone as proof of the displayed cu
   updates, tracking areas, and refresh after undo/redo or tool changes.
 - Pen, Pencil, and Marker use proportional dot tips; Highlighter uses a slanted tip.
   Check width and zoom changes as well as switching from Text to ink.
+- On Mac, a freehand stroke can reach its final position in the lift event,
+  even when AppKit delivered no drag. Keep that position within the gesture's
+  sample limit. Use the preceding pressure when the lift reports zero, and
+  keep stationary taps as dots. Register ink undo after the store accepts the edit.
+- For live ink, invalidate the changed curve and draw the stored sections that
+  intersect it. Preserve whole translucent and dashed paths, the page-wide
+  pattern budget and the pixels drawn at different zoom levels. Rebuild the
+  drawing index when ink is replaced, including erasure, recoloring and undo.
 - Plain tool letters are text while a text field/editor has focus. Keep the modified
   tool shortcuts working without stealing note, search, title, or equation input.
 - The user's 3 November 2026 Select All request applies to every page tool.
@@ -603,6 +617,11 @@ Measure app/DMG file bytes separately from RAM; an artifact size is not a memory
 Production data is `~/Library/Application Support/iNotes/Library.json`, with
 `Library.previous.json` for the previous save. Preserve damaged originals and
 external-change detection; failed saves must not permit an updater restart.
+Debounced autosaves use a serial writer off the main thread. A completion can
+mark only its own revision saved. Explicit save and quit must drain older
+writes and persist the latest edits. Scheduled provider backups run separately
+so a slow folder leaves the local writer available. Keep the full archive
+size check near the byte limit and after structural edits.
 Use temporary libraries (`INOTES_DATA_DIR` or explicit test directories) and an
 isolated QA app identity for manual work. Never use real notes for destructive tests.
 Use a dedicated simulator; do not erase or alter unrelated simulators.

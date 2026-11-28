@@ -215,6 +215,7 @@ struct StandaloneTestRunner {
             ("oversized import and duplicate atomicity", library, library.testOversizedMergeAndDuplicateDoNotCommitPartialChanges),
             ("untrusted order overflow", library, library.testUntrustedOrderingCannotOverflow),
             ("trash search and byte budget", library, library.testTrashSearchIsExplicitAndNodeByteBudgetMatchesArchive),
+            ("exact archive size for handwriting and undo", library, library.testIncrementalInkSizeMatchesArchiveAcrossEditsAndUndo),
             ("payload optimization invariants", library, library.testPayloadOptimizationCannotBypassStructuralAndDateChecks),
             ("ink and paper styles persist", library, library.testEveryInkAndPaperStylePersists),
             ("legacy v1 ink and paper defaults", library, library.testLegacyVersionOneDefaultsToPenAndDottedPaper),

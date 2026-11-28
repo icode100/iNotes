@@ -68,6 +68,69 @@ public enum LibraryArchive {
         try encoder().encode(node).count
     }
 
+    /// Exact archive size after NoteLibrary.update replaces a single node. A move,
+    /// deletion or reorder may also renumber siblings, so measure those in full.
+    public static func sizeAfterUpdatingNode(at index: Int, from old: NoteLibrary, to new: NoteLibrary,
+                                             previousSize: Int) throws -> Int {
+        guard old.nodes.count == new.nodes.count, old.nodes.indices.contains(index) else { return try encode(new).count }
+        let before = old.nodes[index], after = new.nodes[index]
+        guard before.id == after.id, before.parentID == after.parentID,
+              before.isTrashed == after.isTrashed, before.order == after.order else {
+            return try encode(new).count
+        }
+        // Retained strokes share immutable point storage across a pen lift, Undo
+        // or erasure. Only serialize the changed middle of each stroke array.
+        var first = 0, oldEnd = before.strokes.count, newEnd = after.strokes.count
+        while first < min(oldEnd, newEnd), sameEncodedStroke(before.strokes[first], after.strokes[first]) {
+            first += 1
+        }
+        while oldEnd > first, newEnd > first, sameEncodedStroke(before.strokes[oldEnd - 1], after.strokes[newEnd - 1]) {
+            oldEnd -= 1
+            newEnd -= 1
+        }
+        func contribution(_ library: NoteLibrary, node: NoteNode, other: NoteNode, end: Int) throws -> Int {
+            var shell = node
+            shell.strokes = Array(node.strokes[first..<end])
+            // Common payloads make the same byte contribution on both sides.
+            if sharesStorage(node.images, other.images) { shell.images = [] }
+            if sharesStorage(node.attachments, other.attachments) { shell.attachments = [] }
+            if sharesStorage(node.textBoxes, other.textBoxes) { shell.textBoxes = [] }
+            if sharesStorage(node.equations, other.equations) { shell.equations = [] }
+            if sharesStorage(node.diagrams, other.diagrams) { shell.diagrams = [] }
+            if node.richTextRTF == other.richTextRTF { shell.richTextRTF = nil }
+            if node.pencilKitData == other.pencilKitData { shell.pencilKitData = nil }
+            if node.body.utf8.elementsEqual(other.body.utf8) { shell.body = "" }
+            // All omitted strokes and their internal commas cancel. A nonempty
+            // middle has one extra comma joining it to those common strokes.
+            let joiningComma = !shell.strokes.isEmpty && shell.strokes.count < node.strokes.count ? 1 : 0
+            let fields = ChangedArchiveFields(node: shell, modifiedAt: library.modifiedAt, formatVersion: library.formatVersion)
+            return try encoder().encode(fields).count + joiningComma
+        }
+        let delta = try contribution(new, node: after, other: before, end: newEnd)
+            - contribution(old, node: before, other: after, end: oldEnd)
+        let predicted = previousSize + delta
+        return predicted > maximumBytes - 1024 ? try encode(new).count : predicted
+    }
+
+    private struct ChangedArchiveFields: Encodable {
+        var node: NoteNode
+        var modifiedAt: Date
+        var formatVersion: Int
+    }
+
+    private static func sharesStorage<T>(_ lhs: [T], _ rhs: [T]) -> Bool {
+        lhs.count == rhs.count && lhs.withUnsafeBufferPointer { left in
+            rhs.withUnsafeBufferPointer { right in left.baseAddress == right.baseAddress }
+        }
+    }
+
+    private static func sameEncodedStroke(_ lhs: InkStroke, _ rhs: InkStroke) -> Bool {
+        // Equatable alone can equate different JSON (e.g. signed-zero
+        // coordinates or canonically equivalent Unicode with different bytes).
+        sharesStorage(lhs.points, rhs.points) && lhs == rhs
+            && lhs.width.bitPattern == rhs.width.bitPattern && lhs.colorHex.utf8.elementsEqual(rhs.colorHex.utf8)
+    }
+
     private static func encoder() -> JSONEncoder {
         let encoder = JSONEncoder()
         encoder.dateEncodingStrategy = .millisecondsSince1970

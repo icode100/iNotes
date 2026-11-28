@@ -39,6 +39,8 @@ struct iNotesApp: App {
                     print(try WorkspaceDiagnostics.run())
                 } else if CommandLine.arguments.contains("--editor-test") {
                     print(try EditorDiagnostics.run())
+                    try NotesStore.verifyScheduledWrites()
+                    print("Scheduled save checks passed (latest edits, explicit flush, provider ordering, disconnect and external changes).")
                     print(try EquationDiagnostics.run())
                     print(try ToolShortcutDiagnostics.run())
                     print(try RuledTextDiagnostics.run())

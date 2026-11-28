@@ -6,6 +6,28 @@ import AppKit
 
 enum LibraryFilter: String, CaseIterable { case all = "All pages", favorites = "Favorites", trash = "Trash" }
 
+/// Each repository operation runs on one queue, including the compare-and-replace
+/// against the bytes read on the previous operation. Only snapshots and results
+/// cross the queue boundary.
+private final class LocalLibraryWriter: @unchecked Sendable {
+    let queue = DispatchQueue(label: "io.inotes.local-save", qos: .utility)
+    private let repository: LibraryRepository
+
+    init(url: URL) { repository = LibraryRepository(url: url) }
+
+    func load() throws -> NoteLibrary? { try queue.sync { try repository.load() } }
+    func hasBackup() -> Bool { queue.sync { (try? repository.recoverBackup()) != nil } }
+    func restore() throws -> NoteLibrary { try queue.sync { try repository.restoreFromBackup() } }
+    func save(_ snapshot: NoteLibrary) throws { try queue.sync { try repository.save(snapshot) } }
+
+    func autosave(_ snapshot: NoteLibrary, completion: @escaping @MainActor @Sendable (Result<Void, Error>) -> Void) {
+        queue.async { [self] in
+            let result = Result { try repository.save(snapshot) }
+            DispatchQueue.main.async { completion(result) }
+        }
+    }
+}
+
 @MainActor
 final class NotesStore: ObservableObject {
     @Published var library = NoteLibrary()
@@ -25,11 +47,14 @@ final class NotesStore: ObservableObject {
     ]
     @Published var dirty = false
     @Published var recoveryAvailable = false
-    private let repository: LibraryRepository
+    private let writer: LocalLibraryWriter
+    private let backupQueue = DispatchQueue(label: "io.inotes.folder-backup", qos: .utility)
     private let preferences: UserDefaults
     private let backupOwnerID: UUID
     let libraryURL: URL
     private var saveTask: Task<Void, Never>?
+    private var editRevision: UInt64 = 0
+    private var savingRevision: UInt64?
     private var backupTasks: [BackupDestination: Task<Void, Never>] = [:]
     private var backupNeedsWrite: Set<BackupDestination> = []
     private var backupRetryAfter: [BackupDestination: Date] = [:]
@@ -62,9 +87,9 @@ final class NotesStore: ObservableObject {
             backupOwnerID = created
             preferences.set(created.uuidString, forKey: ownerKey)
         }
-        repository = LibraryRepository(url: libraryURL)
+        writer = LocalLibraryWriter(url: libraryURL)
         do {
-            if let saved = try repository.load() {
+            if let saved = try writer.load() {
                 library = saved
                 serializedBytes = try LibraryArchive.encode(saved).count
                 saveStatus = "Saved on this device"
@@ -77,7 +102,7 @@ final class NotesStore: ObservableObject {
             sheetID = library.nodes.first(where: { $0.kind == .sheet && !$0.isTrashed })?.id
         } catch {
             canSave = false
-            recoveryAvailable = (try? repository.recoverBackup()) != nil
+            recoveryAvailable = writer.hasBackup()
             saveStatus = "Library could not be opened"
             errorMessage = "Your original library has been left untouched. \(error.localizedDescription)\nUse File → Show Library in Finder to preserve or repair it, then restart iNotes."
         }
@@ -209,26 +234,21 @@ final class NotesStore: ObservableObject {
         }
     }
 
-    func update(_ id: UUID, _ change: (inout NoteNode) -> Void) {
-        guard let index = library.nodes.firstIndex(where: { $0.id == id }), !library.nodes[index].isTrashed else { return }
+    @discardableResult
+    func update(_ id: UUID, _ change: (inout NoteNode) -> Void) -> Bool {
+        guard let index = library.nodes.firstIndex(where: { $0.id == id }), !library.nodes[index].isTrashed else { return false }
         var node = library.nodes[index]
         change(&node)
-        node.updatedAt = Date()
         do {
+            guard node.id == id else { throw LibraryError.invalidData("A content edit cannot change the page ID.") }
             var updatedLibrary = library
             try updatedLibrary.update(node)
-            guard let committedNode = updatedLibrary.node(id: id) else { return }
-            let delta = try LibraryArchive.encodedNodeSize(committedNode) - LibraryArchive.encodedNodeSize(library.nodes[index])
-            let predicted = serializedBytes + delta
-            // The small reserve covers envelope timestamp changes. Check the entire archive near the limit.
-            let needsFullCheck = committedNode.parentID != library.nodes[index].parentID
-                || committedNode.isTrashed != library.nodes[index].isTrashed
-                || committedNode.order != library.nodes[index].order
-                || predicted > LibraryArchive.maximumBytes - 1024
-            if mutate({ $0 = updatedLibrary }, checkSize: needsFullCheck) {
-                if !needsFullCheck { serializedBytes = predicted }
-            }
-        } catch { errorMessage = error.localizedDescription }
+            let size = try LibraryArchive.sizeAfterUpdatingNode(at: index, from: library, to: updatedLibrary,
+                                                               previousSize: serializedBytes)
+            guard mutate({ $0 = updatedLibrary }, checkSize: false) else { return false }
+            serializedBytes = size
+            return true
+        } catch { errorMessage = error.localizedDescription; return false }
     }
 
     func binding<T>(_ id: UUID, _ keyPath: WritableKeyPath<NoteNode, T>, fallback: T) -> Binding<T> {
@@ -307,6 +327,7 @@ final class NotesStore: ObservableObject {
             try work(&candidate)
             if checkSize { serializedBytes = try LibraryArchive.encode(candidate).count }
             library = candidate
+            editRevision &+= 1
             dirty = true
             backupNeedsWrite.formUnion(BackupDestination.allCases)
             for destination in BackupDestination.allCases where backupFolder(for: destination) != nil && backupRetryAfter[destination] == nil {
@@ -316,19 +337,47 @@ final class NotesStore: ObservableObject {
             saveTask?.cancel()
             saveTask = Task { [weak self] in
                 try? await Task.sleep(for: .milliseconds(650))
-                guard !Task.isCancelled else { return }
-                _ = self?.flush()
+                guard !Task.isCancelled, let self else { return }
+                self.saveTask = nil
+                self.startAutosave()
             }
             return true
         } catch { errorMessage = error.localizedDescription; return false }
     }
 
-    @discardableResult func flush() -> Bool {
+    private func startAutosave() {
+        guard canSave, dirty, savingRevision == nil else { return }
+        let revision = editRevision
+        savingRevision = revision
+        writer.autosave(library) { [weak self] result in
+            guard let self, self.savingRevision == revision else { return }
+            self.savingRevision = nil
+            if self.editRevision == revision {
+                _ = self.finishSave(result)
+            } else if self.saveTask == nil {
+                // A newer edit's debounce already elapsed during this
+                // write. Only its latest snapshot needs to be submitted.
+                self.startAutosave()
+            }
+        }
+    }
+
+    private func cancelPendingAutosave() {
         saveTask?.cancel()
+        saveTask = nil
+        savingRevision = nil
+    }
+
+    @discardableResult func flush() -> Bool {
+        cancelPendingAutosave()
         guard canSave else { return false }
         guard dirty else { return true }
+        return finishSave(Result { try writer.save(library) })
+    }
+
+    private func finishSave(_ result: Result<Void, Error>) -> Bool {
         do {
-            try repository.save(library)
+            try result.get()
             dirty = false
             saveStatus = "Saved on this device"
             scheduleBackups()
@@ -347,7 +396,9 @@ final class NotesStore: ObservableObject {
 
     func recoverPreviousVersion() {
         do {
-            library = try repository.restoreFromBackup()
+            library = try writer.restore()
+            cancelPendingAutosave()
+            editRevision &+= 1
             serializedBytes = try LibraryArchive.encode(library).count
             canSave = true
             recoveryAvailable = false
@@ -393,20 +444,44 @@ final class NotesStore: ObservableObject {
 
     @discardableResult
     private func performBackup(to destination: BackupDestination, reportFailure: Bool) -> ManagedBackupResult? {
+        guard let write = backupWrite(to: destination) else { return nil }
+        let result = Result { try backupQueue.sync(execute: write) }
+        return finishBackup(result, to: destination, revision: editRevision, snapshotDate: library.modifiedAt,
+                            reportFailure: reportFailure)
+    }
+
+    private func backupWrite(to destination: BackupDestination) -> (@Sendable () throws -> ManagedBackupResult)? {
         guard let folder = backupFolder(for: destination) else { return nil }
+        return { [snapshot = library, access = backupAccesses[destination], backupOwnerID, canSave] in
+            guard canSave else { throw RepositoryError.recoveryRequired }
+            return try withExtendedLifetime(access) {
+                try ManagedBackupWriter.write(LibraryArchive.encode(snapshot), to: folder, ownerID: backupOwnerID)
+            }
+        }
+    }
+
+    @discardableResult
+    private func finishBackup(_ write: Result<ManagedBackupResult, Error>, to destination: BackupDestination,
+                              revision: UInt64, snapshotDate: Date, reportFailure: Bool) -> ManagedBackupResult? {
         do {
-            let result = try ManagedBackupWriter.write(archiveData(), to: folder, ownerID: backupOwnerID)
+            let result = try write.get()
             let now = Date()
-            if destination == .googleDrive { lastBackup = now } else { lastICloudBackup = now }
-            preferences.set(now, forKey: destination.lastBackupKey)
-            backupNeedsWrite.remove(destination)
-            backupRetryAfter.removeValue(forKey: destination)
+            let latest = revision == editRevision
+            // Relaunch compares modifiedAt with this date. Never mark edits
+            // made during a provider write as already backed up.
+            let backedUpThrough = latest ? now : snapshotDate
+            if destination == .googleDrive { lastBackup = backedUpThrough } else { lastICloudBackup = backedUpThrough }
+            preferences.set(backedUpThrough, forKey: destination.lastBackupKey)
+            if latest { backupNeedsWrite.remove(destination) }
+            backupRetryAfter[destination] = latest ? nil : now.addingTimeInterval(BackupSchedule.minimumInterval)
             let history = result.cleanupWarning == nil
                 ? "\(result.retainedCount) managed backups · \(ByteCountFormatter.string(fromByteCount: result.retainedBytes, countStyle: .file)). " : ""
             backupStatuses[destination] = (result.didWrite ? "Backup saved to folder. " : "Backup already current. ")
                 + history + "\(destination.title) handles uploading."
                 + (result.cleanupWarning.map { " Cleanup needs attention: \($0)" } ?? "")
+                + (latest ? "" : " Newer edits are pending.")
                 + (backupSessionOnly.contains(destination) ? " Reconnect after restarting iNotes." : "")
+            if !latest { scheduleBackups() }
             return result
         } catch {
             backupNeedsWrite.insert(destination)
@@ -458,9 +533,28 @@ final class NotesStore: ObservableObject {
             let delay = BackupSchedule.delay(now: Date(), lastSuccess: lastBackup(for: destination), retryAfter: backupRetryAfter[destination])
             backupTasks[destination] = Task { [weak self] in
                 if delay > 0 { try? await Task.sleep(for: .seconds(delay)) }
+                guard !Task.isCancelled, let self else { return }
+                guard let write = self.backupWrite(to: destination), let request = self.backupTasks[destination] else {
+                    self.backupTasks.removeValue(forKey: destination)
+                    return
+                }
+                let revision = self.editRevision
+                let snapshotDate = self.library.modifiedAt
+                self.backupStatuses[destination] = "Saving backup to folder…"
+                let result: Result<ManagedBackupResult, Error> = await withCheckedContinuation { continuation in
+                    self.backupQueue.async {
+                        continuation.resume(returning: Result {
+                            guard !request.isCancelled else { throw CancellationError() }
+                            return try write()
+                        })
+                    }
+                }
+                // A manual backup or reconnect may already have superseded
+                // this operation. Its completion belongs to the old request.
                 guard !Task.isCancelled else { return }
-                self?.backupTasks.removeValue(forKey: destination)
-                self?.performBackup(to: destination, reportFailure: false)
+                self.backupTasks.removeValue(forKey: destination)
+                self.finishBackup(result, to: destination, revision: revision, snapshotDate: snapshotDate,
+                                  reportFailure: false)
             }
         }
     }
@@ -562,6 +656,104 @@ final class NotesStore: ObservableObject {
 }
 
 #if os(macOS)
+extension NotesStore {
+    static func verifyScheduledWrites() throws {
+        let root = FileManager.default.temporaryDirectory.appendingPathComponent("iNotes-autosave-\(UUID())")
+        let suite = "io.inotes.autosave.\(UUID())"
+        let preferences = UserDefaults(suiteName: suite)!
+        defer {
+            preferences.removePersistentDomain(forName: suite)
+            try? FileManager.default.removeItem(at: root)
+        }
+        func check(_ condition: @autoclosure () throws -> Bool, _ message: String) throws {
+            guard try condition() else { throw NSError(domain: "iNotes.AutosaveChecks", code: 1,
+                                                        userInfo: [NSLocalizedDescriptionKey: message]) }
+        }
+        func wait(_ message: String, for condition: () -> Bool) throws {
+            let deadline = Date(timeIntervalSinceNow: 5)
+            while !condition() && Date() < deadline { RunLoop.main.run(until: Date(timeIntervalSinceNow: 0.01)) }
+            try check(condition(), message)
+        }
+        func hold(_ queue: DispatchQueue) -> DispatchSemaphore {
+            let gate = DispatchSemaphore(value: 0)
+            queue.async { _ = gate.wait(timeout: .now() + 12) }
+            return gate
+        }
+        let store = NotesStore(directory: root.appendingPathComponent("local"), preferences: preferences)
+        guard let id = store.selectedSheet?.id else { throw LibraryError.nodeNotFound }
+        let reader = LibraryRepository(url: store.libraryURL)
+        let gate = hold(store.writer.queue)
+        defer { gate.signal() }
+        store.rename(id, to: "First snapshot")
+        try wait("The main loop stays available while the local writer is held") { store.savingRevision != nil }
+        store.rename(id, to: "Latest snapshot")
+        try wait("The second debounce expires while the first snapshot is queued") { store.saveTask == nil }
+        try check(store.dirty, "Queued snapshots must keep unsaved edits dirty")
+        gate.signal()
+        try wait("The latest queued edit eventually becomes durable") { !store.dirty }
+        try check(try reader.load()?.node(id: id)?.title == "Latest snapshot", "The latest revision reaches the disk")
+        try check(try reader.recoverBackup().node(id: id)?.title == "First snapshot", "The prior revision is recoverable")
+
+        store.rename(id, to: "Automatic before explicit")
+        store.startAutosave()
+        store.rename(id, to: "Explicit save")
+        try check(store.flush(), "An explicit save drains an older queued snapshot")
+        store.rename(id, to: "Still dirty")
+        var reachedMainQueue = false
+        DispatchQueue.main.async { reachedMainQueue = true }
+        try wait("Previously queued save callbacks are delivered") { reachedMainQueue }
+        try check(store.dirty && store.saveStatus == "Saving…", "An old receipt must not mark the next edit saved")
+        try check(try reader.load()?.node(id: id)?.title == "Explicit save", "An older write cannot follow a newer explicit save")
+
+        let folder = root.appendingPathComponent("provider", isDirectory: true)
+        try FileManager.default.createDirectory(at: folder, withIntermediateDirectories: true)
+        store.driveFolder = folder
+        let providerGate = hold(store.backupQueue)
+        defer { providerGate.signal() }
+        try check(store.flush(), "The pending edit saves before a scheduled folder backup")
+        try wait("A scheduled backup leaves the main loop available while its writer is held") {
+            store.backupStatus(for: .googleDrive) == "Saving backup to folder…"
+        }
+        let backedUpDate = store.library.modifiedAt
+        store.rename(id, to: "Edited during folder backup")
+        try check(store.flush(), "Local saves continue while a provider is busy")
+        providerGate.signal()
+        try wait("The earlier provider write completes") { store.lastBackup != nil }
+        try check(store.lastBackup == backedUpDate && store.backupNeedsWrite.contains(.googleDrive),
+                  "The earlier snapshot cannot mark later folder changes backed up")
+        try check(store.prepareForQuit() && !store.backupNeedsWrite.contains(.googleDrive),
+                  "Quit saves the latest provider revision")
+        let backupDir = store.managedBackupDirectory(for: .googleDrive)!
+        let archives = try FileManager.default.contentsOfDirectory(at: backupDir, includingPropertiesForKeys: nil)
+        let titles = try archives.map { try LibraryArchive.decode(LibraryArchive.read(from: $0)).node(id: id)?.title }
+        try check(titles.contains("Still dirty") && titles.contains("Edited during folder backup"),
+                  "Provider history contains both complete snapshots")
+
+        let disconnectGate = hold(store.backupQueue)
+        defer { disconnectGate.signal() }
+        store.lastBackup = nil
+        store.rename(id, to: "Disconnected write")
+        try check(store.flush(), "A new folder backup can be scheduled")
+        try wait("The second backup is pending on the writer") {
+            store.backupStatus(for: .googleDrive) == "Saving backup to folder…"
+        }
+        store.disconnectDrive()
+        disconnectGate.signal()
+        store.backupQueue.sync {}
+        try check(try FileManager.default.contentsOfDirectory(at: backupDir, includingPropertiesForKeys: nil).count == archives.count
+                  && store.backupStatus(for: .googleDrive) == "Not connected",
+                  "Disconnect cancels a queued write to the former destination")
+
+        var external = try reader.load()!
+        try external.rename(id: id, title: "External edit")
+        try reader.save(external)
+        store.rename(id, to: "Local conflict")
+        try wait("An automatic save reports an external modification") { store.errorMessage != nil }
+        try check(store.dirty && store.selectedSheet?.title == "Local conflict", "A failed autosave preserves local edits")
+        try check(try reader.load()?.node(id: id)?.title == "External edit", "A failed autosave preserves the external file")
+    }
+}
+
 @MainActor
 enum BackupDiagnostics {
     static func run() throws -> String {

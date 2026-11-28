@@ -5,7 +5,7 @@ import Security
 
 /// Holds exactly one security-scope access per connected target. iOS bookmarks
 /// retain the implicit scope supplied by the Files folder picker.
-final class BackupFolderAccess {
+final class BackupFolderAccess: Sendable {
     private struct Envelope: Codable {
         enum Kind: String, Codable { case securityScoped, ordinary, provider }
         let version: Int

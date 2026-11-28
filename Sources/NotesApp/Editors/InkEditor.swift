@@ -150,6 +150,73 @@ enum InkExport {
     }
 }
 
+/// Conservative paint regions in page coordinates. The live canvas appends
+/// accepted strokes incrementally and discards the index on any replacement.
+@MainActor
+struct InkDrawingIndex {
+    struct Section {
+        let strokeIndex: Int
+        let segments: Range<Int>
+        let bounds: CGRect
+    }
+
+    private(set) var sections: [Section] = []
+    private(set) var remainingPatternBudget = InkGeometryLimits.maximumPatternSegments
+    private(set) var acceptedStrokes = 0
+    private var stopped = false
+
+    mutating func indexNewStrokes(in strokes: [InkStroke]) {
+        guard !stopped else { return }
+        for i in acceptedStrokes..<strokes.count {
+            let stroke = strokes[i]
+            // Offscreen dashed ink still counts toward the whole-page limit.
+            guard InkGeometryLimits.consumePatternBudget(for: stroke, remaining: &remainingPatternBudget) else {
+                stopped = true
+                return
+            }
+            Self.forEachSection(of: stroke) { segments, bounds in
+                sections.append(Section(strokeIndex: i, segments: segments, bounds: bounds))
+            }
+            acceptedStrokes += 1
+        }
+    }
+
+    static func forEachSection(of stroke: InkStroke, _ visit: (Range<Int>, CGRect) -> Void) {
+        let count = stroke.points.count
+        guard count > 0 else { return }
+        // Pen and Pencil paint individual cubics. Keep other paths whole to
+        // preserve translucent overlaps, joins and dash phase.
+        let independentSegments = stroke.linePattern == .solid && (stroke.style == .pen || stroke.style == .pencil)
+        let step = independentSegments ? 64 : count
+        var start = 1
+        repeat {
+            let end = min(start + step, count)
+            let segments = start..<end
+            visit(segments, paintBounds(of: stroke, segments: segments))
+            start = end
+        } while start < count
+    }
+
+    static func paintBounds(of stroke: InkStroke, segments: Range<Int>) -> CGRect {
+        // A Catmull–Rom control point can extend past both endpoints.
+        // Include both neighbors and bound their one-sixth tangent offsets.
+        let first = max(0, segments.lowerBound - 2), last = min(stroke.points.count - 1, segments.upperBound)
+        var minX = Double.infinity, minY = Double.infinity
+        var maxX = -Double.infinity, maxY = -Double.infinity
+        guard first <= last else { return .null }
+        for point in stroke.points[first...last] where point.x.isFinite && point.y.isFinite {
+            minX = min(minX, point.x)
+            maxX = max(maxX, point.x)
+            minY = min(minY, point.y)
+            maxY = max(maxY, point.y)
+        }
+        guard minX <= maxX else { return .null }
+        let w = maxX - minX, h = maxY - minY
+        let radius = max(0.5, min(100, stroke.width.isFinite ? stroke.width : 2.5)) * stroke.style.widthMultiplier / 2
+        return CGRect(x: minX, y: minY, width: w, height: h).insetBy(dx: -radius - w / 6, dy: -radius - h / 6)
+    }
+}
+
 @MainActor
 enum InkRenderer {
     static func bounds(of stroke: InkStroke) -> NSRect? {
@@ -162,7 +229,7 @@ enum InkRenderer {
         return path.bounds.insetBy(dx: -width / 2, dy: -width / 2)
     }
 
-    static func draw(strokes: [InkStroke], paper: InkPaper, in requestedRect: NSRect, drawsPaper: Bool = true, theme: PageTheme = .light, pageTemplate: PageTemplate = .none, templateLinePattern: LinePattern = .solid, pageBounds: NSRect? = nil) {
+    static func draw(strokes: [InkStroke], paper: InkPaper, in requestedRect: NSRect, drawsPaper: Bool = true, theme: PageTheme = .light, pageTemplate: PageTemplate = .none, templateLinePattern: LinePattern = .solid, pageBounds: NSRect? = nil, index: InkDrawingIndex? = nil, activeStroke: InkStroke? = nil) {
         // Layer-backed offscreen rendering can request an effectively infinite
         // dirty rectangle. Intersect the real clip before constructing a grid.
         var dirtyRect = requestedRect
@@ -225,6 +292,22 @@ enum InkRenderer {
                 }
             }
         }
+        if let index {
+            // Cover antialiasing at the edge of the dirty region at any zoom.
+            let pixels = NSGraphicsContext.current?.cgContext.convertToUserSpace(CGRect(x: 0, y: 0, width: 2, height: 2)).size ?? CGSize(width: 2, height: 2)
+            let visible = dirtyRect.insetBy(dx: -pixels.width, dy: -pixels.height)
+            for section in index.sections where visible.intersects(section.bounds) {
+                draw(strokes[section.strokeIndex], theme: theme, segments: section.segments)
+            }
+            var budget = index.remainingPatternBudget
+            if let activeStroke, index.acceptedStrokes == strokes.count,
+               InkGeometryLimits.consumePatternBudget(for: activeStroke, remaining: &budget) {
+                InkDrawingIndex.forEachSection(of: activeStroke) { segments, bounds in
+                    if visible.intersects(bounds) { draw(activeStroke, theme: theme, segments: segments) }
+                }
+            }
+            return
+        }
         var patternBudget = InkGeometryLimits.maximumPatternSegments
         for stroke in strokes {
             // Validate work before constructing the native path, including
@@ -234,7 +317,7 @@ enum InkRenderer {
         }
     }
 
-    private static func draw(_ stroke: InkStroke, theme: PageTheme) {
+    private static func draw(_ stroke: InkStroke, theme: PageTheme, segments: Range<Int>? = nil) {
         guard let first = stroke.points.first, first.x.isFinite, first.y.isFinite else { return }
         let inkColor = color(theme.resolvedInkHex(stroke.colorHex))
         let highlighterAlpha: CGFloat = theme.isDark ? 0.36 : 0.25
@@ -271,7 +354,7 @@ enum InkRenderer {
             path.stroke()
             return
         }
-        for index in 1..<stroke.points.count {
+        for index in segments ?? 1..<stroke.points.count {
             let previous = stroke.points[index - 1]
             let point = stroke.points[index]
             guard previous.x.isFinite, previous.y.isFinite, point.x.isFinite, point.y.isFinite else { continue }
@@ -317,7 +400,16 @@ enum InkRenderer {
 
 @MainActor
 final class InkDocumentView: NSView {
-    var strokes: [InkStroke] = []
+    private static let maximumGesturePoints = 100_000
+    private var committedStrokes: [InkStroke] = []
+    private var drawingIndex = InkDrawingIndex()
+    var strokes: [InkStroke] {
+        get { committedStrokes }
+        set {
+            committedStrokes = newValue
+            drawingIndex = InkDrawingIndex()
+        }
+    }
     var colorHex = "#314D43" { didSet { if colorHex != oldValue { invalidateTipCursor() } } }
     var lineWidth: Double = InkNibPreset.defaultWidth(for: .pen) { didSet { if lineWidth != oldValue { invalidateTipCursor() } } }
     var linePattern: LinePattern = .solid
@@ -327,6 +419,8 @@ final class InkDocumentView: NSView {
         didSet { if theme != oldValue { needsDisplay = true; invalidateTipCursor() } }
     }
     var drawsPaper = true
+    /// The mounted page commits through its validated store transaction.
+    var commitStrokes: (([InkStroke]) -> Bool)?
     var onChange: (([InkStroke]) -> Void)?
     var onInputChange: ((String) -> Void)?
     var onTipCursorChange: (() -> Void)?
@@ -425,7 +519,9 @@ final class InkDocumentView: NSView {
     }
 
     override func draw(_ dirtyRect: NSRect) {
-        InkRenderer.draw(strokes: activeStroke.map { strokes + [$0] } ?? strokes, paper: paper, in: dirtyRect.intersection(bounds), drawsPaper: drawsPaper, theme: theme)
+        drawingIndex.indexNewStrokes(in: committedStrokes)
+        InkRenderer.draw(strokes: committedStrokes, paper: paper, in: dirtyRect.intersection(bounds),
+                         drawsPaper: drawsPaper, theme: theme, index: drawingIndex, activeStroke: activeStroke)
     }
 
     override func mouseDown(with event: NSEvent) {
@@ -443,7 +539,9 @@ final class InkDocumentView: NSView {
             activeStroke = InkStroke(points: [point], colorHex: colorHex, width: lineWidth,
                                      style: InkStyle(rawValue: tool.rawValue) ?? .pen,
                                      linePattern: tool == .line ? linePattern : .solid)
-            needsDisplay = true
+            if let activeStroke, let dot = InkRenderer.bounds(of: activeStroke) {
+                setNeedsDisplay(dot.insetBy(dx: -8, dy: -8))
+            }
         }
     }
 
@@ -459,33 +557,57 @@ final class InkDocumentView: NSView {
             if isLineGesture { updateLineEnd(event); return }
             guard let previous = activeStroke?.points.last else { return }
             let distance = hypot(point.x - previous.x, point.y - previous.y)
-            guard distance >= 0.4, (activeStroke?.points.count ?? 0) < 100_000 else { return }
+            guard distance >= 0.4, (activeStroke?.points.count ?? 0) < Self.maximumGesturePoints else { return }
             activeStroke?.points.append(point)
-            let padding = lineWidth * (activeStroke?.style.widthMultiplier ?? 1) + 8
-            let recent = Array(activeStroke?.points.suffix(4) ?? [])
-            let minX = recent.map(\.x).min() ?? point.x, maxX = recent.map(\.x).max() ?? point.x
-            let minY = recent.map(\.y).min() ?? point.y, maxY = recent.map(\.y).max() ?? point.y
-            setNeedsDisplay(NSRect(x: minX - padding, y: minY - padding,
-                                  width: maxX - minX + padding * 2, height: maxY - minY + padding * 2))
+            invalidateFreehandTip()
         } else {
             erase(at: point)
         }
     }
 
+    private func invalidateFreehandTip() {
+        guard let stroke = activeStroke else { return }
+        let count = stroke.points.count
+        let affected = max(1, count - 2)..<count
+        setNeedsDisplay(InkDrawingIndex.paintBounds(of: stroke, segments: affected).insetBy(dx: -8, dy: -8))
+    }
+
     override func mouseUp(with event: NSEvent) {
         guard isInputEnabled, isDrawing else { return }
-        if isLineGesture { updateLineEnd(event) }
+        if isLineGesture {
+            updateLineEnd(event)
+        } else if let last = activeStroke?.points.last,
+                  (activeStroke?.points.count ?? 0) < Self.maximumGesturePoints {
+            // A fast flick can reach its final position only in the lift event.
+            let end = inkPoint(event, fallbackPressure: last.pressure)
+            if end.x != last.x || end.y != last.y {
+                activeStroke?.points.append(end)
+                invalidateFreehandTip()
+            }
+        }
         let actionName = isLineGesture ? "Straight Line" : "Drawing"
-        if let activeStroke { strokes.append(activeStroke) }
+        if let activeStroke {
+            committedStrokes.append(activeStroke)
+            // The mean pressure affects the width of the entire translucent path.
+            if activeStroke.style == .marker || activeStroke.style == .highlighter {
+                InkDrawingIndex.forEachSection(of: activeStroke) { _, bounds in
+                    setNeedsDisplay(bounds.insetBy(dx: -8, dy: -8))
+                }
+            }
+        }
         activeStroke = nil
         isLineGesture = false
         isDrawing = false
         if strokes != beforeGesture {
-            registerUndo(previous: beforeGesture, actionName: actionName)
-            onChange?(strokes)
+            if commitStrokes?(strokes) == false {
+                strokes = beforeGesture
+                needsDisplay = true
+            } else {
+                registerUndo(previous: beforeGesture, actionName: actionName)
+                onChange?(strokes)
+            }
         }
         beforeGesture = []
-        needsDisplay = true
     }
 
     override func tabletProximity(with event: NSEvent) {
@@ -518,21 +640,31 @@ final class InkDocumentView: NSView {
         let needsGroup = manager.groupingLevel == 0
         if needsGroup { manager.beginUndoGrouping() }
         manager.registerUndo(withTarget: self) { target in
-            let current = target.strokes
-            target.strokes = previous
-            target.registerUndo(previous: current, actionName: actionName)
-            target.onChange?(previous)
-            target.needsDisplay = true
+            target.restoreStrokes(previous, actionName: actionName)
         }
         manager.setActionName(actionName)
         if needsGroup { manager.endUndoGrouping() }
     }
 
+    private func restoreStrokes(_ snapshot: [InkStroke], actionName: String) {
+        let history = undoManager as? PageUndoManager
+        let inverse = strokes
+        if history?.isRejectingRemainingActions == true || commitStrokes?(snapshot) == false {
+            history?.retainRejectedAction(withTarget: self, actionName: actionName) { target in
+                target.restoreStrokes(snapshot, actionName: actionName)
+            }
+            return
+        }
+        strokes = snapshot
+        registerUndo(previous: inverse, actionName: actionName)
+        onChange?(snapshot)
+        needsDisplay = true
+    }
+
     private func updateLineEnd(_ event: NSEvent) {
         guard let start = activeStroke?.points.first else { return }
         let oldEnd = activeStroke?.points.last ?? start
-        var end = inkPoint(event)
-        if (event.safeInkPressure ?? 0) <= 0 { end.pressure = oldEnd.pressure }
+        var end = inkPoint(event, fallbackPressure: oldEnd.pressure)
         end = InkLineGeometry.snappedEnd(start: start, end: end, forceAxis: event.modifierFlags.contains(.shift))
         activeStroke?.points = [start, end]
         let padding = lineWidth + 8
@@ -542,16 +674,16 @@ final class InkDocumentView: NSView {
                               width: maxX - minX + padding * 2, height: maxY - minY + padding * 2))
     }
 
-    private func inkPoint(_ event: NSEvent) -> InkPoint {
+    private func inkPoint(_ event: NSEvent, fallbackPressure: Double = 1) -> InkPoint {
         let location = convert(event.locationInWindow, from: nil)
         let pressure = event.safeInkPressure ?? 0
         return InkPoint(x: max(0, min(bounds.width, location.x)), y: max(0, min(bounds.height, location.y)),
-                        pressure: pressure > 0 ? Double(pressure) : 1)
+                        pressure: pressure > 0 ? Double(pressure) : fallbackPressure)
     }
 
     private func erase(at point: InkPoint) {
-        let previousCount = strokes.count
-        strokes.removeAll { stroke in
+        let previousCount = committedStrokes.count
+        committedStrokes.removeAll { stroke in
             // Defensive consumer guard for legacy or in-memory malformed data.
             guard !stroke.points.isEmpty else { return true }
             let radius = max(12, stroke.width / 2 + 8)
@@ -567,7 +699,10 @@ final class InkDocumentView: NSView {
             }
             return false
         }
-        if strokes.count != previousCount { needsDisplay = true }
+        if committedStrokes.count != previousCount {
+            drawingIndex = InkDrawingIndex()
+            needsDisplay = true
+        }
     }
 }
 

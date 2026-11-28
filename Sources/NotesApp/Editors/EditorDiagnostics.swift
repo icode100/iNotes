@@ -191,6 +191,72 @@ enum EditorDiagnostics {
         try check(committed.isEmpty, "stroke eraser")
         canvas.undo(nil)
         try check(committed.count == 1, "eraser undo")
+        let movingLift = try event(.leftMouseUp, x: 192, y: 150, pressure: 0)
+        let flickLift = try event(.leftMouseUp, x: 108, y: 100, pressure: 0.35)
+        let tapLift = try event(.leftMouseUp, x: 100, y: 100, pressure: 0)
+        for tool in [InkTool.pen, .pencil, .marker, .highlighter] {
+            let freehand = InkDocumentView(frame: canvas.frame)
+            freehand.tool = tool
+            var edits = 0
+            freehand.onChange = { _ in edits += 1 }
+            freehand.mouseDown(with: down)
+            freehand.mouseDragged(with: drag)
+            freehand.mouseUp(with: movingLift)
+            let saved = freehand.strokes
+            try check(edits == 1 && saved.count == 1 && saved[0].points.map(\.x) == [100, 180, 192],
+                      "\(tool) commits the final movement at lift in the original stroke")
+            try check(abs((saved[0].points.last?.pressure ?? 0) - 0.8) < 0.001,
+                      "\(tool) keeps the last contact pressure when lifting at zero pressure")
+            freehand.undo(nil)
+            try check(freehand.strokes.isEmpty, "\(tool) undoes the entire flick at once")
+            freehand.redo(nil)
+            try check(freehand.strokes == saved, "\(tool) redoes the flick with its original endpoint")
+            freehand.mouseDown(with: down)
+            freehand.mouseUp(with: flickLift)
+            try check(freehand.strokes.last?.points.map(\.x) == [100, 108]
+                      && abs((freehand.strokes.last?.points.last?.pressure ?? 0) - 0.35) < 0.001,
+                      "\(tool) keeps a down-to-up flick and its reported positive pressure")
+            freehand.mouseDown(with: down)
+            freehand.mouseUp(with: tapLift)
+            try check(freehand.strokes.last?.points.count == 1, "\(tool) keeps stationary taps as dots")
+        }
+        let guardedInk = InkDocumentView(frame: canvas.frame)
+        let guardedHistory = PageUndoManager()
+        guardedHistory.groupsByEvent = false
+        guardedInk.pageSelectionHistory = guardedHistory
+        var rejectsInk = true
+        var storedInk: [InkStroke] = []
+        guardedInk.commitStrokes = { proposed in
+            guard !rejectsInk else { return false }
+            storedInk = proposed
+            return true
+        }
+        guardedInk.mouseDown(with: down)
+        guardedInk.mouseUp(with: flickLift)
+        try check(guardedInk.strokes.isEmpty && storedInk.isEmpty && !guardedHistory.canUndo,
+                  "a rejected pen lift removes its preview and creates no undo action")
+        rejectsInk = false
+        guardedInk.mouseDown(with: down)
+        guardedInk.mouseUp(with: flickLift)
+        let acceptedFlick = storedInk
+        rejectsInk = true
+        guardedInk.tool = .eraser
+        guardedInk.mouseDown(with: down)
+        guardedInk.mouseUp(with: tapLift)
+        guardedHistory.undo()
+        try check(!acceptedFlick.isEmpty && storedInk == acceptedFlick && guardedInk.strokes == acceptedFlick
+                  && guardedHistory.canUndo && !guardedHistory.canRedo,
+                  "rejected erasure and undo restore the same ink and keep undo retryable")
+        rejectsInk = false
+        guardedHistory.undo()
+        rejectsInk = true
+        guardedHistory.redo()
+        try check(storedInk.isEmpty && guardedInk.strokes.isEmpty && guardedHistory.canRedo,
+                  "a rejected ink redo keeps the page empty and redo retryable")
+        rejectsInk = false
+        guardedHistory.redo()
+        try check(storedInk == acceptedFlick && guardedInk.strokes == acceptedFlick,
+                  "retrying redo restores the exact accepted pen-up stroke")
         guard let png = InkExport.png(strokes: committed), let bitmap = NSBitmapImageRep(data: png) else {
             throw Failure(description: "Cannot render PNG")
         }
@@ -689,7 +755,8 @@ enum EditorDiagnostics {
 
         func renderAppearanceSample(strokes: [InkStroke] = [], paper: InkPaper = .blank,
                                     theme: PageTheme = .light, template: PageTemplate = .none,
-                                    pattern: LinePattern = .solid) -> NSBitmapImageRep? {
+                                    pattern: LinePattern = .solid, canvas: InkDocumentView? = nil,
+                                    clip: NSRect? = nil, scale: CGFloat = 1) -> NSBitmapImageRep? {
             guard let bitmap = NSBitmapImageRep(bitmapDataPlanes: nil, pixelsWide: 320, pixelsHigh: 240,
                                                bitsPerSample: 8, samplesPerPixel: 4, hasAlpha: true, isPlanar: false,
                                                colorSpaceName: .deviceRGB, bytesPerRow: 0, bitsPerPixel: 0),
@@ -697,9 +764,14 @@ enum EditorDiagnostics {
             NSGraphicsContext.saveGraphicsState()
             NSGraphicsContext.current = graphics
             let region = NSRect(x: 0, y: 0, width: 320, height: 240)
-            graphics.cgContext.clip(to: region)
-            InkRenderer.draw(strokes: strokes, paper: paper, in: region, theme: theme,
-                             pageTemplate: template, templateLinePattern: pattern, pageBounds: region)
+            graphics.cgContext.scaleBy(x: scale, y: scale)
+            let dirty = clip ?? region
+            graphics.cgContext.clip(to: dirty)
+            if let canvas { canvas.draw(dirty) }
+            else {
+                InkRenderer.draw(strokes: strokes, paper: paper, in: dirty, theme: theme,
+                                 pageTemplate: template, templateLinePattern: pattern, pageBounds: region)
+            }
             graphics.flushGraphics()
             NSGraphicsContext.restoreGraphicsState()
             guard let data = bitmap.representation(using: .png, properties: [:]) else { return nil }
@@ -716,6 +788,44 @@ enum EditorDiagnostics {
               let emptyPattern = renderAppearanceSample() else { throw Failure(description: "Pattern budget sample did not render") }
         try check(rejectedPattern.representation(using: .png, properties: [:]) == emptyPattern.representation(using: .png, properties: [:]),
                   "renderer rejects excessive patterned work before constructing or stroking its native path")
+        let indexedCanvas = InkDocumentView(frame: CGRect(x: 0, y: 0, width: 320, height: 240))
+        indexedCanvas.paper = .blank
+        let samplePoints = (0..<150).map { i in
+            InkPoint(x: 15 + Double(i) * 1.6, y: 70 + 20 * sin(Double(i) * 0.12),
+                     pressure: Double(i % 9) / 8)
+        }
+        let coloredPen = InkStroke(points: samplePoints, colorHex: "#176D77", width: 4)
+        let overlap = [coloredPen, InkStroke(points: samplePoints.reversed(), width: 3, style: .pencil),
+                       InkStroke(points: samplePoints, colorHex: "#DB8900", width: 7, style: .highlighter),
+                       InkStroke(points: samplePoints, colorHex: "#283EAA", width: 2, style: .marker),
+                       InkStroke(points: samplePoints, width: 2, linePattern: .dashed),
+                       InkStroke(points: [samplePoints[64]], width: 5)]
+        indexedCanvas.strokes = overlap
+        func canvasMatchesReference(_ clip: CGRect, scale: CGFloat = 1) -> Bool {
+            guard let live = renderAppearanceSample(canvas: indexedCanvas, clip: clip, scale: scale),
+                  let reference = renderAppearanceSample(strokes: indexedCanvas.strokes, theme: indexedCanvas.theme,
+                                                         clip: clip, scale: scale) else { return false }
+            return live.representation(using: .png, properties: [:]) == reference.representation(using: .png, properties: [:])
+        }
+        for scale in [0.5, 1.0, 2.0] {
+            for rect in [indexedCanvas.bounds, CGRect(x: 116, y: 65, width: 10, height: 20),
+                         CGRect(x: 75, y: 45, width: 23, height: 28)] {
+                try check(canvasMatchesReference(rect, scale: scale), "clipped live ink matches the full renderer at scale \(scale), rect \(rect)")
+            }
+        }
+        // Keep the same ID but move, recolor and resize all of its ink.
+        var movedPen = coloredPen
+        movedPen.points = movedPen.points.map { InkPoint(x: $0.x, y: $0.y + 130, pressure: $0.pressure) }
+        movedPen.width = 9
+        movedPen.colorHex = "#7469C0"
+        indexedCanvas.strokes = [movedPen]
+        indexedCanvas.theme = .dark
+        try check(canvasMatchesReference(CGRect(x: 50, y: 178, width: 100, height: 55)),
+                  "replacement with the same ID and a different theme uses current ink geometry and color")
+        var overBudget = excessivePattern
+        overBudget.points = overBudget.points.map { InkPoint(x: $0.x, y: $0.y + 600) }
+        indexedCanvas.strokes = [overBudget, coloredPen]
+        try check(canvasMatchesReference(indexedCanvas.bounds), "offscreen patterns still consume the live renderer's page budget")
         var lineCoverage: [LinePattern: Int] = [:]
         for pattern in LinePattern.allCases {
             let stroke = InkStroke(points: [InkPoint(x: 20, y: 120), InkPoint(x: 300, y: 120)],

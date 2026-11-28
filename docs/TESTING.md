@@ -68,6 +68,101 @@ collapsed and pinned. The release-mode QA executable passed 1,335 editor, 32
 equation, 9 shortcut, 12 ruled-text, 2,381 workspace and 33 PDF/ZIP checks
 with disposable notes. Separate workspace and export invocations also passed.
 
+## Mac cursive handwriting fixes, local QA — 28 November 2026
+
+The isolated Handwriting QA app uses a separate identity, an independent
+notebook with a blank page and a page of 500 synthetic strokes, and a disabled
+updater. The following measurements used optimized Mac code and temporary
+notes on macOS 27.2.1 (ARM64). The comparison used the build 2029 fixtures
+described below.
+
+- The private AppKit tablet replay preserved all 4,128 supplied down and
+  movement samples, including 1,056 light-pressure samples. Pen, Pencil,
+  Brush and Highlighter recorded both the 12-point final flick and the
+  8-point down-to-up stroke at their exact lift locations. Stationary taps
+  still made one dot. The native checks covered a positive release pressure,
+  zero-pressure fallback, a sub-threshold final movement and rejected edits.
+- With 192 stored strokes, median clipped redraw time fell from 18.60–18.69
+  ms to 0.224–0.227 ms. All 240 original redraws exceeded 16.67 ms and all
+  240 candidate redraws finished within it. Native bitmap comparisons at
+  three zoom factors matched the reference renderer, including translucent
+  overlaps, pressure, dash phase, moved geometry and the page pattern budget.
+- The 20-lift native benchmark measured medians of 0.09, 0.09 and 0.13 ms
+  with 1, 100 and 500 existing strokes. On the 500-stroke page the original
+  median was 53.55 ms, and the 95th percentile fell from 57.81 to 0.14 ms.
+  Explicit synchronous save took 27.41 ms at the median on that page.
+  Each size reopened with the expected ink. A separate archive test at the
+  64 MiB limit accepted the stroke that fit and rejected the next one.
+- With 500 strokes and a 120 Hz input timer, the median interval between
+  main-thread callbacks spanning autosave completion fell from 59.24 ms
+  to 8.35 ms (6.39–10.17 ms in five candidate trials). Every delivered
+  sample reached the stroke. A queue-gated native fixture verified newer
+  edits survive an older save receipt, explicit save and quit wait for
+  pending writes, a busy provider leaves local saving available, and an
+  external file modification is reported with local edits still dirty.
+- A separate fixture mounted the normal SwiftUI workspace and AppKit editor,
+  added eight strokes to a 500-stroke page, and measured 0.23–0.28 ms inside
+  the lift handler. It verified all eight final positions, undo and redo,
+  the existing typed text, native editor identity and the full set of
+  508 strokes after reopening the autosaved archive.
+
+The final standalone suite passed 147 core tests. The ad hoc signed local QA app
+passed 1,374 native editor checks, 2,381 workspace checks, 32 equation
+checks, 9 shortcut checks, 12 ruled-text checks, and 33 PDF/ZIP checks.
+The scheduled save, store, updater, hierarchy and backup checks also passed.
+All 25 iPad app source files type-checked in Debug and Release against the
+Mac Catalyst UIKit/PencilKit SDK. The iPad simulator and physical hardware
+were not exercised. The pen timings measure the Mac input and rendering
+paths with synthetic events. Physical tablet delivery and on-screen latency
+remain unmeasured.
+
+## Mac cursive handwriting investigation on build 2029 — 28 November 2026
+
+The user reported intermittent skips while writing in cursive. These tests
+used the Mac ink code from `9e0337d69fae6139d965de23e4776be2cd420b22`,
+synthetic input and temporary notes on macOS 27.2.1 (ARM64).
+
+- **Stroke endings.** A private AppKit replay mixed tablet-point events with
+  drags. All 4,128 supplied down and movement samples across 32 strokes
+  retained their positions and pressures, including 1,056 light-pressure
+  samples. When the lift was 12 page points past the last drag, Pen, Pencil,
+  Brush and Highlighter each stopped 12 points short. An 8-point down-to-up
+  movement with no intervening drag produced a dot. Straight Line retained
+  the lift in both cases.
+- **Painting while writing.** An optimized harness drew a moving Pen stroke
+  into a clipped 800 × 400 bitmap at 1×. Each previously completed stroke
+  had 96 points. Two passes in opposite order each measured 120 redraws per
+  condition. Median redraw time was 0.10 ms on an empty page, 4.75–4.80 ms
+  with 48 strokes and 18.60–18.69 ms with 192 strokes. All 240 redraws in
+  the last condition exceeded the 16.67 ms budget for a 60 Hz frame.
+  The renderer visits the existing strokes even when the dirty rectangle
+  covers only the pen tip. In a separate bitmap check, a complete 321-point
+  looped stroke produced one connected trail at both tested pressures (0.05
+  and 0.6), with Fine and Extra Fine Pen at four scales from 0.5× to 2×.
+- **Work at pen lift.** With 1, 100 and 500 existing 64-point strokes,
+  adding a 64-point stroke took a median of 0.22, 10.38 and 53.55 ms.
+  The 95th percentile on the 500-stroke page was 57.81 ms. Each condition
+  used two warmups and 20 measured lifts. The native handler registered undo
+  and called the page's normal store update, which validates the change and
+  measures both versions of the page for the archive size limit. Nearly all
+  the measured lift time was inside that update. Explicitly flushing the
+  500-stroke fixture to disk took a further 28.67 ms at the median in a
+  separate measurement. Each saved page matched the ink after reopening.
+- **Autosave during the next stroke.** After a pen lift scheduled the usual
+  650 ms autosave, a main-thread timer supplied movement at 120 Hz for the
+  next 0.88-second stroke. Five measured trials followed one warmup for each
+  page size. On the page seeded with 500 strokes, the median interval between
+  callbacks spanning the save was 59.24 ms (range 49.01–65.30 ms). On the
+  page seeded with one stroke, it was 7.85 ms. Outside the save, typical
+  intervals were 8.33 ms on both pages. Every supplied point was retained.
+  The timer itself paused with the main thread, so this test cannot count
+  any points a real tablet or macOS might queue or combine during the pause.
+
+The replay establishes an application-side loss of the final movement when
+it arrives only at lift. The timings measure main-thread work that can delay
+visual feedback on fuller pages. Physical tablet and driver delivery, visible
+screen latency and the cause of the user's particular skips remain unmeasured.
+
 ## iNotes 1.5.1 / build 2028 published and verified — 27 November 2026
 
 The user requested publication as 1.5.1. The release tag identifies

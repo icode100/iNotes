@@ -43,7 +43,7 @@ struct UnifiedPageEditor: NSViewRepresentable {
     var onPageError: ((String) -> Void)? = nil
     var onEquationEdit: ((NoteEquation) -> Void)? = nil
     var onTextChange: ((String, Data?) -> Void)? = nil
-    var onInkChange: (([InkStroke], Data?) -> Void)? = nil
+    var onInkChange: (([InkStroke], Data?) -> Bool)? = nil
     var onInputChange: ((String) -> Void)? = nil
     var onObjectPlacement: (() -> Void)? = nil
     var toolbarHistory: PageToolbarHistory?
@@ -60,7 +60,7 @@ struct UnifiedPageEditor: NSViewRepresentable {
          linePattern: LinePattern = .solid, pageTemplate: PageTemplate = .none, templateLinePattern: LinePattern = .solid,
          diagramKind: PageDiagram.Kind = .rectangle, connectorRoute: PageDiagram.ConnectorRoute = .straight,
          arrowHeads: PageDiagram.ArrowHeads = .end, tableRows: Int = 3, tableColumns: Int = 3, diagramFill: Bool = false,
-         onTextChange: ((String, Data?) -> Void)? = nil, onInkChange: (([InkStroke], Data?) -> Void)? = nil,
+         onTextChange: ((String, Data?) -> Void)? = nil, onInkChange: (([InkStroke], Data?) -> Bool)? = nil,
          onInputChange: ((String) -> Void)? = nil, onPageChange: ((PageContent) -> Void)? = nil,
          onEquationEdit: ((NoteEquation) -> Void)? = nil, onPageValidate: ((PageContent) -> Bool)? = nil, onPageError: ((String) -> Void)? = nil,
          onObjectPlacement: (() -> Void)? = nil, toolbarHistory: PageToolbarHistory? = nil,
@@ -224,11 +224,13 @@ struct UnifiedPageEditor: NSViewRepresentable {
             page.inkView.strokes = displayed.strokes
             page.inkView.needsDisplay = true
         }
-        page.inkView.onChange = { value in
+        page.inkView.commitStrokes = { value in
+            if let onInkChange {
+                guard onInkChange(value, nil) else { return false }
+            } else { strokes = value; pencilKitData = nil }
             coordinator.selection.content.strokes = value
             coordinator.selection.content.pencilKitData = nil
-            if let onInkChange { onInkChange(value, nil) }
-            else { strokes = value; pencilKitData = nil }
+            return true
         }
         page.inkView.onInputChange = onInputChange
         page.onInputChange = onInputChange
